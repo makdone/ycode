@@ -107,11 +107,12 @@ export default function HeaderBar({
   }, [routeType, optimisticNav]);
 
   // Derive active button: optimistic state takes priority, then URL
-  const activeNavButton = useMemo((): NavButton => {
+  const activeNavButton = useMemo((): NavButton | null => {
     if (optimisticNav) return optimisticNav;
     if (routeType === 'collection' || routeType === 'collections-base') return 'cms';
     if (routeType === 'forms') return 'forms';
-    return 'design';
+    if (routeType === 'layers' || routeType === 'page' || routeType === 'component' || routeType === null) return 'design';
+    return null;
   }, [optimisticNav, routeType]);
 
   const [theme, setTheme] = useState<'system' | 'light' | 'dark'>(() => {
