@@ -5,7 +5,7 @@ import PasswordForm from '@/components/PasswordForm';
 import { resolveCustomCodePlaceholders } from '@/lib/resolve-cms-variables';
 import { generateInitialAnimationCSS, type HiddenLayerInfo } from '@/lib/animation-utils';
 import { buildCustomFontsCss, buildFontClassesCss, getGoogleFontLinks } from '@/lib/font-utils';
-import { collectLayerAssetIds } from '@/lib/asset-utils';
+import { collectLayerAssetIds, getAssetProxyUrl } from '@/lib/asset-utils';
 import { getAllPages } from '@/lib/repositories/pageRepository';
 import { getAllPageFolders } from '@/lib/repositories/pageFolderRepository';
 import { getItemWithValues } from '@/lib/repositories/collectionItemRepository';
@@ -234,10 +234,12 @@ export default async function PageRenderer({
       const assetMap = await getAssetsByIds(Array.from(layerAssetIds), !isPreview);
       resolvedAssets = {};
       for (const [id, asset] of Object.entries(assetMap)) {
-        if (asset.public_url) {
+        const proxyUrl = getAssetProxyUrl(asset);
+        if (proxyUrl) {
+          resolvedAssets[id] = proxyUrl;
+        } else if (asset.public_url) {
           resolvedAssets[id] = asset.public_url;
         } else if (asset.content) {
-          // SVG assets have content but no public_url - mark so client doesn't fetch
           resolvedAssets[id] = '#svg-content';
         }
       }

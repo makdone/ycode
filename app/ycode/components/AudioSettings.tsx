@@ -272,7 +272,8 @@ export default function AudioSettings(props: AudioSettingsProps) {
 
         handleAudioChange(asset.id);
       },
-      currentAssetId
+      currentAssetId,
+      ASSET_CATEGORIES.AUDIO
     );
   }, [openFileManager, handleAudioChange, isStandaloneMode, layer, currentAssetId]);
 

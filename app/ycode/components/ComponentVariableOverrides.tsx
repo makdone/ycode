@@ -147,7 +147,14 @@ export default function ComponentVariableOverrides({
   /** Renders a group of variable items, using masonry-style columns when 2-col is enabled. */
   const renderGroup = (items: React.ReactNode[], key: string) => {
     if (!isTwoCol) {
-      return <div key={key} className="flex flex-col gap-3">{items}</div>;
+      return (
+        <div
+          key={key}
+          className="flex flex-col divide-y divide-border [&>div]:py-3 [&>div:first-child]:pt-0 [&>div:last-child]:pb-0"
+        >
+          {items}
+        </div>
+      );
     }
 
     return (

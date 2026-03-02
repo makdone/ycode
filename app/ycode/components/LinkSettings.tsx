@@ -596,8 +596,9 @@ export default function LinkSettings(props: LinkSettingsProps) {
       if ((!isStandaloneMode && !layer) || !linkSettings) return;
 
       const newTarget = checked ? '_blank' : '_self';
-      // Also add rel="noopener noreferrer" for security when opening in new tab
-      const newRel = checked ? 'noopener noreferrer' : '';
+      const currentRel = (rel || '').replace(/\b(noopener|noreferrer)\b/g, '').replace(/\s+/g, ' ').trim();
+      const securityTokens = checked ? 'noopener noreferrer' : '';
+      const newRel = [securityTokens, currentRel].filter(Boolean).join(' ');
 
       updateLinkSettings({
         ...linkSettings,
@@ -855,6 +856,7 @@ export default function LinkSettings(props: LinkSettingsProps) {
           {useStackedLayout && <Label variant="muted" className="mb-1.5">Asset</Label>}
           <div className={useStackedLayout ? '' : 'col-span-2'}>
             <Button
+              type="button"
               variant="secondary"
               size="sm"
               onClick={handleAssetSelect}
@@ -879,6 +881,7 @@ export default function LinkSettings(props: LinkSettingsProps) {
                 value={pageId}
                 onValueChange={handlePageChange}
                 disabled={isLockedByOther}
+                popoverClassName={isStandaloneMode ? 'min-w-[var(--radix-popover-trigger-width)]' : undefined}
               />
             </div>
           </div>

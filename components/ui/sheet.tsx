@@ -49,6 +49,7 @@ function SheetContent({
   className,
   children,
   side = 'right',
+  onInteractOutside,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: 'top' | 'right' | 'bottom' | 'left'
@@ -58,6 +59,15 @@ function SheetContent({
       <SheetOverlay />
       <SheetPrimitive.Content
         data-slot="sheet-content"
+        onInteractOutside={(e) => {
+          const target = e.target as HTMLElement;
+          // Only allow dismissal when clicking the sheet's own overlay backdrop;
+          // prevent closing for all other outside interactions (portalled dialogs, popovers, etc.)
+          if (!target.closest('[data-slot="sheet-overlay"]')) {
+            e.preventDefault();
+          }
+          onInteractOutside?.(e);
+        }}
         className={cn(
           'bg-background data-[state=open]:animate-in data-[state=closed]:animate-out fixed z-50 flex flex-col gap-4 transition ease-in-out data-[state=closed]:duration-300 data-[state=open]:duration-500 p-6 overflow-y-auto',
           side === 'right' &&
