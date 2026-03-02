@@ -192,6 +192,7 @@ const RightSidebar = React.memo(function RightSidebar({
   const showTextStyleControls = useEditorStore((state) => state.showTextStyleControls());
   const startElementPicker = useEditorStore((state) => state.startElementPicker);
   const stopElementPicker = useEditorStore((state) => state.stopElementPicker);
+  const isElementPickerActive = useEditorStore((state) => !!state.elementPicker?.active);
 
   // Check if text is being edited on canvas
   const isTextEditingOnCanvas = useCanvasTextEditorStore((state) => state.isEditing);
@@ -2827,7 +2828,7 @@ const RightSidebar = React.memo(function RightSidebar({
                     <>
                       <div className="grid grid-cols-3">
                         <Label variant="muted">Sort by</Label>
-                        <div className="col-span-2 *:w-full">
+                        <div className="col-span-2 *:w-full flex">
                           {getCollectionVariable(selectedLayer)?.sort_by_inputLayerId ? (
                               <div className="flex items-center gap-1">
                                 <Input value={getSortLinkedInputName(getCollectionVariable(selectedLayer)!.sort_by_inputLayerId!)} disabled />
@@ -2842,6 +2843,10 @@ const RightSidebar = React.memo(function RightSidebar({
                                   </Tooltip>
                                 </div>
                               </div>
+                          ) : isElementPickerActive ? (
+                            <Button
+                              variant="secondary" onClick={stopElementPicker}
+                            />
                           ) : (
                             <Select
                               value={getCollectionVariable(selectedLayer)?.sort_by || 'none'}
@@ -2885,7 +2890,7 @@ const RightSidebar = React.memo(function RightSidebar({
                           getCollectionVariable(selectedLayer)?.sort_by !== 'random')) && (
                           <div className="grid grid-cols-3">
                             <Label variant="muted">Sort order</Label>
-                            <div className="col-span-2 *:w-full">
+                            <div className="col-span-2 *:w-full flex">
                               {getCollectionVariable(selectedLayer)?.sort_order_inputLayerId ? (
 
                                   <div className="flex items-center gap-1">
@@ -2902,6 +2907,8 @@ const RightSidebar = React.memo(function RightSidebar({
                                     </div>
                                   </div>
 
+                              ) : isElementPickerActive ? (
+                                <Button variant="secondary" onClick={stopElementPicker} />
                               ) : (
                                 <Select
                                   value={getCollectionVariable(selectedLayer)?.sort_order || 'asc'}
