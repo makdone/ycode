@@ -304,7 +304,7 @@ export function getOptimizedImageUrl(
  * Generate responsive image srcset with multiple sizes
  * Creates optimized URLs for different viewport widths
  * @param url - Original image URL
- * @param sizes - Array of widths in pixels (default: [400, 800, 1200, 1600])
+ * @param sizes - Array of widths in pixels (default: [640, 960, 1280, 1920, 2560])
  * @param quality - Image quality 0-100 (default: 85)
  * @returns Srcset string with multiple size options
  *
@@ -314,7 +314,7 @@ export function getOptimizedImageUrl(
  */
 export function generateImageSrcset(
   url: string,
-  sizes: number[] = [400, 800, 1200, 1600],
+  sizes: number[] = [640, 960, 1280, 1920, 2560],
   quality: number = 85
 ): string {
   if (!isTransformableUrl(url)) return '';
@@ -348,14 +348,13 @@ export function generateImageSrcset(
  * @returns Sizes attribute string
  *
  * @example
- * getImageSizes() // Returns: "(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+ * getImageSizes() // Returns: "100vw"
  */
 export function getImageSizes(customSizes?: string): string {
   if (customSizes) {
     return customSizes;
   }
-  // Default responsive sizes: full width on mobile, half on tablet, third on desktop
-  return '(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw';
+  return '100vw';
 }
 
 // ==========================================
