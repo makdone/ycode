@@ -53,7 +53,6 @@ interface PageRendererProps {
   isPreview?: boolean; // Whether we're in preview mode (use draft data)
   translations?: Record<string, any> | null; // Translations for localized URL generation
   gaMeasurementId?: string | null; // Google Analytics Measurement ID (pre-fetched)
-  globalCustomCodeHead?: string | null; // Global custom code for <head> (pre-fetched)
   globalCustomCodeBody?: string | null; // Global custom code for </body> (pre-fetched)
   ycodeBadge?: boolean; // Whether to show the "Made in Ycode" badge
   passwordProtection?: PasswordProtectionContext; // For 401 error pages - inject password form
@@ -92,7 +91,6 @@ export default async function PageRenderer({
   isPreview = false,
   translations,
   gaMeasurementId,
-  globalCustomCodeHead,
   globalCustomCodeBody,
   ycodeBadge = true,
   passwordProtection,
@@ -194,12 +192,7 @@ export default async function PageRenderer({
   }
 
   // Extract custom code from page settings and resolve placeholders for dynamic pages
-  const rawPageCustomCodeHead = page.settings?.custom_code?.head || '';
   const rawPageCustomCodeBody = page.settings?.custom_code?.body || '';
-
-  const pageCustomCodeHead = page.is_dynamic && collectionItem
-    ? resolveCustomCodePlaceholders(rawPageCustomCodeHead, collectionItem, collectionFields)
-    : rawPageCustomCodeHead;
 
   const pageCustomCodeBody = page.is_dynamic && collectionItem
     ? resolveCustomCodePlaceholders(rawPageCustomCodeBody, collectionItem, collectionFields)
@@ -313,16 +306,6 @@ export default async function PageRenderer({
             }}
           />
         </>
-      )}
-
-      {/* Inject global custom head code (applies to all pages) */}
-      {globalCustomCodeHead && (
-        <div dangerouslySetInnerHTML={{ __html: globalCustomCodeHead }} />
-      )}
-
-      {/* Inject page-specific custom head code */}
-      {pageCustomCodeHead && (
-        <div dangerouslySetInnerHTML={{ __html: pageCustomCodeHead }} />
       )}
 
       {/* Apply body layer classes to <body> synchronously before paint */}

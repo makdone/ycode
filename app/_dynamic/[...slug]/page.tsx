@@ -140,7 +140,6 @@ export default async function DynamicSlugPage({ params, searchParams }: DynamicS
       availableLocales={availableLocales}
       translations={translations}
       gaMeasurementId={globalSettings.gaMeasurementId}
-      globalCustomCodeHead={globalSettings.globalCustomCodeHead}
       globalCustomCodeBody={globalSettings.globalCustomCodeBody}
       ycodeBadge={globalSettings.ycodeBadge}
     />

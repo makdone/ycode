@@ -5,7 +5,6 @@ import PageRenderer from '@/components/PageRenderer';
 import PasswordForm from '@/components/PasswordForm';
 import { generatePageMetadata, fetchGlobalPageSettings } from '@/lib/generate-page-metadata';
 import { parseAuthCookie, getPasswordProtection, fetchFoldersForAuth } from '@/lib/page-auth';
-import { getSettingByKey } from '@/lib/repositories/settingsRepository';
 import type { Metadata } from 'next';
 
 // Static by default for performance, dynamic only when pagination is requested
@@ -82,18 +81,6 @@ async function fetchCachedErrorPage(errorCode: 401) {
   }
 }
 
-async function fetchCachedPublishedCss() {
-  try {
-    return await unstable_cache(
-      async () => getSettingByKey('published_css'),
-      ['data-for-published-css'],
-      { tags: ['all-pages'], revalidate: false }
-    )();
-  } catch {
-    return null;
-  }
-}
-
 export default async function Home() {
   // Cache-first homepage path; pagination is served through internal dynamic routes.
   const data = await fetchPublishedHomepage();
@@ -117,6 +104,9 @@ export default async function Home() {
     );
   }
 
+  // Load all global settings early so error pages also get global custom code
+  const globalSettings = await fetchCachedGlobalSettings();
+
   // Check password protection for homepage.
   // First evaluate without cookies() so non-protected pages can stay cacheable.
   const folders = await fetchCachedFoldersForAuth();
@@ -130,24 +120,24 @@ export default async function Home() {
     // If homepage is protected and not unlocked, show 401 error page
     if (!protection.isUnlocked) {
       const errorPageData = await fetchCachedErrorPage(401);
-      const publishedCSS = await fetchCachedPublishedCss();
 
       if (errorPageData) {
         const { page: errorPage, pageLayers: errorPageLayers, components: errorComponents } = errorPageData;
 
         return (
-        <PageRenderer
-          page={errorPage}
-          layers={errorPageLayers.layers || []}
-          components={errorComponents}
-          generatedCss={publishedCSS}
-          passwordProtection={{
-            pageId: protection.protectedBy === 'page' ? protection.protectedById : undefined,
-            folderId: protection.protectedBy === 'folder' ? protection.protectedById : undefined,
-            redirectUrl: '/',
-            isPublished: true,
-          }}
-        />
+          <PageRenderer
+            page={errorPage}
+            layers={errorPageLayers.layers || []}
+            components={errorComponents}
+            generatedCss={globalSettings.publishedCss || undefined}
+            globalCustomCodeBody={globalSettings.globalCustomCodeBody}
+            passwordProtection={{
+              pageId: protection.protectedBy === 'page' ? protection.protectedById : undefined,
+              folderId: protection.protectedBy === 'folder' ? protection.protectedById : undefined,
+              redirectUrl: '/',
+              isPublished: true,
+            }}
+          />
         );
       }
 
@@ -170,9 +160,6 @@ export default async function Home() {
     }
   }
 
-  // Load all global settings in a single query
-  const globalSettings = await fetchCachedGlobalSettings();
-
   // Render homepage
   return (
     <PageRenderer
@@ -184,7 +171,6 @@ export default async function Home() {
       availableLocales={data.availableLocales}
       translations={data.translations}
       gaMeasurementId={globalSettings.gaMeasurementId}
-      globalCustomCodeHead={globalSettings.globalCustomCodeHead}
       globalCustomCodeBody={globalSettings.globalCustomCodeBody}
       ycodeBadge={globalSettings.ycodeBadge}
     />

@@ -3,9 +3,15 @@ import type { Metadata } from 'next';
 import { fetchPageByPath, fetchErrorPage } from '@/lib/page-fetcher';
 import PageRenderer from '@/components/PageRenderer';
 import PasswordForm from '@/components/PasswordForm';
-import { getSettingByKey } from '@/lib/repositories/settingsRepository';
+import { getSettingsByKeys } from '@/lib/repositories/settingsRepository';
+
 import { generatePageMetadata } from '@/lib/generate-page-metadata';
 import { parseAuthCookie, getPasswordProtection, fetchFoldersForAuth } from '@/lib/page-auth';
+
+async function fetchPreviewDraftCss() {
+  const settings = await getSettingsByKeys(['draft_css']);
+  return (settings.draft_css as string) || undefined;
+}
 
 // Force dynamic rendering - no caching for preview
 export const dynamic = 'force-dynamic';
@@ -21,13 +27,15 @@ export default async function Page({ params }: { params: Promise<{ slug: string 
   // Fetch draft page and layers data (no caching)
   const data = await fetchPageByPath(slugPath, false);
 
+  // Fetch draft CSS (global custom code is handled by the preview layout)
+  const draftCSS = await fetchPreviewDraftCss();
+
   // If page not found, try to show custom 404 error page
   if (!data) {
     const errorPageData = await fetchErrorPage(404, false);
 
     if (errorPageData) {
       const { page, pageLayers, components } = errorPageData;
-      const draftCSS = await getSettingByKey('draft_css');
 
       return (
         <PageRenderer
@@ -54,7 +62,6 @@ export default async function Page({ params }: { params: Promise<{ slug: string 
   // If page is protected and not unlocked, show 401 error page
   if (protection.isProtected && !protection.isUnlocked) {
     const errorPageData = await fetchErrorPage(401, false);
-    const draftCSS = await getSettingByKey('draft_css');
 
     if (errorPageData) {
       const { page: errorPage, pageLayers: errorPageLayers, components: errorComponents } = errorPageData;
@@ -93,9 +100,6 @@ export default async function Page({ params }: { params: Promise<{ slug: string 
       </div>
     );
   }
-
-  // Load draft CSS from settings
-  const draftCSS = await getSettingByKey('draft_css');
 
   // Render the preview page (draft version)
   return (
