@@ -505,12 +505,16 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
             setFonts(response.data.fonts || []);
 
             // Load async data in parallel
-            const asyncTasks = [];
+            const asyncTasks: Promise<unknown>[] = [];
 
             // Add collections preloading if we have collections
             if (response.data.collections && response.data.collections.length > 0) {
               asyncTasks.push(preloadCollectionsAndItems(response.data.collections));
             }
+
+            // Load color variables
+            const { useColorVariablesStore } = await import('@/stores/useColorVariablesStore');
+            asyncTasks.push(useColorVariablesStore.getState().loadColorVariables());
 
             // Wait for all async tasks to complete
             if (asyncTasks.length > 0) {

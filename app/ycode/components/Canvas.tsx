@@ -22,6 +22,7 @@ import { getCanvasIframeHtml } from '@/lib/canvas-utils';
 import { cn } from '@/lib/utils';
 import { loadSwiperCss } from '@/lib/slider-utils';
 import { useFontsStore } from '@/stores/useFontsStore';
+import { useColorVariablesStore } from '@/stores/useColorVariablesStore';
 
 import type { Layer, Component, CollectionItemWithValues, CollectionField, Breakpoint, Asset, ComponentVariable } from '@/types';
 import type { UseLiveLayerUpdatesReturn } from '@/hooks/use-live-layer-updates';
@@ -418,6 +419,24 @@ export default function Canvas({
     const iframeDoc = iframeRef.current.contentDocument;
     injectFontsCss(iframeDoc);
   }, [iframeReady, fontsCss, injectFontsCss]);
+
+  // Inject color variable CSS custom properties into the canvas iframe
+  const colorVarCss = useColorVariablesStore((state) => state.generateCssDeclarations());
+
+  useEffect(() => {
+    if (!iframeReady || !iframeRef.current) return;
+    const iframeDoc = iframeRef.current.contentDocument;
+    if (!iframeDoc) return;
+
+    const STYLE_ID = 'ycode-color-vars';
+    let styleEl = iframeDoc.getElementById(STYLE_ID) as HTMLStyleElement | null;
+    if (!styleEl) {
+      styleEl = iframeDoc.createElement('style');
+      styleEl.id = STYLE_ID;
+      iframeDoc.head.appendChild(styleEl);
+    }
+    styleEl.textContent = colorVarCss;
+  }, [iframeReady, colorVarCss]);
 
   // Render content into iframe
   useEffect(() => {

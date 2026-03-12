@@ -113,6 +113,7 @@ export default async function DynamicHome({ searchParams }: DynamicHomeProps) {
       layers={data.pageLayers.layers || []}
       components={[]}
       generatedCss={globalSettings.publishedCss || undefined}
+      colorVariablesCss={globalSettings.colorVariablesCss || undefined}
       locale={data.locale}
       availableLocales={data.availableLocales}
       translations={data.translations}

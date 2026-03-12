@@ -193,6 +193,7 @@ async function fetchCachedGlobalSettings() {
       globalCanonicalUrl: null,
       gaMeasurementId: null,
       publishedCss: null,
+      colorVariablesCss: null,
       globalCustomCodeHead: null,
       globalCustomCodeBody: null,
       ycodeBadge: true,
@@ -341,6 +342,7 @@ export default async function Page({ params }: PageProps) {
       layers={pageLayers.layers || []}
       components={components}
       generatedCss={globalSettings.publishedCss || undefined}
+      colorVariablesCss={globalSettings.colorVariablesCss || undefined}
       collectionItem={collectionItem}
       collectionFields={collectionFields}
       locale={locale}

@@ -82,7 +82,10 @@ export default function EffectControls({ layer, onLayerUpdate, activeTextStyleKe
           const blur = parseInt(parts[2]) || 0;
           const spread = parseInt(parts[3]) || 0;
           // Color is everything after the 4th underscore
-          const color = parts.slice(4).join('_');
+          let color = parts.slice(4).join('_');
+          if (color.startsWith('var(--')) {
+            color = `color:${color}`;
+          }
 
           return {
             id: `shadow-${Date.now()}-${index}`,
@@ -223,7 +226,10 @@ export default function EffectControls({ layer, onLayerUpdate, activeTextStyleKe
   // Generate shadow CSS value from shadow object
   const generateShadowString = (shadow: Shadow): string => {
     const inset = shadow.position === 'inside' ? 'inset_' : '';
-    return `${inset}${shadow.x}px_${shadow.y}px_${shadow.blur}px_${shadow.spread}px_${shadow.color}`;
+    const color = shadow.color.startsWith('color:var(')
+      ? shadow.color.replace('color:', '')
+      : shadow.color;
+    return `${inset}${shadow.x}px_${shadow.y}px_${shadow.blur}px_${shadow.spread}px_${color}`;
   };
 
   // Generate full shadows value for all shadows
@@ -338,8 +344,11 @@ export default function EffectControls({ layer, onLayerUpdate, activeTextStyleKe
   };
 
   const handleShadowColorChange = (value: string) => {
-    const rgbaColor = convertToRgba(value);
-    updateEditingShadow({ color: rgbaColor });
+    if (value.startsWith('color:var(')) {
+      updateEditingShadow({ color: value });
+    } else {
+      updateEditingShadow({ color: convertToRgba(value) });
+    }
   };
 
   const handleShadowXChange = (value: number) => {
