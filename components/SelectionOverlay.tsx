@@ -28,6 +28,8 @@ interface SelectionOverlayProps {
   zoom: number;
   /** Active sublayer index within a richText element (null = highlight whole layer) */
   activeSublayerIndex?: number | null;
+  /** Active list item index within a list (null = highlight whole list block) */
+  activeListItemIndex?: number | null;
 }
 
 const SELECTED_OUTLINE_CLASS = 'outline outline-1 outline-blue-500';
@@ -42,6 +44,7 @@ export function SelectionOverlay({
   parentLayerId,
   zoom,
   activeSublayerIndex,
+  activeListItemIndex,
 }: SelectionOverlayProps) {
   // Container refs for outline groups (supports multiple instances per layer ID)
   const selectedContainerRef = useRef<HTMLDivElement>(null);
@@ -68,6 +71,7 @@ export function SelectionOverlay({
     scale: number,
     outlineClass: string,
     blockIndex?: number | null,
+    listItemIndex?: number | null,
   ) => {
     if (!container) return;
 
@@ -77,7 +81,11 @@ export function SelectionOverlay({
     }
 
     let targetElements: NodeListOf<Element>;
-    if (blockIndex !== undefined && blockIndex !== null) {
+    if (blockIndex !== undefined && blockIndex !== null && listItemIndex !== undefined && listItemIndex !== null) {
+      targetElements = iframeDoc.querySelectorAll(
+        `[data-layer-id="${layerId}"] [data-block-index="${blockIndex}"] [data-list-item-index="${listItemIndex}"]`
+      );
+    } else if (blockIndex !== undefined && blockIndex !== null) {
       targetElements = iframeDoc.querySelectorAll(`[data-layer-id="${layerId}"] [data-block-index="${blockIndex}"]`);
     } else {
       targetElements = iframeDoc.querySelectorAll(`[data-layer-id="${layerId}"]`);
@@ -142,7 +150,7 @@ export function SelectionOverlay({
 
     // Update selected outline (skip during drag)
     if (!skipSolidBorders) {
-      updateOutline(selectedContainerRef.current, selectedLayerId, iframeDoc, iframeElement, containerElement, scale, SELECTED_OUTLINE_CLASS, activeSublayerIndex);
+      updateOutline(selectedContainerRef.current, selectedLayerId, iframeDoc, iframeElement, containerElement, scale, SELECTED_OUTLINE_CLASS, activeSublayerIndex, activeListItemIndex);
 
       // Update hovered outline (only if different from selected)
       const effectiveHoveredId = hoveredLayerId !== selectedLayerId ? hoveredLayerId : null;
@@ -154,7 +162,7 @@ export function SelectionOverlay({
       ? selectedLayerId
       : (parentLayerId !== selectedLayerId ? parentLayerId : null);
     updateOutline(parentContainerRef.current, effectiveParentId, iframeDoc, iframeElement, containerElement, scale, PARENT_OUTLINE_CLASS);
-  }, [iframeElement, containerElement, selectedLayerId, hoveredLayerId, parentLayerId, zoom, updateOutline, hideAllOutlines, activeSublayerIndex]);
+  }, [iframeElement, containerElement, selectedLayerId, hoveredLayerId, parentLayerId, zoom, updateOutline, hideAllOutlines, activeSublayerIndex, activeListItemIndex]);
 
   // Initial update and updates when IDs change
   useEffect(() => {

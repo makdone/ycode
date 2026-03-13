@@ -205,6 +205,7 @@ const LayerRow = React.memo(function LayerRow({
   // Use selective subscriptions to avoid re-renders when unrelated state changes
   const setActiveSublayerIndex = useEditorStore((state) => state.setActiveSublayerIndex);
   const setActiveTextStyleKey = useEditorStore((state) => state.setActiveTextStyleKey);
+  const setActiveListItemIndex = useEditorStore((state) => state.setActiveListItemIndex);
   const editingComponentId = useEditorStore((state) => state.editingComponentId);
   const interactionTriggerLayerIds = useEditorStore((state) => state.interactionTriggerLayerIds);
   const interactionTargetLayerIds = useEditorStore((state) => state.interactionTargetLayerIds);
@@ -313,14 +314,20 @@ const LayerRow = React.memo(function LayerRow({
   // Sublayer rows (content blocks or text style targets)
   if (node.sublayer) {
     const handleSublayerClick = () => {
-      // Always select the actual layer (works for both direct and nested sublayers)
       onSelect(node.layer.id);
       if (node.sublayer!.kind === 'content') {
         setActiveSublayerIndex(node.index);
         setActiveTextStyleKey(node.sublayer!.styleKey ?? null);
+        setActiveListItemIndex(null);
+      } else if (node.sublayer!.kind === 'listItem') {
+        const parentBlockIdx = node.parentId?.match(/__sub_(\d+)$/)?.[1];
+        setActiveSublayerIndex(parentBlockIdx !== undefined ? parseInt(parentBlockIdx, 10) : node.index);
+        setActiveTextStyleKey('listItem');
+        setActiveListItemIndex(node.sublayer!.itemIndex ?? null);
       } else {
         setActiveSublayerIndex(null);
         setActiveTextStyleKey(node.sublayer!.styleKey ?? null);
+        setActiveListItemIndex(null);
       }
     };
 
@@ -793,7 +800,7 @@ export default function LayersTree({
   const [shouldScrollToSelected, setShouldScrollToSelected] = useState(false);
 
   // Pull multi-select state and breakpoint from editor store
-  const { selectedLayerIds: storeSelectedLayerIds, lastSelectedLayerId, toggleSelection, selectRange, editingComponentId, activeBreakpoint, activeSublayerIndex: storeActiveSublayerIndex, activeTextStyleKey: storeActiveTextStyleKey } = useEditorStore();
+  const { selectedLayerIds: storeSelectedLayerIds, lastSelectedLayerId, toggleSelection, selectRange, editingComponentId, activeBreakpoint, activeSublayerIndex: storeActiveSublayerIndex, activeTextStyleKey: storeActiveTextStyleKey, activeListItemIndex: storeActiveListItemIndex } = useEditorStore();
 
   // Get component by ID function for drag overlay
   const { getComponentById } = useComponentsStore();
@@ -884,17 +891,21 @@ export default function LayersTree({
               });
               subIdx++;
 
-              // Nest inline mark sublayers under expanded content blocks
+              // Nest child sublayers (list items, inline marks) under expanded content blocks
               if (hasMarkChildren && !collapsedIds.has(contentSubId)) {
-                sub.children!.forEach((markSub) => {
+                let itemIdx = 0;
+                sub.children!.forEach((childSub) => {
+                  const childId = childSub.kind === 'listItem'
+                    ? `${contentSubId}__item_${itemIdx++}`
+                    : `${contentSubId}__mark_${childSub.styleKey}`;
                   withSublayers.push({
-                    id: `${contentSubId}__mark_${markSub.styleKey}`,
+                    id: childId,
                     layer: node.layer,
                     depth: node.depth + 2,
                     parentId: contentSubId,
                     index: subIdx,
                     canHaveChildren: false,
-                    sublayer: markSub,
+                    sublayer: childSub,
                   });
                   subIdx++;
                 });
@@ -1690,7 +1701,7 @@ export default function LayersTree({
     });
 
     // Only persist for real layers (virtual sublayer nodes are local UI state only)
-    const isVirtualNode = id.includes('__sub_') || id.includes('__style_') || id.includes('__mark_');
+    const isVirtualNode = id.includes('__sub_') || id.includes('__style_') || id.includes('__mark_') || id.includes('__item_');
     if (!isVirtualNode) {
       const updatedLayers = updateLayerOpenState(layers, id, willBeOpen);
       onReorder(updatedLayers);
@@ -1717,12 +1728,20 @@ export default function LayersTree({
     const hasSublayerActive = hasContentSublayerActive || hasStyleSublayerActive;
     let activeSublayerNodeId: string | null = null;
 
-    if (hasContentSublayerActive) {
-      activeSublayerNodeId = flattenedNodes.find(
+    if (hasContentSublayerActive && storeActiveTextStyleKey === 'listItem' && storeActiveListItemIndex !== null) {
+      const listItemMatch = flattenedNodes.find(
+        n => n.sublayer && n.sublayer.kind === 'listItem' && n.sublayer.itemIndex === storeActiveListItemIndex
+          && n.layer.id === selectedLayerId
+          && n.parentId?.endsWith(`__sub_${storeActiveSublayerIndex}`)
+      );
+      activeSublayerNodeId = listItemMatch?.id ?? null;
+    } else if (hasContentSublayerActive) {
+      const contentMatch = flattenedNodes.find(
         n => n.sublayer && n.sublayer.kind === 'content' && n.parentId === selectedLayerId && n.index === storeActiveSublayerIndex
-      )?.id ?? null;
+      );
+      activeSublayerNodeId = contentMatch?.id ?? null;
     } else if (hasStyleSublayerActive) {
-      // Direct style sublayers (text/heading layers) or nested mark sublayers (richText)
+      // Direct style sublayers (text/heading) or nested mark sublayers
       activeSublayerNodeId = flattenedNodes.find(
         n => n.sublayer && n.sublayer.kind === 'style' && n.sublayer.styleKey === storeActiveTextStyleKey && n.layer.id === selectedLayerId
       )?.id ?? null;

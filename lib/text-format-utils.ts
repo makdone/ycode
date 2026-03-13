@@ -530,21 +530,9 @@ function renderNestedRichTextContent(
           if (isEditMode) {
             listProps['data-style'] = block.type;
           }
-          const items = block.content?.map((item: any, itemIdx: number) => {
-            const itemClass = textStyles?.listItem?.classes ??
-              DEFAULT_TEXT_STYLES.listItem?.classes ?? '';
-            const itemContent = item.content?.flatMap((itemBlock: any) => {
-              if (itemBlock.type === 'paragraph' && itemBlock.content) {
-                return renderInlineContent(itemBlock.content, collectionItemData, pageCollectionItemData, textStyles, isEditMode, linkContext, timezone, layerDataMap, components, renderComponentBlock, ancestorComponentIds);
-              }
-              return [];
-            }) || [];
-            const itemProps: Record<string, any> = { key: `${blockKey}-item-${itemIdx}`, className: itemClass };
-            if (isEditMode) {
-              itemProps['data-style'] = 'listItem';
-            }
-            return React.createElement('li', itemProps, ...itemContent);
-          }) || [];
+          const items = block.content?.map((item: any, itemIdx: number) =>
+            renderListItem(item, `${blockKey}-${itemIdx}`, collectionItemData, pageCollectionItemData, textStyles, isEditMode, linkContext, timezone, layerDataMap, components, renderComponentBlock, ancestorComponentIds, itemIdx)
+          ) || [];
           return React.createElement(tag, listProps, ...items);
         }
 
@@ -683,21 +671,9 @@ function renderInlineContent(
       if (isEditMode) {
         listProps['data-style'] = node.type;
       }
-      const items = node.content?.map((item: any, itemIdx: number) => {
-        const itemClass = textStyles?.listItem?.classes ??
-          DEFAULT_TEXT_STYLES.listItem?.classes ?? '';
-        const itemContent = item.content?.flatMap((itemBlock: any) => {
-          if (itemBlock.type === 'paragraph' && itemBlock.content) {
-            return renderInlineContent(itemBlock.content, collectionItemData, pageCollectionItemData, textStyles, isEditMode, linkContext, timezone, layerDataMap, components, renderComponentBlock, ancestorComponentIds);
-          }
-          return [];
-        }) || [];
-        const itemProps: Record<string, any> = { key: `${key}-item-${itemIdx}`, className: itemClass };
-        if (isEditMode) {
-          itemProps['data-style'] = 'listItem';
-        }
-        return React.createElement('li', itemProps, ...itemContent);
-      }) || [];
+      const items = node.content?.map((item: any, itemIdx: number) =>
+        renderListItem(item, `${key}-${itemIdx}`, collectionItemData, pageCollectionItemData, textStyles, isEditMode, linkContext, timezone, layerDataMap, components, renderComponentBlock, ancestorComponentIds, itemIdx)
+      ) || [];
       return [React.createElement(tag, listProps, ...items)];
     }
 
@@ -840,7 +816,7 @@ function renderBlock(
       'ul',
       ulProps,
       block.content?.map((item: any, itemIdx: number) =>
-        renderListItem(item, `${key}-${itemIdx}`, collectionItemData, pageCollectionItemData, textStyles, isEditMode, linkContext, timezone, layerDataMap, components, renderComponentBlock, ancestorComponentIds)
+        renderListItem(item, `${key}-${itemIdx}`, collectionItemData, pageCollectionItemData, textStyles, isEditMode, linkContext, timezone, layerDataMap, components, renderComponentBlock, ancestorComponentIds, itemIdx)
       )
     );
   }
@@ -857,7 +833,7 @@ function renderBlock(
       'ol',
       olProps,
       block.content?.map((item: any, itemIdx: number) =>
-        renderListItem(item, `${key}-${itemIdx}`, collectionItemData, pageCollectionItemData, textStyles, isEditMode, linkContext, timezone, layerDataMap, components, renderComponentBlock, ancestorComponentIds)
+        renderListItem(item, `${key}-${itemIdx}`, collectionItemData, pageCollectionItemData, textStyles, isEditMode, linkContext, timezone, layerDataMap, components, renderComponentBlock, ancestorComponentIds, itemIdx)
       )
     );
   }
@@ -919,6 +895,7 @@ function renderListItem(
   components?: Component[],
   renderComponentBlock?: RenderComponentBlockFn,
   ancestorComponentIds?: Set<string>,
+  itemIdx?: number,
 ): React.ReactNode {
   if (item.type !== 'listItem') return null;
 
@@ -935,6 +912,9 @@ function renderListItem(
   };
   if (isEditMode) {
     liProps['data-style'] = 'listItem';
+    if (itemIdx !== undefined) {
+      liProps['data-list-item-index'] = itemIdx;
+    }
   }
   return React.createElement('li', liProps, children);
 }

@@ -556,6 +556,8 @@ const CenterCanvas = React.memo(function CenterCanvas({
   const closeRichTextSheet = useEditorStore((state) => state.closeRichTextSheet);
   const activeSublayerIndex = useEditorStore((state) => state.activeSublayerIndex);
   const setActiveSublayerIndex = useEditorStore((state) => state.setActiveSublayerIndex);
+  const activeListItemIndex = useEditorStore((state) => state.activeListItemIndex);
+  const setActiveListItemIndex = useEditorStore((state) => state.setActiveListItemIndex);
   const elementPicker = useEditorStore((state) => state.elementPicker);
   const stopElementPicker = useEditorStore((state) => state.stopElementPicker);
   const assets = useAssetsStore((state) => state.assets);
@@ -1044,12 +1046,17 @@ const CenterCanvas = React.memo(function CenterCanvas({
         let target = event.target as HTMLElement;
         let textStyleKey: string | null = null;
         let blockIndex: number | null = null;
+        let listItemIndex: number | null = null;
 
-        // Walk up the DOM tree to find data-style or data-block-index
+        // Walk up the DOM tree to find data-style, data-block-index, data-list-item-index
         while (target && target !== event.currentTarget) {
           if (!textStyleKey) {
             const styleAttr = target.getAttribute?.('data-style');
             if (styleAttr) textStyleKey = styleAttr;
+          }
+          if (listItemIndex === null) {
+            const listItemAttr = target.getAttribute?.('data-list-item-index');
+            if (listItemAttr !== null) listItemIndex = parseInt(listItemAttr, 10);
           }
           if (blockIndex === null) {
             const blockAttr = target.getAttribute?.('data-block-index');
@@ -1060,9 +1067,10 @@ const CenterCanvas = React.memo(function CenterCanvas({
 
         setActiveTextStyleKey(textStyleKey);
         setActiveSublayerIndex(Number.isFinite(blockIndex) ? blockIndex : null);
+        setActiveListItemIndex(Number.isFinite(listItemIndex) ? listItemIndex : null);
       }
     }
-  }, [isPreviewMode, setSelectedLayerId, setActiveSidebarTab, setActiveTextStyleKey, setActiveSublayerIndex]);
+  }, [isPreviewMode, setSelectedLayerId, setActiveSidebarTab, setActiveTextStyleKey, setActiveSublayerIndex, setActiveListItemIndex]);
 
   const handleCanvasLayerUpdate = useCallback((layerId: string, updates: Partial<Layer>) => {
     if (editingComponentId) {
@@ -2185,6 +2193,7 @@ const CenterCanvas = React.memo(function CenterCanvas({
             parentLayerId={parentLayerId}
             zoom={zoom}
             activeSublayerIndex={activeSublayerIndex}
+            activeListItemIndex={activeListItemIndex}
           />
         )}
 

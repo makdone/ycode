@@ -98,6 +98,7 @@ interface EditorActions {
   openRichTextSheet: (layerId: string) => void;
   closeRichTextSheet: () => void;
   setActiveSublayerIndex: (index: number | null) => void;
+  setActiveListItemIndex: (index: number | null) => void;
   // Element picker actions
   startElementPicker: (onSelect: (layerId: string) => void, validate?: (layerId: string) => boolean, originPosition?: { x: number; y: number }) => void;
   stopElementPicker: () => void;
@@ -166,6 +167,8 @@ interface EditorStoreWithHistory extends EditorState {
   richTextSheetLayerId: string | null;
   /** Index of the selected sublayer within a richText element (null = no sublayer selected) */
   activeSublayerIndex: number | null;
+  /** Index of the selected list item within its parent list (null = no list item selected) */
+  activeListItemIndex: number | null;
   // Element picker state (for linking filter inputs to collection conditions)
   elementPicker: {
     active: boolean;
@@ -245,6 +248,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   layerDragStartPosition: null,
   richTextSheetLayerId: null,
   activeSublayerIndex: null,
+  activeListItemIndex: null,
   // Element picker initial state
   elementPicker: null,
 
@@ -267,6 +271,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       lastSelectedLayerId: id,
       activeTextStyleKey: null,
       activeSublayerIndex: null,
+      activeListItemIndex: null,
     });
 
     // Update URL query param if we're in a route that supports layer selection
@@ -602,6 +607,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   openRichTextSheet: (layerId) => set({ richTextSheetLayerId: layerId }),
   closeRichTextSheet: () => set({ richTextSheetLayerId: null }),
   setActiveSublayerIndex: (index) => set({ activeSublayerIndex: index }),
+  setActiveListItemIndex: (index) => set({ activeListItemIndex: index }),
 
   // Element picker actions
   startElementPicker: (onSelect, validate, originPosition) => set({

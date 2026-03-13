@@ -463,10 +463,12 @@ export interface RichTextSublayer {
   type: string;
   label: string;
   icon: string;
-  /** 'content' = actual TipTap block, 'style' = text style target */
-  kind: 'content' | 'style';
+  /** 'content' = actual TipTap block, 'style' = text style target, 'listItem' = individual list entry */
+  kind: 'content' | 'style' | 'listItem';
   /** For style sublayers: the textStyles key (e.g., 'h1', 'bold', 'paragraph') */
   styleKey?: string;
+  /** For listItem sublayers: 0-based index within the parent list */
+  itemIndex?: number;
   /** For content sublayers: inline mark children found in this block */
   children?: RichTextSublayer[];
 }
@@ -495,6 +497,18 @@ export function contentBlockToStyleKey(block: { type: string; attrs?: Record<str
     case 'richTextImage': return 'richTextImage';
     default: return null;
   }
+}
+
+/**
+ * Extract plain text from a TipTap block node (recursively walks content/text).
+ */
+function extractBlockText(block: any): string {
+  if (!block) return '';
+  if (typeof block === 'string') return block;
+  if (block.text) return block.text;
+  if (Array.isArray(block)) return block.map(extractBlockText).join('');
+  if (block.content) return extractBlockText(block.content);
+  return '';
 }
 
 /**
@@ -535,7 +549,7 @@ export function getRichTextSublayers(layer: Layer): RichTextSublayer[] {
       const type = block.type;
       const icon = SUBLAYER_ICON_MAP[type] || 'box';
 
-      const SUBLAYER_LABEL_MAP: Record<string, string> = {
+      const SUBLAYER_FALLBACK_MAP: Record<string, string> = {
         paragraph: 'Paragraph',
         heading: `Heading ${block.attrs?.level || 1}`,
         bulletList: 'Bullet List',
@@ -547,23 +561,52 @@ export function getRichTextSublayers(layer: Layer): RichTextSublayer[] {
         horizontalRule: 'Divider',
       };
 
-      const label = SUBLAYER_LABEL_MAP[type] || type;
+      const textContent = extractBlockText(block).trim();
+      const label = textContent
+        ? (textContent.length > 30 ? textContent.slice(0, 30) + '...' : textContent)
+        : (SUBLAYER_FALLBACK_MAP[type] || type);
+
+      const children: RichTextSublayer[] = [];
+
+      const isList = type === 'bulletList' || type === 'orderedList';
+      if (isList && block.content && Array.isArray(block.content)) {
+        let listItemIdx = 0;
+        block.content.forEach((listItem: any) => {
+          if (listItem.type !== 'listItem') return;
+          const itemText = extractBlockText(listItem).trim();
+          const itemLabel = itemText
+            ? (itemText.length > 30 ? itemText.slice(0, 30) + '...' : itemText)
+            : 'List Item';
+          children.push({
+            type: 'listItem',
+            label: itemLabel,
+            icon: 'listItem',
+            kind: 'listItem' as const,
+            styleKey: 'listItem',
+            itemIndex: listItemIdx,
+          });
+          listItemIdx++;
+        });
+      }
 
       const marks = extractInlineMarks(block);
-      const markChildren = INLINE_STYLE_KEYS
+      INLINE_STYLE_KEYS
         .filter(k => marks.includes(k))
-        .map(markType => ({
-          type: markType,
-          label: DEFAULT_TEXT_STYLES[markType]?.label || markType,
-          icon: STYLE_SUBLAYER_ICON_MAP[markType] || 'type',
-          kind: 'style' as const,
-          styleKey: markType,
-        }));
+        .forEach(markType => {
+          children.push({
+            type: markType,
+            label: DEFAULT_TEXT_STYLES[markType]?.label || markType,
+            icon: STYLE_SUBLAYER_ICON_MAP[markType] || 'type',
+            kind: 'style' as const,
+            styleKey: markType,
+          });
+        });
 
       return {
-        type, label, icon, kind: 'content' as const,
+        type, kind: 'content' as const, icon,
+        label: isList ? (SUBLAYER_FALLBACK_MAP[type] || type) : label,
         styleKey: contentBlockToStyleKey(block) ?? undefined,
-        children: markChildren.length > 0 ? markChildren : undefined,
+        children: children.length > 0 ? children : undefined,
       };
     });
 }
