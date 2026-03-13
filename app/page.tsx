@@ -49,7 +49,6 @@ async function fetchCachedGlobalSettings() {
       gaMeasurementId: null,
       publishedCss: null,
       colorVariablesCss: null,
-      globalCustomCodeHead: null,
       globalCustomCodeBody: null,
       ycodeBadge: true,
       faviconUrl: null,

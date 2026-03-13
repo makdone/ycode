@@ -25,7 +25,6 @@ export interface GlobalPageSettings {
   gaMeasurementId?: string | null;
   publishedCss?: string | null;
   colorVariablesCss?: string | null;
-  globalCustomCodeHead?: string | null;
   globalCustomCodeBody?: string | null;
   ycodeBadge?: boolean;
   faviconUrl?: string | null;
@@ -64,7 +63,6 @@ export const fetchGlobalPageSettings = cache(async (): Promise<GlobalPageSetting
     'global_canonical_url',
     'ga_measurement_id',
     'published_css',
-    'custom_code_head',
     'custom_code_body',
     'ycode_badge',
     'favicon_asset_id',
@@ -105,7 +103,6 @@ export const fetchGlobalPageSettings = cache(async (): Promise<GlobalPageSetting
     gaMeasurementId: settings.ga_measurement_id || null,
     publishedCss: settings.published_css || null,
     colorVariablesCss,
-    globalCustomCodeHead: settings.custom_code_head || null,
     globalCustomCodeBody: settings.custom_code_body || null,
     ycodeBadge: settings.ycode_badge ?? true,
     faviconUrl,

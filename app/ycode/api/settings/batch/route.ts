@@ -1,6 +1,6 @@
-import { revalidateTag } from 'next/cache';
 import { NextRequest, NextResponse } from 'next/server';
 import { setSettings } from '@/lib/repositories/settingsRepository';
+import { clearAllCache } from '@/lib/services/cacheService';
 
 /**
  * PUT /ycode/api/settings/batch
@@ -23,8 +23,7 @@ export async function PUT(request: NextRequest) {
 
     const count = await setSettings(settings);
 
-    // Settings like custom_code_body, ga_measurement_id, etc. affect ISR-cached pages
-    revalidateTag('all-pages', { expire: 0 });
+    await clearAllCache();
 
     return NextResponse.json({
       data: { count },

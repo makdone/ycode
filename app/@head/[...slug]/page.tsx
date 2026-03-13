@@ -1,5 +1,6 @@
 import { unstable_cache } from 'next/cache';
 import { fetchPageByPath } from '@/lib/page-fetcher';
+import { getSettingsByKeys } from '@/lib/repositories/settingsRepository';
 import { parseHeadHtml } from '@/lib/parse-head-html';
 import { resolveCustomCodePlaceholders } from '@/lib/resolve-cms-variables';
 
@@ -7,7 +8,6 @@ const NON_PAGE_PREFIXES = ['ycode', 'dynamic', '_next', 'api'];
 
 /**
  * Reuse the same static params as the main [...slug] route.
- * Imported dynamically to avoid duplicating the logic.
  */
 export { generateStaticParams } from '@/app/[...slug]/page';
 
@@ -27,6 +27,21 @@ async function fetchPublishedPageWithLayers(slugPath: string) {
   }
 }
 
+async function fetchGlobalHeadCode(): Promise<string | null> {
+  try {
+    return await unstable_cache(
+      async () => {
+        const settings = await getSettingsByKeys(['custom_code_head']);
+        return (settings.custom_code_head as string) || null;
+      },
+      ['data-for-global-custom-head-code'],
+      { tags: ['all-pages'], revalidate: false }
+    )();
+  } catch {
+    return null;
+  }
+}
+
 interface HeadSlugProps {
   params: Promise<{ slug: string | string[] }>;
 }
@@ -39,16 +54,26 @@ export default async function HeadSlug({ params }: HeadSlugProps) {
     return null;
   }
 
-  const data = await fetchPublishedPageWithLayers(slugPath);
-  if (!data) return null;
+  const [data, globalHeadCode] = await Promise.all([
+    fetchPublishedPageWithLayers(slugPath),
+    fetchGlobalHeadCode(),
+  ]);
 
-  const headCode = data.page?.settings?.custom_code?.head;
-  if (!headCode) return null;
+  const pageHeadCode = (() => {
+    if (!data) return null;
+    const raw = data.page?.settings?.custom_code?.head;
+    if (!raw) return null;
+    return data.page.is_dynamic && data.collectionItem
+      ? resolveCustomCodePlaceholders(raw, data.collectionItem, data.collectionFields || [])
+      : raw;
+  })();
 
-  const resolved = data.page.is_dynamic && data.collectionItem
-    ? resolveCustomCodePlaceholders(headCode, data.collectionItem, data.collectionFields || [])
-    : headCode;
+  if (!globalHeadCode && !pageHeadCode) return null;
 
-  if (!resolved) return null;
-  return <>{parseHeadHtml(resolved)}</>;
+  return (
+    <>
+      {globalHeadCode && parseHeadHtml(globalHeadCode)}
+      {pageHeadCode && parseHeadHtml(pageHeadCode)}
+    </>
+  );
 }

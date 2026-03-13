@@ -1,6 +1,6 @@
-import { revalidateTag } from 'next/cache';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSettingByKey, setSetting } from '@/lib/repositories/settingsRepository';
+import { clearAllCache } from '@/lib/services/cacheService';
 
 /**
  * GET /ycode/api/settings/[key]
@@ -55,8 +55,7 @@ export async function PUT(
 
     await setSetting(key, value);
 
-    // Invalidate ISR cache so public pages pick up the new setting
-    revalidateTag('all-pages', { expire: 0 });
+    await clearAllCache();
 
     return NextResponse.json({
       data: { key, value },
