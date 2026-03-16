@@ -190,12 +190,10 @@ export async function POST(request: NextRequest) {
         if (collectionIds && collectionIds.length > 0) {
           for (const collectionId of collectionIds) {
             const { items } = await getItemsByCollectionId(collectionId, false);
-            if (items.length > 0) {
-              collectionPublishes.push({
-                collectionId,
-                itemIds: items.map((item: any) => item.id),
-              });
-            }
+            collectionPublishes.push({
+              collectionId,
+              itemIds: items.map((item: any) => item.id),
+            });
           }
         }
 
@@ -237,22 +235,19 @@ export async function POST(request: NextRequest) {
 
         for (const collection of allCollections) {
           const { items } = await getItemsByCollectionId(collection.id, false);
-          if (items.length > 0) {
-            const publishResult = await publishCollectionWithItems({
-              collectionId: collection.id,
-              itemIds: items.map((item: any) => item.id),
-            });
-            totalItems += publishResult.published?.itemsCount || 0;
-            totalValues += publishResult.published?.valuesCount || 0;
-            totalFields += publishResult.published?.fieldsCount || 0;
-            if (publishResult.published?.collection) totalCollections++;
-            // Accumulate timing
-            if (publishResult.timing) {
-              collectionsMs += publishResult.timing.collections.durationMs;
-              fieldsMs += publishResult.timing.fields.durationMs;
-              itemsMs += publishResult.timing.items.durationMs;
-              valuesMs += publishResult.timing.values.durationMs;
-            }
+          const publishResult = await publishCollectionWithItems({
+            collectionId: collection.id,
+            itemIds: items.map((item: any) => item.id),
+          });
+          totalItems += publishResult.published?.itemsCount || 0;
+          totalValues += publishResult.published?.valuesCount || 0;
+          totalFields += publishResult.published?.fieldsCount || 0;
+          if (publishResult.published?.collection) totalCollections++;
+          if (publishResult.timing) {
+            collectionsMs += publishResult.timing.collections.durationMs;
+            fieldsMs += publishResult.timing.fields.durationMs;
+            itemsMs += publishResult.timing.items.durationMs;
+            valuesMs += publishResult.timing.values.durationMs;
           }
         }
         result.changes.collectionItems = totalItems;
