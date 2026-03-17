@@ -18,6 +18,7 @@ export interface PaginationContext {
   // Default page number for all collection layers (from URL ?page=N)
   defaultPage?: number;
 }
+
 import { resolveFieldLinkValue } from '@/lib/link-utils';
 import { SWIPER_CLASS_MAP, SWIPER_DATA_ATTR_MAP } from '@/lib/templates/utilities';
 import { resolveInlineVariables, resolveInlineVariablesFromData } from '@/lib/inline-variables';
@@ -3009,13 +3010,14 @@ function layerToHtml(
   layerDataMap?: Record<string, Record<string, string>>,
   components?: Component[],
   ancestorComponentIds?: Set<string>,
+  isSlideChild?: boolean,
 ): string {
   // Handle fragment layers (created by resolveCollectionLayers for nested collections)
   // Fragments render their children directly without a wrapper element
   if (layer.name === '_fragment' && layer.children) {
     return layer.children
       .map((child) =>
-        layerToHtml(child, collectionItemId, pages, folders, collectionItemSlugs, locale, translations, anchorMap, collectionItemData, pageCollectionItemData, assetMap, layerDataMap, components, ancestorComponentIds)
+        layerToHtml(child, collectionItemId, pages, folders, collectionItemSlugs, locale, translations, anchorMap, collectionItemData, pageCollectionItemData, assetMap, layerDataMap, components, ancestorComponentIds, isSlideChild)
       )
       .join('');
   }
@@ -3062,6 +3064,10 @@ function layerToHtml(
     classesStr = classesStr
       ? `${classesStr} ${SWIPER_CLASS_MAP[layer.name]}`
       : SWIPER_CLASS_MAP[layer.name];
+  }
+
+  if (isSlideChild) {
+    classesStr = classesStr ? `${classesStr} swiper-slide` : 'swiper-slide';
   }
 
   // Build attributes
@@ -3240,7 +3246,7 @@ function layerToHtml(
       const childrenHtml = layer.children
         ? layer.children
           .map((child) =>
-            layerToHtml(child, effectiveCollectionItemId, pages, folders, collectionItemSlugs, locale, translations, anchorMap, effectiveCollectionItemData, pageCollectionItemData, assetMap, effectiveLayerDataMap, components, ancestorComponentIds)
+            layerToHtml(child, effectiveCollectionItemId, pages, folders, collectionItemSlugs, locale, translations, anchorMap, effectiveCollectionItemData, pageCollectionItemData, assetMap, effectiveLayerDataMap, components, ancestorComponentIds, layer.name === 'slides')
           )
           .join('')
         : '';
@@ -3566,7 +3572,7 @@ function layerToHtml(
   const childrenHtml = effectiveChildren
     ? effectiveChildren
       .map((child) =>
-        layerToHtml(child, effectiveCollectionItemId, pages, folders, collectionItemSlugs, locale, translations, anchorMap, effectiveCollectionItemData, pageCollectionItemData, assetMap, effectiveLayerDataMap, components, ancestorComponentIds)
+        layerToHtml(child, effectiveCollectionItemId, pages, folders, collectionItemSlugs, locale, translations, anchorMap, effectiveCollectionItemData, pageCollectionItemData, assetMap, effectiveLayerDataMap, components, ancestorComponentIds, layer.name === 'slides')
       )
       .join('')
     : '';
@@ -3598,7 +3604,7 @@ function layerToHtml(
             ? resolved.map(l => resolveLayerAssets(l, assetMap))
             : resolved;
           return withAssets
-            .map(l => layerToHtml(l, effectiveCollectionItemId, pages, folders, collectionItemSlugs, locale, translations, anchorMap, effectiveCollectionItemData, pageCollectionItemData, assetMap, effectiveLayerDataMap, components, childAncestors))
+            .map(l => layerToHtml(l, effectiveCollectionItemId, pages, folders, collectionItemSlugs, locale, translations, anchorMap, effectiveCollectionItemData, pageCollectionItemData, assetMap, effectiveLayerDataMap, components, childAncestors, layer.name === 'slides'))
             .join('');
         }
         : undefined;

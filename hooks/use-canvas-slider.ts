@@ -205,7 +205,30 @@ export function useCanvasSlider(
       setSliderAnimating(false);
     });
 
+    // Swiper's built-in observer uses the parent window's MutationObserver,
+    // which can miss mutations in the canvas iframe's document. Use the
+    // iframe's own MutationObserver to reliably detect slide changes.
+    let wrapperObserver: MutationObserver | undefined;
+    const wrapperEl = swiper.wrapperEl;
+    if (wrapperEl) {
+      const iframeWindow = wrapperEl.ownerDocument.defaultView;
+      const ObsCtor = iframeWindow?.MutationObserver;
+      if (ObsCtor) {
+        let debounceRaf: number | undefined;
+        wrapperObserver = new ObsCtor(() => {
+          if (debounceRaf) cancelAnimationFrame(debounceRaf);
+          debounceRaf = requestAnimationFrame(() => {
+            if (swiperRef.current && !swiperRef.current.destroyed) {
+              swiperRef.current.update();
+            }
+          });
+        });
+        wrapperObserver.observe(wrapperEl, { childList: true, subtree: true });
+      }
+    }
+
     return () => {
+      wrapperObserver?.disconnect();
       swiperRegistry.delete(layer.id);
       swiper.destroy(true, true);
       ghostEl.remove();

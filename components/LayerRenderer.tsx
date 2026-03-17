@@ -118,6 +118,8 @@ interface LayerRendererProps {
   components?: Component[];
   /** Component IDs in the rendering chain, used to prevent circular loops through collection rich-text data */
   ancestorComponentIds?: Set<string>;
+  /** Whether these layers are direct children of a slides wrapper (adds swiper-slide class) */
+  isSlideChild?: boolean;
 }
 
 const LayerRenderer: React.FC<LayerRendererProps> = ({
@@ -161,6 +163,7 @@ const LayerRenderer: React.FC<LayerRendererProps> = ({
   resolvedAssets,
   components: componentsProp,
   ancestorComponentIds,
+  isSlideChild: isSlideChildProp,
 }) => {
   const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState<string>('');
@@ -298,6 +301,7 @@ const LayerRenderer: React.FC<LayerRendererProps> = ({
         resolvedAssets={resolvedAssets}
         components={componentsProp}
         ancestorComponentIds={ancestorComponentIds}
+        isSlideChild={isSlideChildProp}
       />
     );
   };
@@ -357,6 +361,7 @@ const LayerItem: React.FC<{
   resolvedAssets?: Record<string, string>;
   components?: Component[];
   ancestorComponentIds?: Set<string>;
+  isSlideChild?: boolean;
 }> = ({
   layer,
   isEditMode,
@@ -404,6 +409,7 @@ const LayerItem: React.FC<{
   resolvedAssets,
   components: componentsProp,
   ancestorComponentIds,
+  isSlideChild,
 }) => {
   // Subscribe to selection state from the store for reactive updates without
   // forcing the entire LayerRenderer tree to re-render when selection changes
@@ -1170,7 +1176,7 @@ const LayerItem: React.FC<{
     }
 
     return items;
-  }, [allCollectionItems, sourceFieldId, sourceFieldType, sourceFieldSource, collectionLayerData, pageCollectionItemData, collectionLayerItemId, pageCollectionItemId, getAsset, assetsById, collectionVariable?.filters]);
+  }, [allCollectionItems, sourceFieldId, sourceFieldType, sourceFieldSource, collectionLayerData, pageCollectionItemData, collectionLayerItemId, pageCollectionItemId, getAsset, collectionVariable?.filters, isEditMode]);
 
   useEffect(() => {
     if (!isEditMode) return;
@@ -1391,12 +1397,13 @@ const LayerItem: React.FC<{
     classesString,
     paragraphClasses,
     SWIPER_CLASS_MAP[layer.name],
+    isSlideChild && 'swiper-slide',
     enableDragDrop && !isEditing && !isLockedByOther && 'cursor-default',
     isDragging && 'opacity-30',
     showProjection && 'outline outline-1 outline-dashed outline-blue-400 bg-blue-50/10',
     isLockedByOther && 'opacity-90 pointer-events-none select-none',
     'ycode-layer'
-  ) : clsx(classesString, paragraphClasses, SWIPER_CLASS_MAP[layer.name], buttonNeedsFit && 'w-fit');
+  ) : clsx(classesString, paragraphClasses, SWIPER_CLASS_MAP[layer.name], isSlideChild && 'swiper-slide', buttonNeedsFit && 'w-fit');
 
   // Check if layer should be hidden (hide completely in both edit mode and public pages)
   if (layer.settings?.hidden) {
@@ -2415,6 +2422,7 @@ const LayerItem: React.FC<{
               parentFormSettings={parentFormSettings}
               components={componentsProp}
               ancestorComponentIds={effectiveAncestorIds}
+              isSlideChild={layer.name === 'slides'}
             />
           )}
         </Tag>
@@ -2467,6 +2475,7 @@ const LayerItem: React.FC<{
     // Collection layers - repeat the element for each item (design applies to each looped item)
     if (isCollectionLayer && isEditMode) {
       if (isLoadingLayerData) {
+        if (isSlideChild) return null;
         return (
           <Tag {...elementProps}>
             <div className="w-full p-4">
@@ -2599,6 +2608,7 @@ const LayerItem: React.FC<{
                     resolvedAssets={resolvedAssets}
                     components={componentsProp}
                     ancestorComponentIds={effectiveAncestorIds}
+                    isSlideChild={layer.name === 'slides'}
                   />
                 )}
               </Tag>
@@ -2734,6 +2744,7 @@ const LayerItem: React.FC<{
             resolvedAssets={resolvedAssets}
             components={componentsProp}
             ancestorComponentIds={effectiveAncestorIds}
+            isSlideChild={layer.name === 'slides'}
           />
         )}
       </Tag>
