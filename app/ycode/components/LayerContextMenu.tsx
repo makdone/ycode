@@ -15,6 +15,7 @@ import {
   ContextMenuSeparator, ContextMenuShortcut, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
+import { useCanvasPortalContainer, useCanvasZoom } from '@/lib/canvas-portal-context';
 import { useEditorStore } from '@/stores/useEditorStore';
 import { usePagesStore } from '@/stores/usePagesStore';
 import { useClipboardStore } from '@/stores/useClipboardStore';
@@ -57,6 +58,8 @@ export default function LayerContextMenu({
   const [isComponentDialogOpen, setIsComponentDialogOpen] = useState(false);
   const [isLayoutDialogOpen, setIsLayoutDialogOpen] = useState(false);
   const [layerName, setLayerName] = useState('');
+  const canvasPortalContainer = useCanvasPortalContainer();
+  const canvasZoom = useCanvasZoom();
 
   const copyLayer = usePagesStore((state) => state.copyLayer);
   const deleteLayer = usePagesStore((state) => state.deleteLayer);
@@ -600,6 +603,17 @@ export default function LayerContextMenu({
     if (open && onLayerSelect && layer && selectedLayerId !== layerId) {
       onLayerSelect(layerId);
     }
+    // Hide the parent-document selection overlay while the canvas context menu is open,
+    // and suppress stale clicks that fire on the canvas when the menu dismisses
+    if (canvasPortalContainer) {
+      if (open) {
+        useEditorStore.getState().setCanvasContextMenuOpen(true);
+      } else {
+        requestAnimationFrame(() => {
+          useEditorStore.getState().setCanvasContextMenuOpen(false);
+        });
+      }
+    }
   };
 
   // Check if we're on localhost
@@ -610,7 +624,11 @@ export default function LayerContextMenu({
       <ContextMenuTrigger asChild>
         {children}
       </ContextMenuTrigger>
-      <ContextMenuContent className="w-46">
+      <ContextMenuContent
+        className="w-46"
+        container={canvasPortalContainer}
+        style={canvasPortalContainer ? { zoom: 100 / canvasZoom } : undefined}
+      >
         <ContextMenuItem onClick={handleCut} disabled={isLocked || !canCopy || !canDelete}>
           Cut
           <ContextMenuShortcut>⌘X</ContextMenuShortcut>
@@ -623,7 +641,10 @@ export default function LayerContextMenu({
 
         <ContextMenuSub>
           <ContextMenuSubTrigger>Paste</ContextMenuSubTrigger>
-          <ContextMenuSubContent>
+          <ContextMenuSubContent
+            container={canvasPortalContainer}
+            style={canvasPortalContainer ? { zoom: 100 / canvasZoom } : undefined}
+          >
             <ContextMenuItem onClick={handlePasteAfter} disabled={!hasClipboard || isBody}>
               Paste after
               <ContextMenuShortcut>⌘V</ContextMenuShortcut>
@@ -649,12 +670,16 @@ export default function LayerContextMenu({
           <ContextMenuShortcut>⌫</ContextMenuShortcut>
         </ContextMenuItem>
 
-        <ContextMenuSeparator />
+        {!canvasPortalContainer && (
+          <>
+            <ContextMenuSeparator />
 
-        <ContextMenuItem onClick={handleRename} disabled={isBody}>
-          Rename
-          <ContextMenuShortcut>F2</ContextMenuShortcut>
-        </ContextMenuItem>
+            <ContextMenuItem onClick={handleRename} disabled={isBody}>
+              Rename
+              <ContextMenuShortcut>F2</ContextMenuShortcut>
+            </ContextMenuItem>
+          </>
+        )}
 
         {!isComponentInstance && (
           <>

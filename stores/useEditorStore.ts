@@ -152,6 +152,9 @@ interface EditorStoreWithHistory extends EditorState {
   // Slider transition state (hides outlines during slide animation)
   isSliderAnimating: boolean;
   setSliderAnimating: (value: boolean) => void;
+  // Canvas context menu state (hides overlay while menu is open)
+  isCanvasContextMenuOpen: boolean;
+  setCanvasContextMenuOpen: (value: boolean) => void;
   // Swiper-calculated snap page counts per slider (used for bullet replication)
   sliderSnapCounts: Record<string, number>;
   setSliderSnapCount: (sliderId: string, count: number) => void;
@@ -234,6 +237,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   canvasDropTarget: null,
   isSliderAnimating: false,
   setSliderAnimating: (value) => set({ isSliderAnimating: value }),
+  isCanvasContextMenuOpen: false,
+  setCanvasContextMenuOpen: (value) => set({ isCanvasContextMenuOpen: value }),
   sliderSnapCounts: {},
   setSliderSnapCount: (sliderId, count) => set((state) => ({
     sliderSnapCounts: { ...state.sliderSnapCounts, [sliderId]: count },

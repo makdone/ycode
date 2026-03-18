@@ -2332,6 +2332,7 @@ const CenterCanvas = React.memo(function CenterCanvas({
                         onCanvasClick={handleCanvasClick}
                         editingComponentVariables={editingComponentVariables}
                         disableEditorHiddenLayers={!!activeInteractionTriggerLayerId}
+                        zoom={zoom}
                       />
 
                       {/* Drop indicator overlay - subscribes to store directly */}

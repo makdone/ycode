@@ -30,7 +30,15 @@ export function getCanvasIframeHtml(mountId: string = 'canvas-mount'): string {
     @custom-variant current (&[aria-current]);
     @custom-variant disabled (&:is(:disabled, [aria-disabled]));
     @theme {
-      /* Use default Tailwind theme */
+      /* Editor UI colors for context menus portaled into the iframe */
+      --color-popover: oklch(0.269 0 0);
+      --color-popover-foreground: oklch(0.708 0 0);
+      --color-accent: oklch(0.32 0 0);
+      --color-accent-foreground: oklch(0.985 0 0);
+      --color-muted-foreground: oklch(0.708 0 0);
+      --color-foreground: oklch(0.985 0 0);
+      --color-border: oklch(1 0 0 / 5%);
+      --color-destructive: oklch(0.704 0.191 22.216);
     }
   </style>
   <style id="ycode-fonts-style">
