@@ -1475,18 +1475,20 @@ const LayerItem: React.FC<{
         : layer.componentOverrides;
 
       return (
-        <LayerRenderer
-          layers={layersWithInstanceId}
-          {...sharedRendererProps}
-          editorHiddenLayerIds={componentEditorHiddenLayerIds}
-          enableDragDrop={enableDragDrop}
-          activeLayerId={activeLayerId}
-          projected={projected}
-          parentComponentLayerId={layer.id}
-          parentComponentOverrides={effectiveOverrides}
-          parentComponentVariables={component?.variables}
-          ancestorComponentIds={effectiveAncestorIds}
-        />
+        <div className="contents">
+          <LayerRenderer
+            layers={layersWithInstanceId}
+            {...sharedRendererProps}
+            editorHiddenLayerIds={componentEditorHiddenLayerIds}
+            enableDragDrop={enableDragDrop}
+            activeLayerId={activeLayerId}
+            projected={projected}
+            parentComponentLayerId={layer.id}
+            parentComponentOverrides={effectiveOverrides}
+            parentComponentVariables={component?.variables}
+            ancestorComponentIds={effectiveAncestorIds}
+          />
+        </div>
       );
     }
 
@@ -1875,10 +1877,13 @@ const LayerItem: React.FC<{
         // Text/Heading layers: start inline editing
         startEditing(e.clientX, e.clientY);
       };
-      // Prevent context menu from bubbling
-      elementProps.onContextMenu = (e: React.MouseEvent) => {
-        e.stopPropagation();
-      };
+      // Prevent context menu from bubbling — but let it propagate for layers
+      // inside a component so it reaches the component root's ContextMenuTrigger
+      if (!parentComponentLayerId) {
+        elementProps.onContextMenu = (e: React.MouseEvent) => {
+          e.stopPropagation();
+        };
+      }
       // Hover handlers for explicit hover state management
       if (onLayerHover) {
         elementProps.onMouseEnter = (e: React.MouseEvent) => {

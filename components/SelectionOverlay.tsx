@@ -294,6 +294,7 @@ export function SelectionOverlay({
 
   // Hide outlines during slider transitions
   const isSliderAnimating = useEditorStore((state) => state.isSliderAnimating);
+  const isCanvasContextMenuOpen = useEditorStore((state) => state.isCanvasContextMenuOpen);
 
   useEffect(() => {
     isSliderAnimatingRef.current = isSliderAnimating;
@@ -305,7 +306,10 @@ export function SelectionOverlay({
   }, [isSliderAnimating, updateAllOutlines, hideAllOutlines]);
 
   return (
-    <div className="absolute inset-0 pointer-events-none overflow-hidden z-40">
+    <div
+      className="absolute inset-0 pointer-events-none overflow-hidden z-40"
+      style={isCanvasContextMenuOpen ? { display: 'none' } : undefined}
+    >
       {/* Parent outline container (dashed) - visible during drag */}
       <div ref={parentContainerRef} style={{ display: 'none' }} />
 

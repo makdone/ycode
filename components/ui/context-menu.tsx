@@ -67,7 +67,7 @@ function ContextMenuSubTrigger({
       data-slot='context-menu-sub-trigger'
       data-inset={inset}
       className={cn(
-        'focus:bg-accent focus:text-accent-foreground data-[state=open]:bg-accent data-[state=open]:text-accent-foreground [&_svg:not([class*=\'text-\'])]:text-muted-foreground flex cursor-default items-center rounded-sm px-2 py-1.5 text- outline-hidden select-none data-[inset]:pl-8 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=\'size-\'])]:size-4',
+        'focus:bg-accent focus:text-accent-foreground data-[state=open]:bg-accent data-[state=open]:text-accent-foreground [&_svg:not([class*=\'text-\'])]:text-muted-foreground flex cursor-default items-center rounded-sm px-2 py-1.5 text-xs outline-hidden select-none data-[inset]:pl-8 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=\'size-\'])]:size-4',
         className
       )}
       {...props}
@@ -80,9 +80,12 @@ function ContextMenuSubTrigger({
 
 function ContextMenuSubContent({
   className,
+  container,
   ...props
-}: React.ComponentProps<typeof ContextMenuPrimitive.SubContent>) {
-  return (
+}: React.ComponentProps<typeof ContextMenuPrimitive.SubContent> & {
+  container?: HTMLElement | null
+}) {
+  const content = (
     <ContextMenuPrimitive.SubContent
       data-slot='context-menu-sub-content'
       className={cn(
@@ -92,14 +95,27 @@ function ContextMenuSubContent({
       {...props}
     />
   );
+
+  if (container) {
+    return (
+      <ContextMenuPrimitive.Portal container={container}>
+        {content}
+      </ContextMenuPrimitive.Portal>
+    );
+  }
+
+  return content;
 }
 
 function ContextMenuContent({
   className,
+  container,
   ...props
-}: React.ComponentProps<typeof ContextMenuPrimitive.Content>) {
+}: React.ComponentProps<typeof ContextMenuPrimitive.Content> & {
+  container?: HTMLElement | null
+}) {
   return (
-    <ContextMenuPrimitive.Portal>
+    <ContextMenuPrimitive.Portal container={container ?? undefined}>
       <ContextMenuPrimitive.Content
         data-slot='context-menu-content'
         className={cn(
