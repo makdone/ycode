@@ -146,10 +146,31 @@ const EffectControls = memo(function EffectControls({ layer, onLayerUpdate, acti
 
   const opacityValue = extractOpacity(opacity);
 
-  // Handle opacity change (debounced for text input)
+  // Local input state allows empty field while editing
+  const [opacityInput, setOpacityInput] = useState(String(opacityValue));
+  const [isOpacityFocused, setIsOpacityFocused] = useState(false);
+
+  useEffect(() => {
+    if (!isOpacityFocused) {
+      setOpacityInput(String(opacityValue));
+    }
+  }, [opacityValue, isOpacityFocused]);
+
   const handleOpacityChange = (value: string) => {
-    const numValue = Math.max(0, Math.min(100, parseInt(value) || 0));
-    debouncedUpdateDesignProperty('effects', 'opacity', `${numValue}`);
+    setOpacityInput(value);
+    const parsed = parseInt(value);
+    if (!isNaN(parsed)) {
+      const numValue = Math.max(0, Math.min(100, parsed));
+      debouncedUpdateDesignProperty('effects', 'opacity', `${numValue}`);
+    }
+  };
+
+  const handleOpacityBlur = () => {
+    setIsOpacityFocused(false);
+    if (opacityInput.trim() === '' || isNaN(parseInt(opacityInput))) {
+      updateDesignProperty('effects', 'opacity', null);
+      setOpacityInput('100');
+    }
   };
 
   // Handle opacity slider change (immediate - slider interaction)
@@ -166,10 +187,30 @@ const EffectControls = memo(function EffectControls({ layer, onLayerUpdate, acti
 
   const blurValue = extractBlur(blur);
 
-  // Handle blur change (debounced for text input)
+  const [blurInput, setBlurInput] = useState(String(blurValue));
+  const [isBlurFocused, setIsBlurFocused] = useState(false);
+
+  useEffect(() => {
+    if (!isBlurFocused) {
+      setBlurInput(String(blurValue));
+    }
+  }, [blurValue, isBlurFocused]);
+
   const handleBlurChange = (value: string) => {
-    const numValue = Math.max(0, parseInt(value) || 0);
-    debouncedUpdateDesignProperty('effects', 'blur', `${numValue}px`);
+    setBlurInput(value);
+    const parsed = parseInt(value);
+    if (!isNaN(parsed)) {
+      const numValue = Math.max(0, parsed);
+      debouncedUpdateDesignProperty('effects', 'blur', `${numValue}px`);
+    }
+  };
+
+  const handleBlurInputBlur = () => {
+    setIsBlurFocused(false);
+    if (blurInput.trim() === '' || isNaN(parseInt(blurInput))) {
+      updateDesignProperty('effects', 'blur', null);
+      setBlurInput('0');
+    }
   };
 
   // Handle blur slider change (immediate - slider interaction)
@@ -196,10 +237,30 @@ const EffectControls = memo(function EffectControls({ layer, onLayerUpdate, acti
 
   const backdropBlurValue = extractBackdropBlur(backdropBlur);
 
-  // Handle backdrop blur change (debounced for text input)
+  const [backdropBlurInput, setBackdropBlurInput] = useState(String(backdropBlurValue));
+  const [isBackdropBlurFocused, setIsBackdropBlurFocused] = useState(false);
+
+  useEffect(() => {
+    if (!isBackdropBlurFocused) {
+      setBackdropBlurInput(String(backdropBlurValue));
+    }
+  }, [backdropBlurValue, isBackdropBlurFocused]);
+
   const handleBackdropBlurChange = (value: string) => {
-    const numValue = Math.max(0, parseInt(value) || 0);
-    debouncedUpdateDesignProperty('effects', 'backdropBlur', `${numValue}px`);
+    setBackdropBlurInput(value);
+    const parsed = parseInt(value);
+    if (!isNaN(parsed)) {
+      const numValue = Math.max(0, parsed);
+      debouncedUpdateDesignProperty('effects', 'backdropBlur', `${numValue}px`);
+    }
+  };
+
+  const handleBackdropBlurInputBlur = () => {
+    setIsBackdropBlurFocused(false);
+    if (backdropBlurInput.trim() === '' || isNaN(parseInt(backdropBlurInput))) {
+      updateDesignProperty('effects', 'backdropBlur', null);
+      setBackdropBlurInput('0');
+    }
   };
 
   // Handle backdrop blur slider change (immediate - slider interaction)
@@ -412,10 +473,10 @@ const EffectControls = memo(function EffectControls({ layer, onLayerUpdate, acti
               <div className="col-span-2 grid grid-cols-2 items-center gap-2">
                   <InputGroup>
                       <InputGroupInput
-                        stepper
-                        value={opacityValue}
+                        value={opacityInput}
                         onChange={(e) => handleOpacityChange(e.target.value)}
-
+                        onFocus={() => setIsOpacityFocused(true)}
+                        onBlur={handleOpacityBlur}
                         min="0"
                         max="100"
                         step="1"
@@ -637,8 +698,10 @@ const EffectControls = memo(function EffectControls({ layer, onLayerUpdate, acti
                   <InputGroup>
                     <InputGroupInput
                       stepper
-                      value={blurValue}
+                      value={blurInput}
                       onChange={(e) => handleBlurChange(e.target.value)}
+                      onFocus={() => setIsBlurFocused(true)}
+                      onBlur={handleBlurInputBlur}
                       min="0"
                       step="1"
                     />
@@ -672,8 +735,10 @@ const EffectControls = memo(function EffectControls({ layer, onLayerUpdate, acti
                   <InputGroup>
                     <InputGroupInput
                       stepper
-                      value={backdropBlurValue}
+                      value={backdropBlurInput}
                       onChange={(e) => handleBackdropBlurChange(e.target.value)}
+                      onFocus={() => setIsBackdropBlurFocused(true)}
+                      onBlur={handleBackdropBlurInputBlur}
                       min="0"
                       step="1"
                     />

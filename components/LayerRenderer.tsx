@@ -112,12 +112,14 @@ interface LayerRendererProps {
   isPreview?: boolean; // Whether we're in preview mode (prefix links with /ycode/preview)
   translations?: Record<string, any> | null; // Translations for localized URL generation
   anchorMap?: Record<string, string>; // Pre-built map of layerId -> anchor value for O(1) lookups
-  /** Pre-resolved asset URLs (asset_id -> public_url) for SSR link resolution */
-  resolvedAssets?: Record<string, string>;
+  /** Pre-resolved assets (asset_id -> { url, width, height }) for SSR resolution */
+  resolvedAssets?: Record<string, { url: string; width?: number | null; height?: number | null }>;
   /** Components for resolving embedded component nodes in rich-text (preview/published) */
   components?: Component[];
   /** Component IDs in the rendering chain, used to prevent circular loops through collection rich-text data */
   ancestorComponentIds?: Set<string>;
+  /** Whether these layers are direct children of a slides wrapper (adds swiper-slide class) */
+  isSlideChild?: boolean;
 }
 
 const LayerRenderer: React.FC<LayerRendererProps> = ({
@@ -161,6 +163,7 @@ const LayerRenderer: React.FC<LayerRendererProps> = ({
   resolvedAssets,
   components: componentsProp,
   ancestorComponentIds,
+  isSlideChild: isSlideChildProp,
 }) => {
   const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState<string>('');
@@ -298,6 +301,7 @@ const LayerRenderer: React.FC<LayerRendererProps> = ({
         resolvedAssets={resolvedAssets}
         components={componentsProp}
         ancestorComponentIds={ancestorComponentIds}
+        isSlideChild={isSlideChildProp}
       />
     );
   };
@@ -354,9 +358,10 @@ const LayerItem: React.FC<{
   isPreview?: boolean; // Whether we're in preview mode
   translations?: Record<string, any> | null; // Translations for localized URL generation
   anchorMap?: Record<string, string>; // Pre-built map of layerId -> anchor value
-  resolvedAssets?: Record<string, string>;
+  resolvedAssets?: Record<string, { url: string; width?: number | null; height?: number | null }>;
   components?: Component[];
   ancestorComponentIds?: Set<string>;
+  isSlideChild?: boolean;
 }> = ({
   layer,
   isEditMode,
@@ -404,6 +409,7 @@ const LayerItem: React.FC<{
   resolvedAssets,
   components: componentsProp,
   ancestorComponentIds,
+  isSlideChild,
 }) => {
   // Subscribe to selection state from the store for reactive updates without
   // forcing the entire LayerRenderer tree to re-render when selection changes
@@ -442,16 +448,13 @@ const LayerItem: React.FC<{
 
   // Create asset resolver that checks pre-resolved assets first (SSR), then falls back to store
   const getAsset = useCallback((id: string) => {
-    // Check pre-resolved assets from server first
     if (resolvedAssets?.[id]) {
-      const value = resolvedAssets[id];
-      // Inline SVG content (starts with <) — return as content, no public URL
-      if (value.startsWith('<')) {
-        return { public_url: null, content: value };
+      const { url, width, height } = resolvedAssets[id];
+      if (url.startsWith('<')) {
+        return { public_url: null, content: url };
       }
-      return { public_url: value };
+      return { public_url: url, width, height };
     }
-    // Fall back to store (may trigger async fetch)
     return getAssetFromStore(id);
   }, [resolvedAssets, getAssetFromStore]);
   const openFileManager = useEditorStore((state) => state.openFileManager);
@@ -1393,12 +1396,13 @@ const LayerItem: React.FC<{
     classesString,
     paragraphClasses,
     SWIPER_CLASS_MAP[layer.name],
+    isSlideChild && 'swiper-slide',
     enableDragDrop && !isEditing && !isLockedByOther && 'cursor-default',
     isDragging && 'opacity-30',
     showProjection && 'outline outline-1 outline-dashed outline-blue-400 bg-blue-50/10',
     isLockedByOther && 'opacity-90 pointer-events-none select-none',
     'ycode-layer'
-  ) : clsx(classesString, paragraphClasses, SWIPER_CLASS_MAP[layer.name], buttonNeedsFit && 'w-fit');
+  ) : clsx(classesString, paragraphClasses, SWIPER_CLASS_MAP[layer.name], isSlideChild && 'swiper-slide', buttonNeedsFit && 'w-fit');
 
   // Check if layer should be hidden (hide completely in both edit mode and public pages)
   if (layer.settings?.hidden) {
@@ -1902,8 +1906,31 @@ const LayerItem: React.FC<{
       // Use default image if URL is empty or invalid
       const finalImageUrl = imageUrl && imageUrl.trim() !== '' ? imageUrl : DEFAULT_ASSETS.IMAGE;
 
-      // Generate optimized src and srcset for responsive images
-      const optimizedSrc = getOptimizedImageUrl(finalImageUrl, 1920, 1920, 85);
+      // Resolve intrinsic dimensions: explicit attributes > asset record > URL reverse-lookup
+      let imgWidth = layer.attributes?.width as string | undefined;
+      let imgHeight = layer.attributes?.height as string | undefined;
+
+      if (!imgWidth || !imgHeight) {
+        const assetId = isAssetVariable(imageVariable) ? getAssetId(imageVariable) : undefined;
+        const asset = assetId ? getAsset(assetId) : undefined;
+        if (asset && 'width' in asset && asset.width && !imgWidth) imgWidth = String(asset.width);
+        if (asset && 'height' in asset && asset.height && !imgHeight) imgHeight = String(asset.height);
+
+        // CMS images: field variable resolved to a URL — reverse-lookup asset by matching URL
+        if ((!imgWidth || !imgHeight) && resolvedAssets && imageUrl) {
+          for (const entry of Object.values(resolvedAssets)) {
+            if (entry.url === imageUrl) {
+              if (!imgWidth && entry.width) imgWidth = String(entry.width);
+              if (!imgHeight && entry.height) imgHeight = String(entry.height);
+              break;
+            }
+          }
+        }
+      }
+
+      const imgLoading = layer.attributes?.loading as string | undefined;
+
+      const optimizedSrc = getOptimizedImageUrl(finalImageUrl, 1920, 85);
       const srcset = generateImageSrcset(finalImageUrl);
       const sizes = getImageSizes();
 
@@ -1912,6 +1939,10 @@ const LayerItem: React.FC<{
         alt: imageAlt,
         src: optimizedSrc,
       };
+
+      if (imgWidth) imageProps.width = imgWidth;
+      if (imgHeight) imageProps.height = imgHeight;
+      if (imgLoading) imageProps.loading = imgLoading;
 
       if (srcset) {
         imageProps.srcSet = srcset;
@@ -2417,6 +2448,7 @@ const LayerItem: React.FC<{
               parentFormSettings={parentFormSettings}
               components={componentsProp}
               ancestorComponentIds={effectiveAncestorIds}
+              isSlideChild={layer.name === 'slides'}
             />
           )}
         </Tag>
@@ -2469,6 +2501,7 @@ const LayerItem: React.FC<{
     // Collection layers - repeat the element for each item (design applies to each looped item)
     if (isCollectionLayer && isEditMode) {
       if (isLoadingLayerData) {
+        if (isSlideChild) return null;
         return (
           <Tag {...elementProps}>
             <div className="w-full p-4">
@@ -2601,6 +2634,7 @@ const LayerItem: React.FC<{
                     resolvedAssets={resolvedAssets}
                     components={componentsProp}
                     ancestorComponentIds={effectiveAncestorIds}
+                    isSlideChild={layer.name === 'slides'}
                   />
                 )}
               </Tag>
@@ -2736,6 +2770,7 @@ const LayerItem: React.FC<{
             resolvedAssets={resolvedAssets}
             components={componentsProp}
             ancestorComponentIds={effectiveAncestorIds}
+            isSlideChild={layer.name === 'slides'}
           />
         )}
       </Tag>

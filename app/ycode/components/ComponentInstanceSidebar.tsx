@@ -24,6 +24,7 @@ import { useComponentsStore } from '@/stores/useComponentsStore';
 import { usePagesStore } from '@/stores/usePagesStore';
 import { useEditorActions } from '@/hooks/use-editor-url';
 import { detachSpecificLayerFromComponent } from '@/lib/component-utils';
+import { findLayerById } from '@/lib/layer-utils';
 import { EMPTY_OVERRIDES } from '@/lib/variable-utils';
 
 import type { Layer, ComponentVariable, Component, Collection, CollectionField } from '@/types';
@@ -117,8 +118,13 @@ export default function ComponentInstanceSidebar({
     await loadComponentDraft(component.id);
     openComponent(component.id, currentPageId, undefined, selectedLayerId);
 
+    // Select root layer only if user hasn't already selected a valid component layer during the await
     if (component.layers && component.layers.length > 0) {
-      setLayerId(component.layers[0].id);
+      const currentSelection = useEditorStore.getState().selectedLayerId;
+      const hasValidSelection = currentSelection && findLayerById(component.layers, currentSelection);
+      if (!hasValidSelection) {
+        setLayerId(component.layers[0].id);
+      }
     }
   }, [editingComponentId, currentPageId, selectedLayerId, component, openComponent]);
 

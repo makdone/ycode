@@ -210,8 +210,8 @@ export interface LinkResolutionContext {
   translations?: Record<string, any> | null;
   getAsset?: (id: string) => { public_url?: string | null; content?: string | null } | null;
   anchorMap?: Record<string, string>;
-  /** Pre-resolved asset URLs (asset_id -> public_url) for SSR */
-  resolvedAssets?: Record<string, string>;
+  /** Pre-resolved assets (asset_id -> { url, width, height }) for SSR */
+  resolvedAssets?: Record<string, { url: string; width?: number | null; height?: number | null }>;
   /** Map of layer ID → item data for layer-specific field resolution */
   layerDataMap?: Record<string, Record<string, string>>;
 }
@@ -305,11 +305,10 @@ export function resolveFieldLinkValue(options: ResolveFieldLinkOptions): string 
     }
     // SSR: use pre-resolved assets
     if (resolvedAssets?.[rawValue]) {
-      // Inline SVG content (no URL available for linking)
-      if (resolvedAssets[rawValue].startsWith('<')) {
+      if (resolvedAssets[rawValue].url.startsWith('<')) {
         return '#no-svg-url';
       }
-      return resolvedAssets[rawValue];
+      return resolvedAssets[rawValue].url;
     }
     // Client: use getAsset callback
     if (getAsset) {

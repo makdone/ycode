@@ -79,8 +79,10 @@ export async function getAllPageFolders(filters?: QueryFilters): Promise<PageFol
 
 /**
  * Get page folder by ID
+ * Filters by is_published to avoid .single() failure when both draft and
+ * published rows exist (composite PK is id + is_published).
  */
-export async function getPageFolderById(id: string): Promise<PageFolder | null> {
+export async function getPageFolderById(id: string, isPublished = false): Promise<PageFolder | null> {
   const client = await getSupabaseAdmin();
 
   if (!client) {
@@ -91,6 +93,7 @@ export async function getPageFolderById(id: string): Promise<PageFolder | null> 
     .from('page_folders')
     .select('*')
     .eq('id', id)
+    .eq('is_published', isPublished)
     .is('deleted_at', null)
     .single();
 

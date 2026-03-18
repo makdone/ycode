@@ -12,7 +12,6 @@ import { useEffect, useRef, useMemo } from 'react';
 import Swiper from 'swiper';
 import type { Layer, SliderSettings } from '@/types';
 import { useEditorStore } from '@/stores/useEditorStore';
-import { containsLayerId } from '@/lib/layer-utils';
 import { DEFAULT_SLIDER_SETTINGS } from '@/lib/templates/utilities';
 import { buildCanvasSwiperOptions, applySwiperEasing } from '@/lib/slider-utils';
 
@@ -22,24 +21,44 @@ const swiperRegistry = new Map<string, { swiper: Swiper; layerRef: React.RefObje
 /** Tracks the intended target index per slider during rapid navigation */
 const targetIndex = new Map<string, number>();
 
+/**
+ * Find the Swiper slide index for a layer by querying the DOM.
+ * Needed because collection layers expand into multiple DOM slides,
+ * so layer-tree indices don't map 1:1 to Swiper slide indices.
+ */
+function findSlideIndexInDom(swiperEl: HTMLElement, swiper: Swiper, layerId: string): number {
+  const layerEl = swiperEl.querySelector(`[data-layer-id="${layerId}"]`);
+  if (!layerEl) return -1;
+
+  let current: HTMLElement | null = layerEl as HTMLElement;
+  while (current && current !== swiperEl) {
+    if (current.classList.contains('swiper-slide')) {
+      return Array.from(swiper.slides).indexOf(current);
+    }
+    current = current.parentElement;
+  }
+  return -1;
+}
+
 function navigateAndSelect(sliderLayerId: string, direction: 'prev' | 'next') {
   const entry = swiperRegistry.get(sliderLayerId);
   if (!entry) return;
-  const { swiper, layerRef } = entry;
-  const slides = layerRef.current?.children?.find(c => c.name === 'slides')?.children;
-  if (!slides?.length) return;
+  const { swiper } = entry;
+  const totalSlides = swiper.slides.length;
+  if (!totalSlides) return;
 
   const current = targetIndex.get(sliderLayerId) ?? swiper.realIndex;
   const next = direction === 'prev'
-    ? (current - 1 + slides.length) % slides.length
-    : (current + 1) % slides.length;
+    ? (current - 1 + totalSlides) % totalSlides
+    : (current + 1) % totalSlides;
   targetIndex.set(sliderLayerId, next);
 
   swiper.slideTo(next);
 
-  const slideLayer = slides[next];
-  if (slideLayer) {
-    useEditorStore.getState().setSelectedLayerId(slideLayer.id);
+  const slideEl = swiper.slides[next] as HTMLElement | undefined;
+  const layerId = slideEl?.getAttribute('data-layer-id');
+  if (layerId) {
+    useEditorStore.getState().setSelectedLayerId(layerId);
   }
 }
 
@@ -146,10 +165,7 @@ export function useCanvasSlider(
     // Restore the selected slide after reinit (e.g. after per-view change)
     const selectedLayerId = useEditorStore.getState().selectedLayerId;
     if (selectedLayerId) {
-      const slidesWrapper = layerRef.current.children?.find(c => c.name === 'slides');
-      const slideIndex = slidesWrapper?.children?.findIndex(
-        child => containsLayerId(child, selectedLayerId),
-      ) ?? -1;
+      const slideIndex = findSlideIndexInDom(el, swiper, selectedLayerId);
       if (slideIndex > 0) {
         requestAnimationFrame(() => swiper.slideTo(slideIndex, 0));
       }
@@ -205,7 +221,30 @@ export function useCanvasSlider(
       setSliderAnimating(false);
     });
 
+    // Swiper's built-in observer uses the parent window's MutationObserver,
+    // which can miss mutations in the canvas iframe's document. Use the
+    // iframe's own MutationObserver to reliably detect slide changes.
+    let wrapperObserver: MutationObserver | undefined;
+    const wrapperEl = swiper.wrapperEl;
+    if (wrapperEl) {
+      const iframeWindow = wrapperEl.ownerDocument.defaultView;
+      const ObsCtor = iframeWindow?.MutationObserver;
+      if (ObsCtor) {
+        let debounceRaf: number | undefined;
+        wrapperObserver = new ObsCtor(() => {
+          if (debounceRaf) cancelAnimationFrame(debounceRaf);
+          debounceRaf = requestAnimationFrame(() => {
+            if (swiperRef.current && !swiperRef.current.destroyed) {
+              swiperRef.current.update();
+            }
+          });
+        });
+        wrapperObserver.observe(wrapperEl, { childList: true, subtree: true });
+      }
+    }
+
     return () => {
+      wrapperObserver?.disconnect();
       swiperRegistry.delete(layer.id);
       swiper.destroy(true, true);
       ghostEl.remove();
@@ -220,20 +259,32 @@ export function useCanvasSlider(
 
     const navigateToSelected = (selectedLayerId: string | null) => {
       const swiper = swiperRef.current;
-      if (!swiper || !selectedLayerId) return;
+      if (!swiper || !selectedLayerId || !elementRef.current) return;
 
-      const slidesWrapper = layerRef.current.children?.find(c => c.name === 'slides');
-      if (!slidesWrapper?.children) return;
-
-      const slideIndex = slidesWrapper.children.findIndex(
-        child => containsLayerId(child, selectedLayerId),
-      );
+      const slideIndex = findSlideIndexInDom(elementRef.current, swiper, selectedLayerId);
 
       if (slideIndex >= 0 && slideIndex !== swiper.realIndex) {
         requestAnimationFrame(() => {
           swiper.update();
           swiper.slideTo(slideIndex);
         });
+      } else if (slideIndex === -1) {
+        // Element not in DOM yet (e.g. newly added slide). Retry after render.
+        let retries = 10;
+        const retry = () => {
+          const sw = swiperRef.current;
+          const el = elementRef.current;
+          if (!sw || sw.destroyed || !el || retries-- <= 0) return;
+
+          sw.update();
+          const idx = findSlideIndexInDom(el, sw, selectedLayerId);
+          if (idx >= 0) {
+            sw.slideTo(idx);
+          } else {
+            requestAnimationFrame(retry);
+          }
+        };
+        requestAnimationFrame(retry);
       }
     };
 
@@ -250,5 +301,5 @@ export function useCanvasSlider(
     });
 
     return unsubscribe;
-  }, [isSlider]);
+  }, [isSlider, elementRef]);
 }

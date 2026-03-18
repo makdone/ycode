@@ -33,7 +33,7 @@ import type { Component } from '@/types';
 import Image from 'next/image';
 import { getLayerFromTemplate, getBlockName, getBlockIcon, getLayoutTemplate, getLayoutCategory, getLayoutPreviewImage, getLayoutsByCategory, getAllLayoutKeys } from '@/lib/templates/blocks';
 import { DEFAULT_ASSETS } from '@/lib/asset-constants';
-import { canHaveChildren, assignOrderClassToNewLayer, collectAllSettingsIds, generateUniqueSettingsId } from '@/lib/layer-utils';
+import { canHaveChildren, assignOrderClassToNewLayer, collectAllSettingsIds, generateUniqueSettingsId, findLayerById } from '@/lib/layer-utils';
 import { checkCircularReference, isCircularComponentReference } from '@/lib/component-utils';
 import { cn, generateId } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -1310,8 +1310,13 @@ export default function ElementLibrary({ isOpen, onClose, defaultTab = 'elements
     await loadComponentDraft(component.id);
     openComponent(component.id, currentPageId, undefined, undefined);
 
+    // Select root layer only if user hasn't already selected a valid component layer during the await
     if (component.layers?.length) {
-      setLayerId(component.layers[0].id);
+      const currentSelection = useEditorStore.getState().selectedLayerId;
+      const hasValidSelection = currentSelection && findLayerById(component.layers, currentSelection);
+      if (!hasValidSelection) {
+        setLayerId(component.layers[0].id);
+      }
     }
 
     onClose();

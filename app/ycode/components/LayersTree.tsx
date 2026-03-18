@@ -192,6 +192,8 @@ const LayerRow = React.memo(function LayerRow({
   const activeInteractionTriggerLayerId = useEditorStore((state) => state.activeInteractionTriggerLayerId);
   const activeInteractionTargetLayerIds = useEditorStore((state) => state.activeInteractionTargetLayerIds);
   const setHoveredLayerId = useEditorStore((state) => state.setHoveredLayerId);
+  const activeUIState = useEditorStore((state) => state.activeUIState);
+  const isStateActive = activeUIState !== 'neutral';
   const { setNodeRef: setDropRef } = useDroppable({
     id: node.id,
   });
@@ -338,8 +340,10 @@ const LayerRow = React.memo(function LayerRow({
         <div
           className={cn(
             'group relative flex items-center h-8 cursor-pointer',
-            isSelected && 'bg-primary text-primary-foreground rounded-lg',
-            !isSelected && isChildOfSelected && 'dark:bg-primary/15 bg-primary/10 text-current/70',
+            isSelected && !isStateActive && 'bg-primary text-primary-foreground rounded-lg',
+            isSelected && isStateActive && 'bg-[#8dd92f] text-black rounded-lg',
+            !isSelected && isChildOfSelected && !isStateActive && 'dark:bg-primary/15 bg-primary/10 text-current/70',
+            !isSelected && isChildOfSelected && isStateActive && 'dark:bg-[#8dd92f]/15 bg-[#8dd92f]/10 text-current/70',
             !isSelected && isChildOfSelected && isLastVisibleDescendant && 'rounded-b-lg',
             !isSelected && isChildOfSelected && !isLastVisibleDescendant && 'rounded-none',
             !isSelected && !isChildOfSelected && 'rounded-lg text-secondary-foreground/80 dark:text-muted-foreground',
@@ -445,9 +449,12 @@ const LayerRow = React.memo(function LayerRow({
             // Background colors
             !isDragActive && !isDragging && !isLockedByOther && 'hover:bg-secondary/50',
             // Component instances OR component edit mode use purple, regular layers use blue
-            isSelected && !usePurpleStyle && 'bg-primary text-primary-foreground hover:bg-primary',
+            // When a UI state (hover/focus/active/etc.) is active, use green (#8dd92f)
+            isSelected && !usePurpleStyle && !isStateActive && 'bg-primary text-primary-foreground hover:bg-primary',
+            isSelected && !usePurpleStyle && isStateActive && 'bg-[#8dd92f] text-black hover:bg-[#8dd92f]',
             isSelected && usePurpleStyle && 'bg-purple-500 text-white hover:bg-purple-500',
-            !isSelected && isChildOfSelected && !usePurpleStyle && 'dark:bg-primary/15 bg-primary/10 text-current/70 hover:bg-primary/15 dark:hover:bg-primary/20',
+            !isSelected && isChildOfSelected && !usePurpleStyle && !isStateActive && 'dark:bg-primary/15 bg-primary/10 text-current/70 hover:bg-primary/15 dark:hover:bg-primary/20',
+            !isSelected && isChildOfSelected && !usePurpleStyle && isStateActive && 'dark:bg-[#8dd92f]/15 bg-[#8dd92f]/10 text-current/70 hover:bg-[#8dd92f]/15 dark:hover:bg-[#8dd92f]/20',
             !isSelected && isChildOfSelected && usePurpleStyle && 'dark:bg-purple-500/10 bg-purple-500/10 text-current/70 hover:bg-purple-500/15 dark:hover:bg-purple-500/20',
             isSelected && !isDragActive && !isDragging && '',
             isDragging && '',

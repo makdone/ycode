@@ -157,6 +157,9 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
 
   const componentIsSaving = useComponentsStore((state) => state.isSaving);
   const components = useComponentsStore((state) => state.components);
+  const componentDraftLayers = useComponentsStore((state) =>
+    editingComponentId ? state.componentDrafts[editingComponentId] ?? null : null
+  );
 
   const migrationsComplete = useMigrationStore((state) => state.migrationsComplete);
   const setMigrationsComplete = useMigrationStore((state) => state.setMigrationsComplete);
@@ -314,9 +317,8 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
           return; // Draft not loaded yet, wait for next render
         }
       } else if (isComponentRoute && editingComponentId) {
-        const componentDrafts = useComponentsStore.getState().componentDrafts;
-        if (!componentDrafts[editingComponentId]) {
-          return; // Component draft not loaded yet
+        if (!componentDraftLayers) {
+          return; // Component draft not loaded yet, will re-run when it arrives
         }
       } else {
         return; // Not ready yet
@@ -342,13 +344,12 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
           hasInitializedLayerFromUrlRef.current = true;
         }
       } else if (isComponentRoute && editingComponentId) {
-        const componentDrafts = useComponentsStore.getState().componentDrafts;
-        if (componentDrafts[editingComponentId]) {
+        if (componentDraftLayers) {
           hasInitializedLayerFromUrlRef.current = true;
         }
       }
     }
-  }, [urlState.layerId, resourceId, routeType, setSelectedLayerId, currentPageId, editingComponentId, currentDraft, getCurrentLayers]);
+  }, [urlState.layerId, resourceId, routeType, setSelectedLayerId, currentPageId, editingComponentId, currentDraft, componentDraftLayers, getCurrentLayers]);
 
   // Sync selected layer to URL (but only after initialization from URL, skip when in page settings mode or during edit mode transition)
   useEffect(() => {

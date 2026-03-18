@@ -18,6 +18,7 @@ export interface PaginationContext {
   // Default page number for all collection layers (from URL ?page=N)
   defaultPage?: number;
 }
+
 import { resolveFieldLinkValue } from '@/lib/link-utils';
 import { SWIPER_CLASS_MAP, SWIPER_DATA_ATTR_MAP } from '@/lib/templates/utilities';
 import { resolveInlineVariables, resolveInlineVariablesFromData } from '@/lib/inline-variables';
@@ -2678,7 +2679,7 @@ async function resolveAllAssets(
   layers: Layer[],
   isPublished: boolean = true,
   components?: Component[],
-): Promise<{ layers: Layer[]; assetMap: Record<string, { public_url: string | null; content?: string | null }> }> {
+): Promise<{ layers: Layer[]; assetMap: Record<string, { public_url: string | null; content?: string | null; width?: number | null; height?: number | null }> }> {
   const { getAssetsByIds } = await import('@/lib/repositories/assetRepository');
 
   // Step 1: Collect all asset IDs from the layer tree
@@ -2706,9 +2707,11 @@ async function resolveAllAssets(
  */
 function resolveLayerAssets(
   layer: Layer,
-  assetMap: Record<string, { public_url: string | null; content?: string | null }>,
+  assetMap: Record<string, { public_url: string | null; content?: string | null; width?: number | null; height?: number | null }>,
 ): Layer {
   const variableUpdates: Partial<Layer['variables']> = {};
+
+  let attributeUpdates: Record<string, any> | undefined;
 
   const imageSrc = layer.variables?.image?.src;
   if (imageSrc && isAssetVariable(imageSrc)) {
@@ -2725,6 +2728,15 @@ function resolveLayerAssets(
         src: createDynamicTextVariable(resolvedUrl),
         alt: layer.variables?.image?.alt || createDynamicTextVariable(''),
       };
+
+      // Store intrinsic dimensions from asset for CLS prevention
+      if (asset?.width && asset?.height) {
+        attributeUpdates = {
+          ...(layer.attributes || {}),
+          ...(!layer.attributes?.width && { width: String(asset.width) }),
+          ...(!layer.attributes?.height && { height: String(asset.height) }),
+        };
+      }
     }
   }
 
@@ -2791,6 +2803,9 @@ function resolveLayerAssets(
   const updates: Partial<Layer> = {};
   if (Object.keys(variableUpdates).length > 0) {
     updates.variables = { ...layer.variables, ...variableUpdates };
+  }
+  if (attributeUpdates) {
+    updates.attributes = attributeUpdates;
   }
   if (layer.children) {
     updates.children = layer.children.map(child => resolveLayerAssets(child, assetMap));
@@ -3005,17 +3020,18 @@ function layerToHtml(
   anchorMap?: Record<string, string>,
   collectionItemData?: Record<string, string>,
   pageCollectionItemData?: Record<string, string>,
-  assetMap?: Record<string, { public_url: string | null; content?: string | null }>,
+  assetMap?: Record<string, { public_url: string | null; content?: string | null; width?: number | null; height?: number | null }>,
   layerDataMap?: Record<string, Record<string, string>>,
   components?: Component[],
   ancestorComponentIds?: Set<string>,
+  isSlideChild?: boolean,
 ): string {
   // Handle fragment layers (created by resolveCollectionLayers for nested collections)
   // Fragments render their children directly without a wrapper element
   if (layer.name === '_fragment' && layer.children) {
     return layer.children
       .map((child) =>
-        layerToHtml(child, collectionItemId, pages, folders, collectionItemSlugs, locale, translations, anchorMap, collectionItemData, pageCollectionItemData, assetMap, layerDataMap, components, ancestorComponentIds)
+        layerToHtml(child, collectionItemId, pages, folders, collectionItemSlugs, locale, translations, anchorMap, collectionItemData, pageCollectionItemData, assetMap, layerDataMap, components, ancestorComponentIds, isSlideChild)
       )
       .join('');
   }
@@ -3062,6 +3078,10 @@ function layerToHtml(
     classesStr = classesStr
       ? `${classesStr} ${SWIPER_CLASS_MAP[layer.name]}`
       : SWIPER_CLASS_MAP[layer.name];
+  }
+
+  if (isSlideChild) {
+    classesStr = classesStr ? `${classesStr} swiper-slide` : 'swiper-slide';
   }
 
   // Build attributes
@@ -3178,37 +3198,46 @@ function layerToHtml(
   // Handle images (variables structure)
   if (tag === 'img') {
     const imageSrc = layer.variables?.image?.src;
+    let resolvedSrcValue: string | undefined;
     if (imageSrc) {
-      // Extract string value from variable (should be DynamicTextVariable after resolution)
-      // AssetVariable should have been resolved to DynamicTextVariable in injectCollectionDataForHtml
-      let srcValue: string | undefined = undefined;
       if (imageSrc.type === 'dynamic_text') {
-        srcValue = imageSrc.data.content || undefined;
+        resolvedSrcValue = imageSrc.data.content || undefined;
       } else if (imageSrc.type === 'asset') {
-        // AssetVariable should have been resolved, but if not, skip (don't use asset_id as URL)
-        srcValue = undefined;
+        resolvedSrcValue = undefined;
       }
-      // Only add src if we have a valid URL (not empty string)
-      if (srcValue && srcValue.trim()) {
-        const optimizedSrc = getOptimizedImageUrl(srcValue, 1920, 1920, 85);
+      if (resolvedSrcValue && resolvedSrcValue.trim()) {
+        const optimizedSrc = getOptimizedImageUrl(resolvedSrcValue, 1920, 85);
         attrs.push(`src="${escapeHtml(optimizedSrc)}"`);
 
-        // Generate srcset for responsive images
-        const srcset = generateImageSrcset(srcValue);
+        const srcset = generateImageSrcset(resolvedSrcValue);
         if (srcset) {
           attrs.push(`srcset="${escapeHtml(srcset)}"`);
-          // Add sizes attribute for responsive images
           attrs.push(`sizes="${escapeHtml(getImageSizes())}"`);
         }
       }
     }
-    // Add data-layer-type for images
     attrs.push('data-layer-type="image"');
 
     const imageAlt = layer.variables?.image?.alt;
     if (imageAlt && imageAlt.type === 'dynamic_text') {
       attrs.push(`alt="${escapeHtml(imageAlt.data.content)}"`);
     }
+
+    // Set width/height from explicit attributes or intrinsic asset dimensions (prevents CLS)
+    let imgWidth = layer.attributes?.width as string | undefined;
+    let imgHeight = layer.attributes?.height as string | undefined;
+    if ((!imgWidth || !imgHeight) && resolvedSrcValue && assetMap) {
+      const matchedAsset = Object.values(assetMap).find(a => a.public_url === resolvedSrcValue);
+      if (matchedAsset?.width && matchedAsset?.height) {
+        if (!imgWidth) imgWidth = String(matchedAsset.width);
+        if (!imgHeight) imgHeight = String(matchedAsset.height);
+      }
+    }
+    if (imgWidth) attrs.push(`width="${escapeHtml(imgWidth)}"`);
+    if (imgHeight) attrs.push(`height="${escapeHtml(imgHeight)}"`);
+
+    const imgLoadingAttr = layer.attributes?.loading;
+    if (imgLoadingAttr) attrs.push(`loading="${escapeHtml(String(imgLoadingAttr))}"`);
   }
 
   // Handle YouTube video (VideoVariable with provider='youtube') - render as iframe
@@ -3240,7 +3269,7 @@ function layerToHtml(
       const childrenHtml = layer.children
         ? layer.children
           .map((child) =>
-            layerToHtml(child, effectiveCollectionItemId, pages, folders, collectionItemSlugs, locale, translations, anchorMap, effectiveCollectionItemData, pageCollectionItemData, assetMap, effectiveLayerDataMap, components, ancestorComponentIds)
+            layerToHtml(child, effectiveCollectionItemId, pages, folders, collectionItemSlugs, locale, translations, anchorMap, effectiveCollectionItemData, pageCollectionItemData, assetMap, effectiveLayerDataMap, components, ancestorComponentIds, layer.name === 'slides')
           )
           .join('')
         : '';
@@ -3566,7 +3595,7 @@ function layerToHtml(
   const childrenHtml = effectiveChildren
     ? effectiveChildren
       .map((child) =>
-        layerToHtml(child, effectiveCollectionItemId, pages, folders, collectionItemSlugs, locale, translations, anchorMap, effectiveCollectionItemData, pageCollectionItemData, assetMap, effectiveLayerDataMap, components, ancestorComponentIds)
+        layerToHtml(child, effectiveCollectionItemId, pages, folders, collectionItemSlugs, locale, translations, anchorMap, effectiveCollectionItemData, pageCollectionItemData, assetMap, effectiveLayerDataMap, components, ancestorComponentIds, layer.name === 'slides')
       )
       .join('')
     : '';
@@ -3598,7 +3627,7 @@ function layerToHtml(
             ? resolved.map(l => resolveLayerAssets(l, assetMap))
             : resolved;
           return withAssets
-            .map(l => layerToHtml(l, effectiveCollectionItemId, pages, folders, collectionItemSlugs, locale, translations, anchorMap, effectiveCollectionItemData, pageCollectionItemData, assetMap, effectiveLayerDataMap, components, childAncestors))
+            .map(l => layerToHtml(l, effectiveCollectionItemId, pages, folders, collectionItemSlugs, locale, translations, anchorMap, effectiveCollectionItemData, pageCollectionItemData, assetMap, effectiveLayerDataMap, components, childAncestors, layer.name === 'slides'))
             .join('');
         }
         : undefined;

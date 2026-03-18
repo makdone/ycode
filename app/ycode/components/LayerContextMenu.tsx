@@ -408,10 +408,14 @@ export default function LayerContextMenu({
     // Load component into draft (async to ensure proper cache sync)
     await loadComponentDraft(layer.componentId);
 
-    // Select the first (top-level) layer of the component (now on component channel)
+    // Select root layer only if user hasn't already selected a valid component layer during the await
     const component = getComponentById(layer.componentId);
     if (component && component.layers && component.layers.length > 0) {
-      setSelectedLayerId(component.layers[0].id);
+      const currentSelection = useEditorStore.getState().selectedLayerId;
+      const hasValidSelection = currentSelection && findLayerById(component.layers, currentSelection);
+      if (!hasValidSelection) {
+        setSelectedLayerId(component.layers[0].id);
+      }
     }
   };
 

@@ -242,20 +242,24 @@ export default async function PageRenderer({
 
   // Fetch all assets and build resolved map
   // Use draft assets (isPublished=false) for preview mode, published assets otherwise
-  let resolvedAssets: Record<string, string> | undefined;
+  let resolvedAssets: Record<string, { url: string; width?: number | null; height?: number | null }> | undefined;
   if (layerAssetIds.size > 0) {
     try {
       const { getAssetsByIds } = await import('@/lib/repositories/assetRepository');
       const assetMap = await getAssetsByIds(Array.from(layerAssetIds), !isPreview);
       resolvedAssets = {};
       for (const [id, asset] of Object.entries(assetMap)) {
+        let url: string | undefined;
         const proxyUrl = getAssetProxyUrl(asset);
         if (proxyUrl) {
-          resolvedAssets[id] = proxyUrl;
+          url = proxyUrl;
         } else if (asset.public_url) {
-          resolvedAssets[id] = asset.public_url;
+          url = asset.public_url;
         } else if (asset.content) {
-          resolvedAssets[id] = asset.content;
+          url = asset.content;
+        }
+        if (url) {
+          resolvedAssets[id] = { url, width: asset.width, height: asset.height };
         }
       }
     } catch (error) {
@@ -270,6 +274,12 @@ export default async function PageRenderer({
 
       {/* Inject page-specific custom head code */}
       {pageCustomCodeHead && renderHeadCode(pageCustomCodeHead, 'page-head')}
+
+      {/* Strip native browser appearance from form elements so Tailwind classes apply */}
+      <style
+        id="ycode-form-reset"
+        dangerouslySetInnerHTML={{ __html: 'input,select,textarea{appearance:none;-webkit-appearance:none}input[type="checkbox"]:checked,input[type="radio"]:checked{background-color:currentColor;border-color:transparent;background-size:100% 100%;background-position:center;background-repeat:no-repeat}input[type="checkbox"]:checked{background-image:url("data:image/svg+xml,%3csvg viewBox=\'0 0 16 16\' fill=\'white\' xmlns=\'http://www.w3.org/2000/svg\'%3e%3cpath d=\'M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z\'/%3e%3c/svg%3e")}input[type="radio"]:checked{background-image:url("data:image/svg+xml,%3csvg viewBox=\'0 0 16 16\' fill=\'white\' xmlns=\'http://www.w3.org/2000/svg\'%3e%3ccircle cx=\'8\' cy=\'8\' r=\'3\'/%3e%3c/svg%3e")}' }}
+      />
 
       {/* Inject CSS directly — React 19 hoists <style> with precedence to <head> */}
       {generatedCss && (

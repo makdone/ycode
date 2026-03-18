@@ -27,7 +27,7 @@ export default function UIStateSelector({ selectedLayer }: UIStateSelectorProps)
   return (
     <div className="sticky -top-2 bg-background z-30 py-4 flex flex-row gap-2">
       <Select value={activeUIState} onValueChange={(value) => setActiveUIState(value as UIState)}>
-        <SelectTrigger className="w-full">
+        <SelectTrigger className={`w-full ${activeUIState !== 'neutral' ? 'text-[#8dd92f]' : ''}`}>
           <SelectValue placeholder="Select..." />
         </SelectTrigger>
         <SelectContent align="end">

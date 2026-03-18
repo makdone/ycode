@@ -338,9 +338,15 @@ export function useEditorUrl() {
 
   const navigateToComponent = useCallback(
     (componentId: string, rightTab?: string, layerId?: string) => {
+      const currentParams = new URLSearchParams(window.location.search);
       const params = new URLSearchParams();
-      if (rightTab) params.set('tab', rightTab);
+
+      // Preserve current tab if not explicitly provided (matches navigateToLayers/navigateToPage behavior)
+      const tabToUse = rightTab || currentParams.get('tab') || 'design';
+      params.set('tab', tabToUse);
+
       if (layerId) params.set('layer', layerId);
+
       const query = params.toString();
       router.push(`/ycode/components/${componentId}${query ? `?${query}` : ''}`);
     },
@@ -493,10 +499,11 @@ export function useEditorActions() {
   );
 
   // Combined action: Open component edit mode (updates state + URL)
+  // returnToLayerId is the page/parent layer to restore on exit — NOT the component's layer for the URL
   const openComponent = useCallback(
-    (componentId: string, returnPageId: string | null, rightTab?: string, layerId?: string) => {
-      setEditingComponentId(componentId, returnPageId, layerId);
-      navigateToComponent(componentId, rightTab, layerId);
+    (componentId: string, returnPageId: string | null, rightTab?: string, returnToLayerId?: string) => {
+      setEditingComponentId(componentId, returnPageId, returnToLayerId);
+      navigateToComponent(componentId, rightTab);
     },
     [setEditingComponentId, navigateToComponent]
   );
