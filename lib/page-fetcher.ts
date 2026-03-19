@@ -1578,9 +1578,9 @@ export async function resolveCollectionLayers(
     const layerDataMap = { ...parentLayerDataMap, ...(layer._layerDataMap || {}) };
     // Check if this is a collection layer
     const isCollectionLayer = !!layer.variables?.collection?.id;
-    const hasCheckboxOptionsSource = layer.name === 'div' && !!layer.settings?.optionsSource?.collectionId;
+    const hasOptionsSource = layer.name === 'div' && !!layer.settings?.optionsSource?.collectionId;
 
-    if (isCollectionLayer && !hasCheckboxOptionsSource) {
+    if (isCollectionLayer && !hasOptionsSource) {
       const collectionVariable = getCollectionVariable(layer);
 
       if (collectionVariable && collectionVariable.id) {
@@ -1992,83 +1992,115 @@ export async function resolveCollectionLayers(
       }
     }
 
-    // Collection-sourced checkbox group: replace children with checkboxes from a collection
-    if (
-      layer.name === 'div' &&
-      layer.settings?.optionsSource?.collectionId
-    ) {
-      try {
-        const sourceCollectionId = layer.settings.optionsSource.collectionId;
-        let { items: sourceItems } = await getItemsWithValues(sourceCollectionId, isPublished);
-        const sourceFields = await getFieldsByCollectionId(sourceCollectionId, isPublished);
-        const opts = layer.settings.optionsSource;
+    // Helper to find a specific input type in a layer's children tree
+    const findInputByType = (children: Layer[] | undefined, type: string): Layer | undefined => {
+      if (!children) return undefined;
+      for (const c of children) {
+        if (c.name === 'input' && c.attributes?.type === type) return c;
+        if (c.children) { const found = findInputByType(c.children, type); if (found) return found; }
+      }
+      return undefined;
+    };
 
-        const displayField = findDisplayField(sourceFields);
+    // Build a _fragment layer from a collection-sourced input group (checkbox or radio)
+    const buildInputGroupFragment = (
+      inputType: 'checkbox' | 'radio',
+      items: { id: string; values: Record<string, string> }[],
+      fields: { id: string; type: string; key?: string | null; fillable?: boolean }[],
+    ): Layer => {
+      const opts = layer.settings!.optionsSource!;
+      const displayField = findDisplayField(fields as CollectionField[]);
+      const prefix = inputType === 'checkbox' ? 'cb' : 'rb';
 
-        if (opts.sortFieldId) {
-          const sortField = sourceFields.find(f => f.id === opts.sortFieldId);
-          if (sortField) {
-            const dir = opts.sortOrder === 'desc' ? -1 : 1;
-            sourceItems = [...sourceItems].sort((a, b) => {
-              const aVal = String(a.values[sortField.id] ?? '');
-              const bVal = String(b.values[sortField.id] ?? '');
-              return aVal.localeCompare(bVal, undefined, { numeric: true, sensitivity: 'base' }) * dir;
-            });
-          }
+      if (opts.sortFieldId) {
+        const sortField = fields.find(f => f.id === opts.sortFieldId);
+        if (sortField) {
+          const dir = opts.sortOrder === 'desc' ? -1 : 1;
+          items = [...items].sort((a, b) => {
+            const aVal = String(a.values[sortField.id] ?? '');
+            const bVal = String(b.values[sortField.id] ?? '');
+            return aVal.localeCompare(bVal, undefined, { numeric: true, sensitivity: 'base' }) * dir;
+          });
         }
+      }
 
-        const findCheckboxInput = (children: Layer[] | undefined): Layer | undefined => {
-          if (!children) return undefined;
-          for (const c of children) {
-            if (c.name === 'input' && c.attributes?.type === 'checkbox') return c;
-            if (c.children) { const found = findCheckboxInput(c.children); if (found) return found; }
-          }
-          return undefined;
-        };
-        const checkboxInput = findCheckboxInput(layer.children);
-        const baseName = checkboxInput?.attributes?.name || checkboxInput?.settings?.id || layer.id;
-        const checkboxName = baseName.endsWith('[]') ? baseName : `${baseName}[]`;
+      const templateInput = findInputByType(layer.children, inputType);
+      const templateText = layer.children?.find(c => c.name === 'text');
 
-        const generatedChildren: Layer[] = sourceItems.map(item => {
-          const label = displayField ? (item.values[displayField.id] || 'Untitled') : 'Untitled';
-          return {
-            id: `${layer.id}-cb-${item.id}`,
-            name: 'div',
-            settings: { tag: 'label' },
-            classes: layer.classes || '',
-            children: [
-              {
-                id: `${layer.id}-cb-${item.id}-input`,
-                name: 'input',
-                classes: checkboxInput?.classes || '',
-                attributes: { type: 'checkbox', name: checkboxName, value: item.id },
-                design: checkboxInput?.design,
-              },
-              {
-                id: `${layer.id}-cb-${item.id}-text`,
-                name: 'text',
-                classes: '',
-                variables: {
-                  text: { type: 'dynamic_text' as const, data: { content: String(label) } },
-                },
-              },
-            ],
-          } as Layer;
-        });
+      const baseName = templateInput?.attributes?.name || templateInput?.settings?.id || layer.id;
+      const inputName = inputType === 'checkbox'
+        ? (baseName.endsWith('[]') ? baseName : `${baseName}[]`)
+        : baseName;
 
-        const { collection: _col, ...restVariables } = layer.variables || {};
+      // Preserve template input attributes (required, disabled, etc.)
+      const { type: _t, name: _n, value: _v, checked: _c, ...inheritedInputAttrs } = templateInput?.attributes || {};
+
+      const generatedChildren: Layer[] = items.map(item => {
+        const label = displayField ? (item.values[displayField.id] || 'Untitled') : 'Untitled';
+        const isDefault = inputType === 'checkbox'
+          ? (opts.defaultItemIds || []).includes(item.id)
+          : opts.defaultItemId === item.id;
+
         return {
-          ...layer,
-          id: `${layer.id}-fragment`,
-          name: '_fragment',
-          classes: [],
-          design: undefined,
-          attributes: {} as Record<string, any>,
-          variables: Object.keys(restVariables).length > 0 ? restVariables : undefined,
-          children: generatedChildren,
-        };
-      } catch (error) {
-        console.error(`Failed to resolve collection-sourced checkbox options for layer ${layer.id}:`, error);
+          id: `${layer.id}-${prefix}-${item.id}`,
+          name: 'div',
+          settings: { tag: 'label' },
+          classes: layer.classes || '',
+          children: [
+            {
+              id: `${layer.id}-${prefix}-${item.id}-input`,
+              name: 'input',
+              classes: templateInput?.classes || '',
+              attributes: {
+                ...inheritedInputAttrs,
+                type: inputType,
+                name: inputName,
+                value: item.id,
+                ...(isDefault ? { checked: 'true' } : {}),
+              },
+              design: templateInput?.design,
+            },
+            {
+              id: `${layer.id}-${prefix}-${item.id}-text`,
+              name: 'text',
+              classes: templateText?.classes || '',
+              design: templateText?.design,
+              variables: {
+                text: { type: 'dynamic_text' as const, data: { content: String(label) } },
+              },
+            },
+          ],
+        } as Layer;
+      });
+
+      const { collection: _col, ...restVariables } = layer.variables || {};
+      return {
+        ...layer,
+        id: `${layer.id}-fragment`,
+        name: '_fragment',
+        classes: [],
+        design: undefined,
+        attributes: {} as Record<string, any>,
+        variables: Object.keys(restVariables).length > 0 ? restVariables : undefined,
+        children: generatedChildren,
+      };
+    };
+
+    // Collection-sourced checkbox/radio group: replace children with inputs from a collection
+    if (layer.name === 'div' && layer.settings?.optionsSource?.collectionId) {
+      const inputType = findInputByType(layer.children, 'checkbox') ? 'checkbox'
+        : findInputByType(layer.children, 'radio') ? 'radio'
+          : null;
+
+      if (inputType) {
+        try {
+          const sourceCollectionId = layer.settings.optionsSource.collectionId;
+          const { items } = await getItemsWithValues(sourceCollectionId, isPublished);
+          const fields = await getFieldsByCollectionId(sourceCollectionId, isPublished);
+          return buildInputGroupFragment(inputType, items, fields);
+        } catch (error) {
+          console.error(`Failed to resolve collection-sourced ${inputType} options for layer ${layer.id}:`, error);
+        }
       }
     }
 

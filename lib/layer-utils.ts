@@ -1400,14 +1400,14 @@ export function getLayerIcon(
   // Other named layers
   if (layer.customName === 'Container') return 'container';
 
-  // Input elements - use type-specific icons for radio
-  if (layer.name === 'input' && layer.attributes?.type === 'radio') {
-    return 'radio';
-  }
-
   // Checkbox wrapper div (contains a checkbox input child)
   if (layer.name === 'div' && layer.children?.some(c => c.name === 'input' && c.attributes?.type === 'checkbox')) {
     return 'checkbox';
+  }
+
+  // Radio wrapper div (contains a radio input child)
+  if (layer.name === 'div' && layer.children?.some(c => c.name === 'input' && c.attributes?.type === 'radio')) {
+    return 'radio';
   }
 
   // Fallback to block icon (based on name)
@@ -1461,14 +1461,14 @@ export function getLayerName(
     return layer.customName;
   }
 
-  // Input elements - use type-specific names for radio
-  if (layer.name === 'input' && layer.attributes?.type === 'radio') {
-    return 'Radio';
-  }
-
   // Checkbox wrapper div (contains a checkbox input child)
   if (layer.name === 'div' && layer.children?.some(c => c.name === 'input' && c.attributes?.type === 'checkbox')) {
     return 'Checkbox';
+  }
+
+  // Radio wrapper div (contains a radio input child)
+  if (layer.name === 'div' && layer.children?.some(c => c.name === 'input' && c.attributes?.type === 'radio')) {
+    return 'Radio';
   }
 
   return getBlockName(layer.name) || 'Layer';

@@ -2009,6 +2009,17 @@ const LayerItem: React.FC<{
         elementProps.defaultValue = elementProps.value;
         delete elementProps.value;
       }
+      // In edit mode, keep checked as a controlled prop (canvas inputs aren't interactive)
+      // so defaults update in real-time. In published mode, convert to defaultChecked
+      // so the input remains uncontrolled and users can interact with it.
+      if ('checked' in elementProps) {
+        if (isEditMode) {
+          elementProps.readOnly = true;
+        } else {
+          elementProps.defaultChecked = elementProps.checked;
+          delete elementProps.checked;
+        }
+      }
       return <Tag {...elementProps} />;
     }
 
@@ -2649,6 +2660,26 @@ const LayerItem: React.FC<{
               }
             }
 
+            // For checkbox/radio wrappers, always inject checked attribute so inputs
+            // stay controlled for their lifetime (avoids uncontrolled→controlled switch)
+            const checkboxDefaultIds = layer.settings?.optionsSource?.defaultItemIds;
+            const radioDefaultId = layer.settings?.optionsSource?.defaultItemId;
+            const isOptionsSourceLayer = !!layer.settings?.optionsSource?.collectionId;
+            const itemChildren = (isOptionsSourceLayer && effectiveChildren)
+              ? effectiveChildren.map(child => {
+                if (child.name !== 'input') return child;
+                if (child.attributes?.type === 'checkbox') {
+                  const isChecked = checkboxDefaultIds?.includes(item.id) ? 'true' : 'false';
+                  return { ...child, attributes: { ...child.attributes, checked: isChecked } };
+                }
+                if (child.attributes?.type === 'radio') {
+                  const isChecked = radioDefaultId === item.id ? 'true' : 'false';
+                  return { ...child, attributes: { ...child.attributes, checked: isChecked } };
+                }
+                return child;
+              })
+              : effectiveChildren;
+
             return (
               <Tag
                 key={item.id}
@@ -2658,9 +2689,9 @@ const LayerItem: React.FC<{
               >
                 {textContent && textContent}
 
-                {effectiveChildren && effectiveChildren.length > 0 && (
+                {itemChildren && itemChildren.length > 0 && (
                   <LayerRenderer
-                    layers={effectiveChildren}
+                    layers={itemChildren}
                     onLayerClick={onLayerClick}
                     onLayerUpdate={onLayerUpdate}
                     onLayerHover={onLayerHover}

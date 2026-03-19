@@ -214,7 +214,8 @@ export interface LayerSettings {
   filterOnChange?: boolean; // For filter layers: trigger filtering on every input change (debounced)
   optionsSource?: {
     collectionId: string;
-    defaultItemId?: string; // item ID to pre-select as default
+    defaultItemId?: string; // item ID to pre-select as default (select elements)
+    defaultItemIds?: string[]; // item IDs to pre-check as defaults (checkbox groups)
     sortFieldId?: string; // field ID to sort options by (undefined = manual/insertion order)
     sortOrder?: 'asc' | 'desc'; // sort direction (defaults to 'asc')
   };

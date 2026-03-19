@@ -860,7 +860,10 @@ const CenterCanvas = React.memo(function CenterCanvas({
       layerList.forEach((layer) => {
         const collectionVariable = getCollectionVariable(layer);
         if (collectionVariable?.id) {
-          settings.push(`${layer.id}:${collectionVariable.id}:${collectionVariable.sort_by ?? ''}:${collectionVariable.sort_order ?? ''}:${collectionVariable.limit ?? ''}:${collectionVariable.offset ?? ''}`);
+          const opts = layer.settings?.optionsSource;
+          const sortBy = opts?.sortFieldId || collectionVariable.sort_by;
+          const sortOrder = opts?.sortOrder || collectionVariable.sort_order;
+          settings.push(`${layer.id}:${collectionVariable.id}:${sortBy ?? ''}:${sortOrder ?? ''}:${collectionVariable.limit ?? ''}:${collectionVariable.offset ?? ''}`);
         }
         if (layer.children && layer.children.length > 0) {
           settings.push(...extractCollectionSettings(layer.children));
@@ -886,11 +889,14 @@ const CenterCanvas = React.memo(function CenterCanvas({
         layerList.forEach((layer) => {
           const collectionVariable = getCollectionVariable(layer);
           if (collectionVariable?.id) {
+            const opts = layer.settings?.optionsSource;
+            const sortBy = opts?.sortFieldId || collectionVariable.sort_by;
+            const sortOrder = opts?.sortOrder || collectionVariable.sort_order;
             fetchLayerData(
               layer.id,
               collectionVariable.id,
-              collectionVariable.sort_by,
-              collectionVariable.sort_order,
+              sortBy,
+              sortOrder,
               collectionVariable.limit,
               collectionVariable.offset
             );

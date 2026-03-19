@@ -66,6 +66,13 @@ function isCheckboxWrapperLayer(layer: Layer | null): boolean {
   );
 }
 
+function isRadioWrapperLayer(layer: Layer | null): boolean {
+  if (!layer || layer.name !== 'div') return false;
+  return !!layer.children?.some(
+    (c) => c.name === 'input' && c.attributes?.type === 'radio'
+  );
+}
+
 interface SelectOptionsSettingsProps {
   layer: Layer | null;
   onLayerUpdate: (layerId: string, updates: Partial<Layer>) => void;
@@ -341,6 +348,7 @@ export default function SelectOptionsSettings({
 
   const isSelectLayer = layer?.name === 'select';
   const isCheckboxWrapper = isCheckboxWrapperLayer(layer);
+  const isRadioWrapper = isRadioWrapperLayer(layer);
   const optionsSource = layer?.settings?.optionsSource;
   const isCollectionSource = !!optionsSource?.collectionId;
   const explicitOptionsMode = layer?.settings?.selectOptionsMode;
@@ -380,13 +388,13 @@ export default function SelectOptionsSettings({
   const handleSourceChange = useCallback((value: string) => {
     if (!layer) return;
 
-    if (value === 'none' && isCheckboxWrapper) {
+    if (value === 'none' && (isCheckboxWrapper || isRadioWrapper)) {
       autoBindAppliedForRef.current = null;
       const { optionsSource: _, sortByCollectionId: _sb, sortByFieldIds: _sf, selectOptionsMode: _sm, ...restSettings } = layer.settings || {};
       const textChild = layer.children?.find(c => c.name === 'text');
       if (textChild) {
         onLayerUpdate(textChild.id, {
-          variables: { ...textChild.variables, text: { type: 'dynamic_text' as const, data: { content: 'Checkbox label' } } },
+          variables: { ...textChild.variables, text: { type: 'dynamic_text' as const, data: { content: isRadioWrapper ? 'Radio label' : 'Checkbox label' } } },
         });
       }
       onLayerUpdate(layer.id, {
@@ -422,7 +430,7 @@ export default function SelectOptionsSettings({
         },
         children: SORT_ORDER_PRESET_OPTIONS.map((opt, idx) => buildOptionLayer(`${layer.id}-preset-${idx}-${generateId('opt')}`, opt.label, opt.value)),
       });
-    } else if (isCheckboxWrapper) {
+    } else if (isCheckboxWrapper || isRadioWrapper) {
       const { sortByCollectionId: _sb, sortByFieldIds: _sf, ...restSettings } = layer.settings || {};
       onLayerUpdate(layer.id, {
         settings: {
@@ -442,7 +450,7 @@ export default function SelectOptionsSettings({
         },
       });
     }
-  }, [layer, isCheckboxWrapper, onLayerUpdate]);
+  }, [layer, isCheckboxWrapper, isRadioWrapper, onLayerUpdate]);
 
   const handleSortByCollectionChange = useCallback((collectionId: string) => {
     if (!layer) return;
@@ -500,6 +508,14 @@ export default function SelectOptionsSettings({
   const handleDefaultItemChange = useCallback((value: string) => {
     patchOptionsSource({ defaultItemId: value === 'none' ? undefined : value });
   }, [patchOptionsSource]);
+
+  const handleToggleDefaultCheckboxItem = useCallback((itemId: string) => {
+    const current = optionsSource?.defaultItemIds || [];
+    const updated = current.includes(itemId)
+      ? current.filter(id => id !== itemId)
+      : [...current, itemId];
+    patchOptionsSource({ defaultItemIds: updated.length > 0 ? updated : undefined });
+  }, [patchOptionsSource, optionsSource?.defaultItemIds]);
 
   const handleSortFieldChange = useCallback((value: string) => {
     patchOptionsSource({ sortFieldId: value === 'none' ? undefined : value, sortOrder: value === 'none' ? undefined : (optionsSource?.sortOrder || 'asc') });
@@ -749,9 +765,10 @@ export default function SelectOptionsSettings({
   // Track which collection has already had its text child auto-bound to prevent re-binding
   const autoBindAppliedForRef = useRef<string | null>(null);
 
-  // Checkbox wrapper: auto-bind text child to the display field once when a collection is first assigned
+  // Checkbox/radio wrapper: auto-bind text child to the display field once when a collection is first assigned
+  const isInputGroupWrapper = isCheckboxWrapper || isRadioWrapper;
   useEffect(() => {
-    if (!layer || !isCheckboxWrapper || !isCollectionSource || !displayField) return;
+    if (!layer || !isInputGroupWrapper || !isCollectionSource || !displayField) return;
     const collectionId = layer.settings?.optionsSource?.collectionId;
     if (!collectionId || autoBindAppliedForRef.current === collectionId) return;
     const textChild = layer.children?.find(c => c.name === 'text');
@@ -781,9 +798,9 @@ export default function SelectOptionsSettings({
       },
     });
     autoBindAppliedForRef.current = collectionId;
-  }, [layer?.id, isCheckboxWrapper, isCollectionSource, displayField, layer?.children, onLayerUpdate]);
+  }, [layer?.id, isInputGroupWrapper, isCollectionSource, displayField, layer?.children, onLayerUpdate]);
 
-  if (!layer || (!isSelectLayer && !isCheckboxWrapper)) {
+  if (!layer || (!isSelectLayer && !isCheckboxWrapper && !isRadioWrapper)) {
     return null;
   }
 
@@ -906,45 +923,101 @@ export default function SelectOptionsSettings({
             <div className="grid grid-cols-3 items-center">
               <Label variant="muted">Default</Label>
               <div className="col-span-2">
-                <Select
-                  value={optionsSource?.defaultItemId || 'none'}
-                  onValueChange={handleDefaultItemChange}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="None" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">None</SelectItem>
-                    {sourceItems.map((item) => (
-                      <SelectItem key={item.id} value={item.id}>
-                        {getItemDisplayName(item, displayField)}
-                      </SelectItem>
-                    ))}
-                    {sourceItemsLoading && (
-                      <div className="px-2 py-2 text-xs text-muted-foreground">Loading options...</div>
-                    )}
-                    {!sourceItemsLoading && sourceItems.length === 0 && (
-                      <div className="px-2 py-2 text-xs text-muted-foreground">No items found</div>
-                    )}
-                    {sourceItemsHasMore && (
-                      <div className="px-1 py-1">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="w-full justify-center text-xs"
-                          disabled={sourceItemsLoadingMore}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            fetchSourceItems({ reset: false, offset: sourceItemsOffset });
-                          }}
+                {isCheckboxWrapper ? (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="outline" size="sm"
+                        className="w-full justify-between font-normal"
+                      >
+                        <span className="truncate">
+                          {(optionsSource?.defaultItemIds?.length || 0) > 0
+                            ? `${optionsSource!.defaultItemIds!.length} selected`
+                            : 'None'}
+                        </span>
+                        <Icon
+                          name="chevronDown"
+                          className="size-3.5 shrink-0 opacity-50"
+                        />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent className="w-[var(--radix-dropdown-menu-trigger-width)]">
+                      {sourceItems.map((item) => (
+                        <DropdownMenuCheckboxItem
+                          key={item.id}
+                          checked={(optionsSource?.defaultItemIds || []).includes(item.id)}
+                          onCheckedChange={() => handleToggleDefaultCheckboxItem(item.id)}
+                          onSelect={(e) => e.preventDefault()}
                         >
-                          {sourceItemsLoadingMore ? 'Loading...' : 'Load more'}
-                        </Button>
-                      </div>
-                    )}
-                  </SelectContent>
-                </Select>
+                          {getItemDisplayName(item, displayField)}
+                        </DropdownMenuCheckboxItem>
+                      ))}
+                      {sourceItemsLoading && (
+                        <div className="px-2 py-2 text-xs text-muted-foreground">Loading options...</div>
+                      )}
+                      {!sourceItemsLoading && sourceItems.length === 0 && (
+                        <div className="px-2 py-2 text-xs text-muted-foreground">No items found</div>
+                      )}
+                      {sourceItemsHasMore && (
+                        <div className="px-1 py-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="w-full justify-center text-xs"
+                            disabled={sourceItemsLoadingMore}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              fetchSourceItems({ reset: false, offset: sourceItemsOffset });
+                            }}
+                          >
+                            {sourceItemsLoadingMore ? 'Loading...' : 'Load more'}
+                          </Button>
+                        </div>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                ) : (
+                  <Select
+                    value={optionsSource?.defaultItemId || 'none'}
+                    onValueChange={handleDefaultItemChange}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="None" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      {sourceItems.map((item) => (
+                        <SelectItem key={item.id} value={item.id}>
+                          {getItemDisplayName(item, displayField)}
+                        </SelectItem>
+                      ))}
+                      {sourceItemsLoading && (
+                        <div className="px-2 py-2 text-xs text-muted-foreground">Loading options...</div>
+                      )}
+                      {!sourceItemsLoading && sourceItems.length === 0 && (
+                        <div className="px-2 py-2 text-xs text-muted-foreground">No items found</div>
+                      )}
+                      {sourceItemsHasMore && (
+                        <div className="px-1 py-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="w-full justify-center text-xs"
+                            disabled={sourceItemsLoadingMore}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              fetchSourceItems({ reset: false, offset: sourceItemsOffset });
+                            }}
+                          >
+                            {sourceItemsLoadingMore ? 'Loading...' : 'Load more'}
+                          </Button>
+                        </div>
+                      )}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
             </div>
 
