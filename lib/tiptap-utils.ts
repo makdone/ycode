@@ -75,6 +75,8 @@ export function extractInlineNodesFromRichText(
     } else if (node.type === 'richTextComponent') {
       // Preserve embedded component nodes as-is for block rendering
       result.push(node);
+    } else if (node.type === 'horizontalRule') {
+      result.push(node);
     } else if (node.type === 'listItem') {
       // List items should be handled by their parent list
       // But if we encounter one directly, extract its content
@@ -114,7 +116,7 @@ export function contentHasBlockElements(content: any): boolean {
   // Handle Tiptap doc structure
   if (content.type === 'doc' && Array.isArray(content.content)) {
     return content.content.some((block: any) =>
-      block.type === 'bulletList' || block.type === 'orderedList' || block.type === 'richTextComponent'
+      block.type === 'bulletList' || block.type === 'orderedList' || block.type === 'richTextComponent' || block.type === 'horizontalRule'
     );
   }
 

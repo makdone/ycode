@@ -290,6 +290,11 @@ const CLASS_PROPERTY_MAP: Record<string, RegExp> = {
   divideStyle: /^divide-(solid|dashed|dotted|double|none)$/,
   divideColor: /^divide-((\w+)(-\d+)?|\[(?:#|rgb|color:var).+\])(\/\d+)?$/,
 
+  // Outline
+  outlineWidth: /^outline(-\d+|-\[(?!#|rgb|color:var).+\])?$/,
+  outlineColor: /^outline-((\w+)(-\d+)?|\[(?:#|rgb|color:var).+\])(\/\d+)?$/,
+  outlineOffset: /^outline-offset-(\d+|-?\[.+\])$/,
+
   // Effects
   opacity: /^opacity-(\d+|\[.+\])$/,
   boxShadow: /^shadow(-none|-sm|-md|-lg|-xl|-2xl|-inner|-\[.+\])?$/,
@@ -781,6 +786,25 @@ export function propertyToClass(
           return `divide-[${value}]`;
         }
         return `divide-${value}`;
+      case 'outlineWidth':
+        return formatMeasurementClass(value, 'outline');
+      case 'outlineColor':
+        if (value.startsWith('color:var(')) {
+          return `outline-[${value}]`;
+        }
+        if (value.startsWith('var(')) {
+          return `outline-[color:${value}]`;
+        }
+        if (value.match(/^#|^rgb/)) {
+          const parts = value.split('/');
+          if (parts.length === 2) {
+            return `outline-[${parts[0]}]/${parts[1]}`;
+          }
+          return `outline-[${value}]`;
+        }
+        return `outline-${value}`;
+      case 'outlineOffset':
+        return formatMeasurementClass(value, 'outline-offset');
     }
   }
 
@@ -1488,6 +1512,26 @@ export function classesToDesign(classes: string | string[]): Layer['design'] {
     if (cls.startsWith('divide-[#') || cls.startsWith('divide-[rgb') || cls.startsWith('divide-[color:var(')) {
       const value = extractArbitraryValueWithOpacity(cls);
       if (value) design.borders!.divideColor = value;
+    }
+
+    // Outline Width
+    if (cls.startsWith('outline-[') && !cls.includes('#') && !cls.includes('rgb') && !cls.includes('color:var')) {
+      const value = extractArbitraryValue(cls);
+      if (value) design.borders!.outlineWidth = value;
+    } else if (cls.match(/^outline-\d+$/)) {
+      design.borders!.outlineWidth = cls.replace('outline-', '') + 'px';
+    }
+
+    // Outline Color
+    if (cls.startsWith('outline-[#') || cls.startsWith('outline-[rgb') || cls.startsWith('outline-[color:var(')) {
+      const value = extractArbitraryValueWithOpacity(cls);
+      if (value) design.borders!.outlineColor = value;
+    }
+
+    // Outline Offset
+    if (cls.startsWith('outline-offset-')) {
+      const value = extractArbitraryValue(cls) || cls.replace('outline-offset-', '') + 'px';
+      if (value) design.borders!.outlineOffset = value;
     }
 
     // ===== BACKGROUNDS =====

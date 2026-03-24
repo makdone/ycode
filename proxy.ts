@@ -110,10 +110,15 @@ async function verifyApiAuth(request: NextRequest): Promise<NextResponse | null>
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Protect API routes with auth
-  if (pathname.startsWith('/ycode/api')) {
+  // Protect API and preview routes with auth
+  if (pathname.startsWith('/ycode/api') || pathname.startsWith('/ycode/preview')) {
     const authResponse = await verifyApiAuth(request);
-    if (authResponse) return authResponse;
+    if (authResponse) {
+      if (pathname.startsWith('/ycode/preview')) {
+        return NextResponse.redirect(new URL('/ycode', request.url));
+      }
+      return authResponse;
+    }
   }
 
   const isPublicPage = !pathname.startsWith('/ycode')

@@ -172,7 +172,7 @@ function remapVariableCollectionLayerIds(vars: LayerVariables, idMap: Map<string
   if (vars.design) {
     let designChanged = false;
     const newDesign = { ...vars.design };
-    for (const key of ['backgroundColor', 'color', 'borderColor', 'divideColor', 'textDecorationColor'] as const) {
+    for (const key of ['backgroundColor', 'color', 'borderColor', 'divideColor', 'outlineColor', 'textDecorationColor'] as const) {
       if (vars.design[key]) {
         const r = remapDesignColor(vars.design[key], idMap);
         if (r !== vars.design[key]) { (newDesign as any)[key] = r; designChanged = true; }

@@ -207,23 +207,25 @@ export function SelectionOverlay({
     let mutationTimeout: ReturnType<typeof setTimeout> | null = null;
     let mutationRafId: number | null = null;
     const mutationObserver = new MutationObserver((mutations) => {
-      // Check if any mutation is a structural change (element added/removed)
       const hasStructuralChange = mutations.some(m => m.type === 'childList');
 
+      // Cancel any pending updates to avoid double-firing
+      if (mutationTimeout) clearTimeout(mutationTimeout);
+      if (mutationRafId) {
+        cancelAnimationFrame(mutationRafId);
+        mutationRafId = null;
+      }
+
       if (hasStructuralChange) {
-        hideAllOutlines();
-
-        if (mutationTimeout) clearTimeout(mutationTimeout);
-
-        // Show outlines after DOM settles
+        // Structural DOM changes: defer update to let DOM settle
+        // Don't hide outlines first — avoids blinking on re-selection
         mutationTimeout = setTimeout(() => {
           updateAllOutlines(isDraggingRef.current);
-        }, 150);
+        }, 50);
       } else {
         // Attribute-only changes (class/style) - defer to next frame so
         // Tailwind Browser CDN has time to generate CSS for new classes
         // and the browser can reflow before we measure dimensions
-        if (mutationRafId) cancelAnimationFrame(mutationRafId);
         mutationRafId = requestAnimationFrame(() => {
           mutationRafId = requestAnimationFrame(() => {
             updateAllOutlines(isDraggingRef.current);

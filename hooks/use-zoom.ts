@@ -10,6 +10,10 @@ interface UseZoomOptions {
   minZoom?: number;
   maxZoom?: number;
   zoomStep?: number;
+  /** When false, keyboard shortcuts and wheel zoom are disabled (e.g. preview mode active) */
+  shortcutsEnabled?: boolean;
+  /** Optional iframe ref — attaches wheel/gesture listeners to its contentDocument (separate browsing context) */
+  iframeRef?: React.RefObject<HTMLIFrameElement | null>;
 }
 
 interface UseZoomResult {
@@ -32,6 +36,8 @@ export function useZoom({
   minZoom = 10,
   maxZoom = 200,
   zoomStep = 10,
+  shortcutsEnabled = true,
+  iframeRef,
 }: UseZoomOptions): UseZoomResult {
   const [zoom, setZoom] = useState(100);
   const [zoomMode, setZoomMode] = useState<ZoomMode>('autofit'); // Default to autofit
@@ -159,6 +165,8 @@ export function useZoom({
 
   // Keyboard shortcuts - capture at window level with high priority
   useEffect(() => {
+    if (!shortcutsEnabled) return;
+
     const handleKeyDown = (e: KeyboardEvent) => {
       // Check for Cmd (Mac) or Ctrl (Windows/Linux)
       const isCmdOrCtrl = e.metaKey || e.ctrlKey;
@@ -205,11 +213,13 @@ export function useZoom({
     // Add listener with capture phase to intercept before other handlers
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [zoomIn, zoomOut, resetZoom, zoomToFit, autofit]);
+  }, [shortcutsEnabled, zoomIn, zoomOut, resetZoom, zoomToFit, autofit]);
 
   // Ctrl/Cmd + wheel to zoom (includes trackpad pinch) - GLOBAL, works everywhere
   // Also prevents native browser zoom COMPLETELY
   useEffect(() => {
+    if (!shortcutsEnabled) return;
+
     const handleWheel = (e: WheelEvent) => {
       if (e.ctrlKey || e.metaKey) {
         // ALWAYS prevent default browser zoom, everywhere
@@ -255,7 +265,63 @@ export function useZoom({
       document.removeEventListener('gesturestart', handleGestureStart, { capture: true } as EventListenerOptions);
       document.removeEventListener('gesturechange', handleGestureChange, { capture: true } as EventListenerOptions);
     };
-  }, [minZoom, maxZoom]);
+  }, [shortcutsEnabled, minZoom, maxZoom]);
+
+  // Mirror wheel/gesture listeners onto the iframe's contentDocument since
+  // events inside an iframe don't bubble to the parent document.
+  useEffect(() => {
+    if (!shortcutsEnabled || !iframeRef?.current) return;
+
+    const iframe = iframeRef.current;
+    let iframeDoc: Document | null = null;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        const zoomDelta = -e.deltaY * 0.5;
+        setZoom((current) => Math.min(Math.max(current + zoomDelta, minZoom), maxZoom));
+        setZoomMode('custom');
+      }
+    };
+
+    const preventGesture = (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+
+    const attach = () => {
+      try {
+        iframeDoc = iframe.contentDocument;
+        if (!iframeDoc) return;
+        iframeDoc.addEventListener('wheel', handleWheel, { passive: false, capture: true });
+        iframeDoc.addEventListener('gesturestart', preventGesture, { passive: false, capture: true });
+        iframeDoc.addEventListener('gesturechange', preventGesture, { passive: false, capture: true });
+      } catch {
+        // Cross-origin iframe
+      }
+    };
+
+    const detach = () => {
+      if (!iframeDoc) return;
+      try {
+        iframeDoc.removeEventListener('wheel', handleWheel, { capture: true } as EventListenerOptions);
+        iframeDoc.removeEventListener('gesturestart', preventGesture, { capture: true } as EventListenerOptions);
+        iframeDoc.removeEventListener('gesturechange', preventGesture, { capture: true } as EventListenerOptions);
+      } catch {
+        // Ignore
+      }
+      iframeDoc = null;
+    };
+
+    iframe.addEventListener('load', attach);
+    if (iframe.contentDocument?.readyState === 'complete') attach();
+
+    return () => {
+      detach();
+      iframe.removeEventListener('load', attach);
+    };
+  }, [shortcutsEnabled, iframeRef, minZoom, maxZoom]);
 
   return {
     zoom,

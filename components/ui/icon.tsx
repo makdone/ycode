@@ -15,11 +15,8 @@ export interface IconProps extends React.SVGProps<SVGSVGElement> {
     | 'select' | 'checkbox' | 'radio' | 'zap' | 'zap-outline' | 'loopAlternate' | 'loopRepeat' | 'globe' | 'ease-linear' | 'ease-in' | 'ease-in-out' | 'ease-out' | 'ease-back-in'
     | 'ease-back-in-out' | 'ease-back-out' | 'none' | 'play' | 'stop' | 'info' | 'preview' | 'linear' | 'radial' | 'color' | 'fill-image' | 'eyedrop' | 'calendar' | 'hash'
     | 'paintbrush' | 'swatch' | 'cube' | 'triangle-down' | 'triangle-right' | 'plus-circle' | 'plus-circle-solid' | 'detach' | 'email' | 'phone' | 'paperclip' | 'unlink' | 'map'
-    | 'paragraph' | 'droplet' | 'expand' | 'collapse' | 'filter' | 'crosshair'
-    | 'lightbox'
-    | 'slider' | 'slide' | 'slides' | 'slide-button-prev' | 'slide-button-next' | 'slide-bullets' | 'slide-bullet' | 'slide-navigation' | 'slide-fraction'
-    | 'loop-alternate' | 'loop-repeat'
-    | 'listItem'
+    | 'paragraph' | 'droplet' | 'expand' | 'collapse' | 'filter' | 'crosshair' | 'lightbox' | 'slider' | 'slide' | 'slides' | 'slide-button-prev' | 'slide-button-next'
+    | 'slide-bullets' | 'slide-bullet' | 'slide-navigation' | 'slide-fraction' | 'loop-alternate' | 'loop-repeat' | 'listItem' | 'external-link'
   );
 }
 
@@ -962,6 +959,9 @@ const ICONS: Record<IconProps['name'], React.ReactNode> = {
       <path d="M4,3 C4.27614237,3 4.5,3.22385763 4.5,3.5 C4.5,3.74545989 4.32312484,3.94960837 4.08987563,3.99194433 L4,4 L3,4 C1.8954305,4 1,4.8954305 1,6 C1,7.0543618 1.81587779,7.91816512 2.85073766,7.99451426 L3,8 L9,8 C10.1045695,8 11,7.1045695 11,6 C11,4.9456382 10.1841222,4.08183488 9.14926234,4.00548574 L9,4 L8.5017185,4 C8.22557613,4 8.0017185,3.77614237 8.0017185,3.5 C8.0017185,3.25454011 8.17859367,3.05039163 8.41184287,3.00805567 L8.5017185,3 L9,3 C10.6568542,3 12,4.34314575 12,6 C12,7.59768088 10.75108,8.90366088 9.17627279,8.99490731 L9,9 L3,9 C1.34314575,9 0,7.65685425 0,6 C0,4.40231912 1.24891996,3.09633912 2.82372721,3.00509269 L3,3 L4,3 Z" opacity="0.5" />
       <path d="M5.80728852,2.36874622 L7.45327186,4.34392623 C7.59469749,4.51363699 7.57176787,4.76586288 7.40205711,4.90728851 C7.3301711,4.96719351 7.23955795,5 7.14598334,5 L3.85401666,5 C3.63310275,5 3.45401665,4.8209139 3.45401665,4.59999999 C3.45401665,4.50642539 3.48682314,4.41581223 3.54672814,4.34392623 L5.19271148,2.36874622 C5.33413712,2.19903546 5.586363,2.17610583 5.75607376,2.31753147 C5.77465899,2.33301916 5.79180083,2.35016099 5.80728852,2.36874622 Z" transform="translate(5.500000, 3.500000) rotate(90.000000) translate(-5.500000, -3.500000)" />
     </>
+  ),
+  'external-link': (
+    <path d="M5,2 L5,3 L2.5,3 C1.72030388,3 1.07955132,3.59488808 1.00686658,4.35553999 L1,4.5 L1,9.5 C1,10.2796961 1.59488808,10.9204487 2.35553999,10.9931334 L2.5,11 L7.5,11 C8.27969612,11 8.92044868,10.4051119 8.99313342,9.64446001 L9,9.5 L9,7 L10,7 L10,9.5 C10,10.8254834 8.96846406,11.9100387 7.66437569,11.9946823 L7.5,12 L2.5,12 C1.1745166,12 0.089961328,10.9684641 0.00531767968,9.66437569 L0,9.5 L0,4.5 C0,3.1745166 1.03153594,2.08996133 2.33562431,2.00531768 L2.5,2 L5,2 Z M12,0 L12,5 L11,5 L11,1.753 L5.7,7.00090117 L5,6.29379439 L10.341,1 L7,1 L7,0 L12,0 Z" />
   ),
 };
 

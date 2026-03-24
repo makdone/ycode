@@ -147,7 +147,6 @@ function ElementButton({
 interface ElementLibraryProps {
   isOpen: boolean;
   onClose: () => void;
-  defaultTab?: 'elements' | 'layouts' | 'components';
   liveLayerUpdates?: UseLiveLayerUpdatesReturn | null;
 }
 
@@ -275,7 +274,7 @@ async function restoreInlinedComponents(
   return newLayer;
 }
 
-export default function ElementLibrary({ isOpen, onClose, defaultTab = 'elements', liveLayerUpdates }: ElementLibraryProps) {
+export default function ElementLibrary({ isOpen, onClose, liveLayerUpdates }: ElementLibraryProps) {
   const { addLayerFromTemplate, updateLayer, setDraftLayers, draftsByPageId, pages } = usePagesStore();
   const { currentPageId, selectedLayerId, setSelectedLayerId, editingComponentId, activeBreakpoint, pushComponentNavigation, startCanvasDrag, endCanvasDrag } = useEditorStore();
   const { components, componentDrafts, updateComponentDraft, deleteComponent, getDeletePreview, loadComponentDraft, getComponentById, loadComponents } = useComponentsStore();
@@ -287,16 +286,16 @@ export default function ElementLibrary({ isOpen, onClose, defaultTab = 'elements
   const [deletePreviewInfo, setDeletePreviewInfo] = useState<{ pageCount: number; componentCount: number } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [activeTab, setActiveTab] = React.useState<'elements' | 'layouts' | 'components'>(() => {
-    // Try to load from sessionStorage first
     if (typeof window !== 'undefined') {
       const saved = sessionStorage.getItem('elementLibrary-activeTab');
       if (saved && ['elements', 'layouts', 'components'].includes(saved)) {
         return saved as 'elements' | 'layouts' | 'components';
       }
     }
-    return defaultTab;
+    return 'elements';
   });
   const [componentSearch, setComponentSearch] = useState('');
+  const tabRefs = React.useRef<Record<string, HTMLDivElement | null>>({});
 
   const circularComponentIds = useMemo(() => {
     if (!editingComponentId) return new Set<string>();
@@ -338,10 +337,17 @@ export default function ElementLibrary({ isOpen, onClose, defaultTab = 'elements
     return new Set(allCategories.filter(cat => cat !== 'Navigation' && cat !== 'Hero' && cat !== 'Blog header' && cat !== 'Blog posts'));
   });
 
-  // Sync active tab when defaultTab prop changes (e.g., "Add layout" button, keyboard shortcut)
+  // Sync tab when explicitly requested (e.g., "Add layout" button)
   React.useEffect(() => {
-    setActiveTab(defaultTab);
-  }, [defaultTab]);
+    const handleToggle = (event: Event) => {
+      const tab = (event as CustomEvent<{ tab?: string }>).detail?.tab;
+      if (tab && ['elements', 'layouts', 'components'].includes(tab)) {
+        setActiveTab(tab as 'elements' | 'layouts' | 'components');
+      }
+    };
+    window.addEventListener('toggleElementLibrary', handleToggle);
+    return () => window.removeEventListener('toggleElementLibrary', handleToggle);
+  }, []);
 
   // Persist active tab to sessionStorage
   React.useEffect(() => {
@@ -1370,13 +1376,20 @@ export default function ElementLibrary({ isOpen, onClose, defaultTab = 'elements
 
   const deleteConfirmDescription = `Are you sure you want to delete "${componentName}"? ${usageSuffix}`;
 
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed left-64 top-14 bottom-0 w-64 bg-background border-r z-50 flex flex-col">
+    <div
+      className={cn(
+        'fixed left-64 top-14 bottom-0 w-64 bg-background border-r z-50 flex flex-col',
+        !isOpen && 'hidden'
+      )}
+    >
         {/* Tabs */}
         <Tabs
-          value={activeTab} onValueChange={(value) => setActiveTab(value as 'elements' | 'layouts' | 'components')}
+          value={activeTab} onValueChange={(value) => {
+            const tab = value as 'elements' | 'layouts' | 'components';
+            setActiveTab(tab);
+            tabRefs.current[tab]?.scrollTo(0, 0);
+          }}
           className="flex flex-col h-full overflow-hidden gap-0"
         >
           <div className="flex flex-col shrink-0 gap-2">
@@ -1391,7 +1404,10 @@ export default function ElementLibrary({ isOpen, onClose, defaultTab = 'elements
             <hr className="mt-2 mb-0 mx-4 shrink-0" />
           </div>
 
-          <TabsContent value="elements" className="flex flex-col divide-y overflow-y-auto flex-1 px-4 pb-4 no-scrollbar">
+          <TabsContent
+            value="elements" forceMount
+            ref={(el) => { tabRefs.current.elements = el; }} className="flex flex-col divide-y overflow-y-auto flex-1 px-4 pb-4 no-scrollbar"
+          >
             {Object.entries(elementCategories).map(([categoryName, elements]) => (
               <div key={categoryName} className="flex flex-col pb-5">
                 <header className="py-5">
@@ -1414,7 +1430,10 @@ export default function ElementLibrary({ isOpen, onClose, defaultTab = 'elements
             ))}
           </TabsContent>
 
-          <TabsContent value="layouts" className="flex flex-col overflow-y-auto flex-1 px-4 pb-4 no-scrollbar">
+          <TabsContent
+            value="layouts" forceMount
+            ref={(el) => { tabRefs.current.layouts = el; }} className="flex flex-col overflow-y-auto flex-1 px-4 pb-4 no-scrollbar"
+          >
             {getAllLayoutKeys().length === 0 ? (
               <Empty>
                 <EmptyTitle>No layouts available</EmptyTitle>
@@ -1440,8 +1459,7 @@ export default function ElementLibrary({ isOpen, onClose, defaultTab = 'elements
                         />
                         <Label className="cursor-pointer">{category}</Label>
                       </header>
-                      {!isCollapsed && (
-                        <div className="grid grid-cols-1 gap-1.5 pb-5">
+                      <div className={cn('grid grid-cols-1 gap-1.5 pb-5', isCollapsed && 'hidden')}>
                       {layoutKeys.map((layoutKey) => {
                         const previewImage = getLayoutPreviewImage(layoutKey);
 
@@ -1463,6 +1481,7 @@ export default function ElementLibrary({ isOpen, onClose, defaultTab = 'elements
                                     width={640}
                                     height={262}
                                     alt="Layout preview"
+                                    loading="eager"
                                     className="object-contain w-full h-full rounded pointer-events-none"
                                   />
                                 )}
@@ -1496,7 +1515,6 @@ export default function ElementLibrary({ isOpen, onClose, defaultTab = 'elements
                         );
                       })}
                     </div>
-                      )}
                 </div>
                   );
                 })}
@@ -1504,7 +1522,10 @@ export default function ElementLibrary({ isOpen, onClose, defaultTab = 'elements
             )}
           </TabsContent>
 
-          <TabsContent value="components" className="flex flex-col overflow-y-auto flex-1 px-4 pb-4 no-scrollbar">
+          <TabsContent
+            value="components" forceMount
+            ref={(el) => { tabRefs.current.components = el; }} className="flex flex-col overflow-y-auto flex-1 px-4 pb-4 no-scrollbar"
+          >
             {components.length === 0 ? (
               <Empty>
                 <EmptyTitle>No components yet</EmptyTitle>

@@ -236,6 +236,9 @@ export function useEditorUrl() {
       // Preserve existing query params (e.g., preview mode)
       const currentParams = new URLSearchParams(window.location.search);
 
+      // Remove edit param — layers view is never in edit mode
+      currentParams.delete('edit');
+
       // Update/set specific params (use provided values or current values or defaults)
       currentParams.set('view', view || currentParams.get('view') || 'desktop');
       currentParams.set('tab', rightTab || currentParams.get('tab') || 'design');
@@ -251,6 +254,9 @@ export function useEditorUrl() {
     (pageId: string, view?: string, rightTab?: string, layerId?: string) => {
       // Preserve existing query params (e.g., preview mode)
       const currentParams = new URLSearchParams(window.location.search);
+
+      // Remove edit param — navigating to page view means exiting edit mode
+      currentParams.delete('edit');
 
       // Update/set specific params (use provided values or current values or defaults)
       currentParams.set('view', view || currentParams.get('view') || 'desktop');
@@ -401,13 +407,14 @@ export function useEditorUrl() {
         }
       }
 
-      // Only navigate if something actually changed
+      // Update URL without Next.js navigation to avoid racing with router.push calls
       if (hasChanges) {
         const query = newSearchParams.toString();
-        router.replace(`${pathname}${query ? `?${query}` : ''}`);
+        const newUrl = `${window.location.pathname}${query ? `?${query}` : ''}`;
+        window.history.replaceState(null, '', newUrl);
       }
     },
-    [router, pathname]
+    []
   );
 
   return {

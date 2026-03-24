@@ -49,6 +49,7 @@ export default function ComponentCard({
           width={640}
           height={262}
           unoptimized
+          loading="eager"
           className="object-contain w-full h-full rounded pointer-events-none"
         />
       </button>

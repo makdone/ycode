@@ -66,8 +66,8 @@ function TabsContent({
       data-slot="tabs-content"
       className={cn(
         'flex-1 outline-none',
-        // When forceMount is used, hide inactive tabs with CSS (!important to override flex)
-        forceMount && 'data-[state=inactive]:!hidden',
+        // When forceMount is used, collapse inactive tabs but keep them rendered so images preload
+        forceMount && 'data-[state=inactive]:flex-none! data-[state=inactive]:h-0! data-[state=inactive]:p-0! data-[state=inactive]:overflow-hidden! data-[state=inactive]:pointer-events-none!',
         className
       )}
       forceMount={forceMount}

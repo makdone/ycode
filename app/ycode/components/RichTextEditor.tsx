@@ -30,6 +30,7 @@ import ListItem from '@tiptap/extension-list-item';
 import Heading from '@tiptap/extension-heading';
 import Blockquote from '@tiptap/extension-blockquote';
 import Code from '@tiptap/extension-code';
+import HorizontalRule from '@tiptap/extension-horizontal-rule';
 import { cn } from '@/lib/utils';
 import type { CollectionField, Collection } from '@/types';
 import {
@@ -374,6 +375,7 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(({
         ListItem,
         Blockquote,
         Code,
+        HorizontalRule,
         RichTextImage,
       ];
 

@@ -533,3 +533,29 @@ export function looksLikePhone(value: string): boolean {
   const digitCount = (trimmed.match(/\d/g) || []).length;
   return /^[\d\s\-()+.]*$/.test(trimmed) && digitCount >= 7;
 }
+
+export interface ResolvedLinkAttrs {
+  href: string;
+  target: string;
+  rel?: string;
+  download?: boolean;
+}
+
+/** Resolve link settings to HTML anchor attributes (href, target, rel, download) */
+export function resolveLinkAttrs(
+  linkSettings: LinkSettings,
+  context: LinkResolutionContext
+): ResolvedLinkAttrs | null {
+  const href = generateLinkHref(linkSettings, context);
+  if (!href) return null;
+
+  const target = linkSettings.target || '_self';
+  const rel = linkSettings.rel || (target === '_blank' ? 'noopener noreferrer' : undefined);
+
+  return {
+    href,
+    target,
+    ...(rel && { rel }),
+    ...(linkSettings.download && { download: linkSettings.download }),
+  };
+}

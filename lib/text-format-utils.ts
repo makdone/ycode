@@ -187,6 +187,13 @@ export const DEFAULT_TEXT_STYLES: Record<string, TextStyle> = {
       borders: { borderRadius: '4px' },
     },
   },
+  horizontalRule: {
+    label: 'Separator',
+    classes: 'border-t-[1px] border-[#aeaeae]',
+    design: {
+      borders: { borderTopWidth: '1px', borderColor: '#aeaeae' },
+    },
+  },
 };
 
 /**
@@ -779,6 +786,17 @@ function renderBlock(
       imgProps['data-asset-id'] = block.attrs.assetId;
     }
     return React.createElement('img', imgProps);
+  }
+
+  if (block.type === 'horizontalRule') {
+    const hrProps: Record<string, any> = {
+      key,
+      className: getTextStyleClasses(textStyles, 'horizontalRule'),
+    };
+    if (isEditMode) {
+      hrProps['data-style'] = 'horizontalRule';
+    }
+    return React.createElement('hr', hrProps);
   }
 
   // Handle embedded component blocks

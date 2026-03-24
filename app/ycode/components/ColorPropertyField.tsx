@@ -14,7 +14,7 @@ import type { Collection, CollectionField, CollectionFieldType, FieldVariable, D
 import type { FieldGroup, FieldSourceType } from '@/lib/collection-field-utils';
 
 /** Design property names that can be bound to color fields */
-export type ColorDesignProperty = 'backgroundColor' | 'color' | 'borderColor' | 'divideColor' | 'textDecorationColor' | 'placeholderColor';
+export type ColorDesignProperty = 'backgroundColor' | 'color' | 'borderColor' | 'divideColor' | 'outlineColor' | 'textDecorationColor' | 'placeholderColor';
 
 interface ColorPropertyFieldProps {
   value: string;

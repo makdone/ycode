@@ -94,6 +94,9 @@ export interface BordersDesign {
   divideY?: string;
   divideStyle?: string;
   divideColor?: string;
+  outlineWidth?: string;
+  outlineColor?: string;
+  outlineOffset?: string;
 }
 
 export interface BackgroundsDesign {
@@ -433,6 +436,7 @@ export interface LayerVariables {
     color?: DesignColorVariable; // text color
     borderColor?: DesignColorVariable;
     divideColor?: DesignColorVariable;
+    outlineColor?: DesignColorVariable;
     textDecorationColor?: DesignColorVariable;
     placeholderColor?: DesignColorVariable;
   };

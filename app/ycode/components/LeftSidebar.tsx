@@ -21,7 +21,7 @@ import { usePagesStore } from '@/stores/usePagesStore';
 import { resetBindingsAfterMove } from '@/lib/layer-utils';
 
 // 5.5 Hooks
-import { useEditorUrl, useEditorActions } from '@/hooks/use-editor-url';
+import { useEditorUrl } from '@/hooks/use-editor-url';
 import type { EditorTab } from '@/hooks/use-editor-url';
 import { useLayerLocks } from '@/hooks/use-layer-locks';
 
@@ -51,10 +51,8 @@ const LeftSidebar = React.memo(function LeftSidebar({
   liveLayerUpdates,
   liveComponentUpdates,
 }: LeftSidebarProps) {
-  const { sidebarTab, urlState } = useEditorUrl();
-  const { navigateToLayers, navigateToPage } = useEditorActions();
+  const { sidebarTab } = useEditorUrl();
   const [showElementLibrary, setShowElementLibrary] = useState(false);
-  const [elementLibraryTab, setElementLibraryTab] = useState<'elements' | 'layouts' | 'components'>('elements');
   const [assetMessage, setAssetMessage] = useState<string | null>(null);
 
   // Optimize store subscriptions - scoped to current page only
@@ -71,25 +69,18 @@ const LeftSidebar = React.memo(function LeftSidebar({
   const editingComponentId = useEditorStore((state) => state.editingComponentId);
   const setActiveSidebarTab = useEditorStore((state) => state.setActiveSidebarTab);
 
-  // Local state for instant tab switching - syncs with URL but allows immediate UI feedback
-  const [localActiveTab, setLocalActiveTab] = useState<EditorTab>(sidebarTab);
-
-  // Read the store's activeSidebarTab
   const storeSidebarTab = useEditorStore((state) => state.activeSidebarTab);
 
-  // Sync local tab with URL when URL changes (e.g., from navigation or page load)
+  // Sync URL → store only on initial mount
+  const hasInitializedTabRef = useRef(false);
   useEffect(() => {
-    setLocalActiveTab(sidebarTab);
-    setActiveSidebarTab(sidebarTab);
+    if (!hasInitializedTabRef.current) {
+      hasInitializedTabRef.current = true;
+      setActiveSidebarTab(sidebarTab);
+    }
   }, [sidebarTab, setActiveSidebarTab]);
 
-  // Sync local tab with store when store changes (e.g., from canvas layer click)
-  useEffect(() => {
-    if (storeSidebarTab && storeSidebarTab !== localActiveTab) {
-      setLocalActiveTab(storeSidebarTab);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- localActiveTab intentionally excluded to avoid sync loops
-  }, [storeSidebarTab]);
+  const activeTab = storeSidebarTab || sidebarTab;
 
   const componentDrafts = useComponentsStore((state) => state.componentDrafts);
   const getComponentById = useComponentsStore((state) => state.getComponentById);
@@ -101,9 +92,6 @@ const LeftSidebar = React.memo(function LeftSidebar({
   const layerLocksRef = useRef(layerLocks);
   layerLocksRef.current = layerLocks;
 
-  // Use local state for immediate tab switching
-  const activeTab = localActiveTab;
-
   // Get component layers if in edit mode
   const editingComponent = editingComponentId ? getComponentById(editingComponentId) : null;
 
@@ -114,10 +102,7 @@ const LeftSidebar = React.memo(function LeftSidebar({
       const tab = customEvent.detail?.tab;
 
       if (tab) {
-        setElementLibraryTab(tab);
         setShowElementLibrary(true);
-        // Switch to Layers tab so the element library context is correct
-        setLocalActiveTab('layers');
         setActiveSidebarTab('layers');
       } else {
         setShowElementLibrary((prev) => !prev);
@@ -307,34 +292,18 @@ const LeftSidebar = React.memo(function LeftSidebar({
             onValueChange={(value) => {
               const newTab = value as EditorTab;
 
-              // Immediately update local state AND store for instant UI feedback
-              setLocalActiveTab(newTab);
               setActiveSidebarTab(newTab);
               setShowElementLibrary(false);
 
-              // Clear layer selection when switching away from Layers tab
-              // This releases the lock so other users can edit
-              if (newTab === 'pages') {
-                onLayerSelect(null);
+              // Update URL without triggering Next.js navigation to avoid re-renders
+              const targetPageId = currentPageId || (pages.length > 0 ? pages[0].id : null);
+              if (targetPageId) {
+                const segment = newTab === 'layers' ? 'layers' : 'pages';
+                const newPath = `/ycode/${segment}/${targetPageId}${window.location.search}`;
+                window.history.replaceState(null, '', newPath);
               }
-
-              // Defer URL navigation to avoid blocking the UI
-              // startTransition marks this as a low-priority update
-              startTransition(() => {
-                if (newTab === 'layers') {
-                  const targetPageId = currentPageId || (pages.length > 0 ? pages[0].id : null);
-                  if (targetPageId) {
-                    navigateToLayers(targetPageId, urlState.view || undefined, urlState.rightTab || undefined, urlState.layerId || undefined);
-                  }
-                } else if (newTab === 'pages') {
-                  const targetPageId = currentPageId || (pages.length > 0 ? pages[0].id : null);
-                  if (targetPageId) {
-                    navigateToPage(targetPageId, urlState.view || undefined, urlState.rightTab || undefined, urlState.layerId || undefined);
-                  }
-                }
-              });
             }}
-            className="h-full overflow-hidden !gap-0"
+            className="h-full overflow-hidden gap-0!"
           >
             <TabsList className="w-full shrink-0">
               <TabsTrigger value="layers">Layers</TabsTrigger>
@@ -348,7 +317,7 @@ const LeftSidebar = React.memo(function LeftSidebar({
               value="layers" className="flex flex-col min-h-0 overflow-y-auto no-scrollbar"
               forceMount
             >
-              <header className="py-5 flex justify-between shrink-0 sticky top-0 bg-gradient-to-b from-background to-transparent z-20">
+              <header className="py-5 flex justify-between shrink-0 sticky top-0 bg-linear-to-b from-background to-transparent z-20">
                 <span className="font-medium">{editingComponentId ? 'Layers' : 'Layers'}</span>
                 <div className="-my-1">
                   <Button
@@ -400,17 +369,14 @@ const LeftSidebar = React.memo(function LeftSidebar({
         </div>
       </div>
 
-      {/* Element Library Slide-Out (lazy loaded) */}
-      {showElementLibrary && (
-        <Suspense fallback={null}>
-          <ElementLibrary
-            isOpen={showElementLibrary}
-            onClose={() => setShowElementLibrary(false)}
-            defaultTab={elementLibraryTab}
-            liveLayerUpdates={liveLayerUpdates}
-          />
-        </Suspense>
-      )}
+      {/* Element Library Slide-Out (lazy loaded, always mounted to preserve state) */}
+      <Suspense fallback={null}>
+        <ElementLibrary
+          isOpen={showElementLibrary}
+          onClose={() => setShowElementLibrary(false)}
+          liveLayerUpdates={liveLayerUpdates}
+        />
+      </Suspense>
     </>
   );
 });

@@ -44,7 +44,7 @@ import FilterableCollection from '@/components/FilterableCollection';
 import LocaleSelector from '@/components/layers/LocaleSelector';
 import { usePagesStore } from '@/stores/usePagesStore';
 import { useSettingsStore } from '@/stores/useSettingsStore';
-import { generateLinkHref, type LinkResolutionContext } from '@/lib/link-utils';
+import { generateLinkHref, resolveLinkAttrs, type LinkResolutionContext } from '@/lib/link-utils';
 import { collectEditorHiddenLayerIds, type HiddenLayerInfo } from '@/lib/animation-utils';
 import AnimationInitializer from '@/components/AnimationInitializer';
 import { transformLayerIdsForInstance, resolveVariableLinks } from '@/lib/resolve-components';
@@ -599,7 +599,6 @@ const LayerItem: React.FC<{
   // Buttons with link settings render as <a> directly instead of being
   // wrapped in <a><button></button></a> which is invalid HTML
   const isButtonWithLink = layer.name === 'button'
-    && !isEditMode
     && !isInsideForm
     && isValidLinkSettings(layer.variables?.link);
   if (isButtonWithLink) {
@@ -1421,6 +1420,7 @@ const LayerItem: React.FC<{
     paragraphClasses,
     SWIPER_CLASS_MAP[layer.name],
     isSlideChild && 'swiper-slide',
+    buttonNeedsFit && 'w-fit',
     enableDragDrop && !isEditing && !isLockedByOther && 'cursor-default',
     isDragging && 'opacity-30',
     showProjection && 'outline outline-1 outline-dashed outline-blue-400 bg-blue-50/10',
@@ -1462,6 +1462,25 @@ const LayerItem: React.FC<{
   if (layer.componentId && ancestorComponentIds?.has(layer.componentId)) {
     return null;
   }
+
+  // Shared link resolution context — only built once, reused by button links,
+  // <a> layer links, and link wrappers. Skipped in edit mode (no resolution needed).
+  const layerLinkContext: LinkResolutionContext | undefined = isEditMode ? undefined : {
+    pages,
+    folders,
+    collectionItemSlugs,
+    collectionItemId: collectionLayerItemId,
+    pageCollectionItemId,
+    collectionItemData: collectionLayerData,
+    pageCollectionItemData: pageCollectionItemData || undefined,
+    isPreview,
+    locale: currentLocale,
+    translations,
+    getAsset,
+    anchorMap,
+    resolvedAssets,
+    layerDataMap: effectiveLayerDataMap,
+  };
 
   // Render element-specific content
   const renderContent = () => {
@@ -1623,65 +1642,15 @@ const LayerItem: React.FC<{
       ...(!isEditMode && { suppressHydrationWarning: true }),
     };
 
-    // When a button is rendered as <a>, apply link attributes directly
-    if (isButtonWithLink && layer.variables?.link) {
-      const btnLinkSettings = layer.variables.link;
-      const btnLinkContext: LinkResolutionContext = {
-        pages,
-        folders,
-        collectionItemSlugs,
-        collectionItemId: collectionLayerItemId,
-        pageCollectionItemId,
-        collectionItemData: collectionLayerData,
-        pageCollectionItemData: pageCollectionItemData || undefined,
-        isPreview,
-        locale: currentLocale,
-        translations,
-        getAsset,
-        anchorMap,
-        resolvedAssets,
-        layerDataMap: effectiveLayerDataMap,
-      };
-      const btnLinkHref = generateLinkHref(btnLinkSettings, btnLinkContext);
-      if (btnLinkHref) {
-        elementProps.href = btnLinkHref;
-        elementProps.target = btnLinkSettings.target || '_self';
-        const btnLinkRel = btnLinkSettings.rel || (btnLinkSettings.target === '_blank' ? 'noopener noreferrer' : undefined);
-        if (btnLinkRel) elementProps.rel = btnLinkRel;
-        if (btnLinkSettings.download) elementProps.download = btnLinkSettings.download;
+    // Apply link attributes for elements rendered as <a> (buttons with links or <a> layers)
+    if (htmlTag === 'a' && layer.variables?.link) {
+      if (isButtonWithLink) {
+        elementProps.role = 'button';
+        delete elementProps.type;
       }
-      elementProps.role = 'button';
-      delete elementProps.type;
-    }
-
-    // When an <a> layer has link settings, apply href/target/rel directly
-    if (htmlTag === 'a' && !isButtonWithLink && !isEditMode && layer.variables?.link) {
-      const aLinkSettings = layer.variables.link;
-      if (isValidLinkSettings(aLinkSettings)) {
-        const aLinkContext: LinkResolutionContext = {
-          pages,
-          folders,
-          collectionItemSlugs,
-          collectionItemId: collectionLayerItemId,
-          pageCollectionItemId,
-          collectionItemData: collectionLayerData,
-          pageCollectionItemData: pageCollectionItemData || undefined,
-          isPreview,
-          locale: currentLocale,
-          translations,
-          getAsset,
-          anchorMap,
-          resolvedAssets,
-          layerDataMap: effectiveLayerDataMap,
-        };
-        const aLinkHref = generateLinkHref(aLinkSettings, aLinkContext);
-        if (aLinkHref) {
-          elementProps.href = aLinkHref;
-          elementProps.target = aLinkSettings.target || '_self';
-          const aLinkRel = aLinkSettings.rel || (aLinkSettings.target === '_blank' ? 'noopener noreferrer' : undefined);
-          if (aLinkRel) elementProps.rel = aLinkRel;
-          if (aLinkSettings.download) elementProps.download = aLinkSettings.download;
-        }
+      if (layerLinkContext && isValidLinkSettings(layer.variables.link)) {
+        const linkAttrs = resolveLinkAttrs(layer.variables.link, layerLinkContext);
+        if (linkAttrs) Object.assign(elementProps, linkAttrs);
       }
     }
 
@@ -2886,53 +2855,34 @@ const LayerItem: React.FC<{
   // Don't wrap layers inside component instances (they're not directly editable)
   let content = renderContent();
 
-  // Wrap with link if layer has link settings (published mode only)
-  // In edit mode, links are not interactive to allow layer selection
+  // Wrap with link if layer has link settings
   // Skip for buttons — they render as <a> directly (see isButtonWithLink)
   // Skip for <a> layers — they already render as <a> and nesting <a> inside <a> is invalid HTML
   const linkSettings = layer.variables?.link;
-  const shouldWrapWithLink = !isEditMode
-    && !isButtonWithLink
+  const shouldWrapWithLink = !isButtonWithLink
     && htmlTag !== 'a'
     && !subtreeHasInteractiveDescendants
     && isValidLinkSettings(linkSettings);
 
   if (shouldWrapWithLink && linkSettings) {
-    // Build link context for layer-level link resolution
-    const layerLinkContext: LinkResolutionContext = {
-      pages,
-      folders,
-      collectionItemSlugs,
-      collectionItemId: collectionLayerItemId,
-      pageCollectionItemId,
-      collectionItemData: collectionLayerData,
-      pageCollectionItemData: pageCollectionItemData || undefined,
-      isPreview,
-      locale: currentLocale,
-      translations,
-      getAsset,
-      anchorMap,
-      resolvedAssets,
-      layerDataMap: effectiveLayerDataMap,
-    };
-    const linkHref = generateLinkHref(linkSettings, layerLinkContext);
-
-    if (linkHref) {
-      const linkTarget = linkSettings.target || '_self';
-      const linkRel = linkSettings.rel || (linkTarget === '_blank' ? 'noopener noreferrer' : undefined);
-      const linkDownload = linkSettings.download;
-
+    if (isEditMode) {
       content = (
-        <a
-          href={linkHref}
-          target={linkTarget}
-          rel={linkRel}
-          download={linkDownload || undefined}
-          className="contents"
-        >
+        <a className="contents">
           {content}
         </a>
       );
+    } else if (layerLinkContext) {
+      const linkAttrs = resolveLinkAttrs(linkSettings, layerLinkContext);
+      if (linkAttrs) {
+        content = (
+          <a
+            {...linkAttrs}
+            className="contents"
+          >
+            {content}
+          </a>
+        );
+      }
     }
   }
 

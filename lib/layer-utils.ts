@@ -565,6 +565,7 @@ const SUBLAYER_ICON_MAP: Record<string, string> = {
   blockquote: 'quote',
   richTextComponent: 'component',
   richTextImage: 'image',
+  horizontalRule: 'separator',
 };
 
 /**
@@ -579,6 +580,7 @@ export function contentBlockToStyleKey(block: { type: string; attrs?: Record<str
     case 'orderedList': return 'orderedList';
     case 'blockquote': return 'blockquote';
     case 'richTextImage': return 'richTextImage';
+    case 'horizontalRule': return 'horizontalRule';
     default: return null;
   }
 }
@@ -667,7 +669,7 @@ function buildSublayersFromDoc(doc: any, layer: Layer): RichTextSublayer[] {
         richTextComponent: 'Component',
         richTextImage: 'Image',
         codeBlock: 'Code Block',
-        horizontalRule: 'Divider',
+        horizontalRule: 'Separator',
       };
 
       const textContent = extractBlockText(block).trim();
@@ -738,6 +740,7 @@ const STYLE_SUBLAYER_ICON_MAP: Record<string, string> = {
   listItem: 'text',
   blockquote: 'quote',
   richTextImage: 'image',
+  horizontalRule: 'separator',
 };
 
 /** Inline mark style keys shown for all text layers */
@@ -2719,7 +2722,7 @@ function resetLayerVariableBindings(variables: LayerVariables | undefined, ctx: 
 
   // --- Design color bindings ---
   if (updated.design) {
-    const designKeys = ['backgroundColor', 'color', 'borderColor', 'divideColor', 'textDecorationColor'] as const;
+    const designKeys = ['backgroundColor', 'color', 'borderColor', 'divideColor', 'outlineColor', 'textDecorationColor'] as const;
     let designChanged = false;
     const newDesign = { ...updated.design };
 
@@ -3149,7 +3152,7 @@ function stripPageSourceFromVariables(variables: LayerVariables): LayerVariables
 
   // Design color bindings
   if (updated.design) {
-    const designKeys = ['backgroundColor', 'color', 'borderColor', 'divideColor', 'textDecorationColor'] as const;
+    const designKeys = ['backgroundColor', 'color', 'borderColor', 'divideColor', 'outlineColor', 'textDecorationColor'] as const;
     let designChanged = false;
     const newDesign = { ...updated.design };
     for (const key of designKeys) {
@@ -3451,7 +3454,7 @@ function resetVariablesForCollectionLayer(variables: LayerVariables, collectionL
 
   // --- Design color bindings ---
   if (updated.design) {
-    const designKeys = ['backgroundColor', 'color', 'borderColor', 'divideColor', 'textDecorationColor'] as const;
+    const designKeys = ['backgroundColor', 'color', 'borderColor', 'divideColor', 'outlineColor', 'textDecorationColor'] as const;
     let designChanged = false;
     const newDesign = { ...updated.design };
 
@@ -3757,7 +3760,7 @@ function resetVariablesForDeletedField(variables: LayerVariables, deletedFieldId
 
   // --- Design color bindings ---
   if (updated.design) {
-    const designKeys = ['backgroundColor', 'color', 'borderColor', 'divideColor', 'textDecorationColor'] as const;
+    const designKeys = ['backgroundColor', 'color', 'borderColor', 'divideColor', 'outlineColor', 'textDecorationColor'] as const;
     let designChanged = false;
     const newDesign = { ...updated.design };
 

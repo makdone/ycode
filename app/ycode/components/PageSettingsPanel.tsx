@@ -42,13 +42,12 @@ import Icon from '@/components/ui/icon';
 import { getPageIcon, isHomepage, buildSlugPath, buildFolderPath, folderHasIndexPage, generateUniqueSlug, generateSlug, sanitizeSlug, isReservedRootSlug } from '@/lib/page-utils';
 import { isAssetOfType, ASSET_CATEGORIES } from '@/lib/asset-utils';
 import { Textarea } from '@/components/ui/textarea';
-import { uploadFileApi, deleteAssetApi } from '@/lib/api';
 import { useAsset } from '@/hooks/use-asset';
-import { useAssetsStore } from '@/stores/useAssetsStore';
+import { useEditorStore } from '@/stores/useEditorStore';
 import RichTextEditor from './RichTextEditor';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
-import { getFieldIcon, IMAGE_FIELD_TYPES, SIMPLE_TEXT_FIELD_TYPES } from '@/lib/collection-field-utils';
+import { getFieldIcon, IMAGE_FIELD_TYPES, RICH_TEXT_FIELD_TYPES } from '@/lib/collection-field-utils';
 
 export interface PageSettingsPanelHandle {
   checkUnsavedChanges: () => Promise<boolean>;
@@ -123,9 +122,7 @@ const PageSettingsPanel = React.forwardRef<PageSettingsPanelHandle, PageSettings
   const [seoDescription, setSeoDescription] = useState('');
   const [seoImage, setSeoImage] = useState<string | FieldVariable | null>(null);
   const [seoNoindex, setSeoNoindex] = useState(false);
-  const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
-  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { openFileManager } = useEditorStore();
 
   const nameInputRef = useRef<HTMLInputElement>(null);
 
@@ -145,17 +142,11 @@ const PageSettingsPanel = React.forwardRef<PageSettingsPanelHandle, PageSettings
 
   const { collections, fields } = useCollectionsStore();
 
-  const [uploadedAssetCache, setUploadedAssetCache] = useState<Asset | null>(null);
-  // Only use asset hook if seoImage is a string (asset ID)
   const seoImageId = typeof seoImage === 'string' ? seoImage : null;
   const seoImageAsset = useAsset(seoImageId);
-  const { addAsset, removeAsset } = useAssetsStore();
-  const displayAsset = uploadedAssetCache || seoImageAsset;
 
-  // Check if there's any image displayed (including temp preview)
-  const hasImage = seoImage !== null || imagePreviewUrl !== null || displayAsset !== null;
-  // Check if there's an uploaded asset (not a field variable)
-  const hasUploadedAsset = (imagePreviewUrl || displayAsset) && !isSeoImageFieldVariable(seoImage);
+  const hasImage = seoImage !== null || seoImageAsset !== null;
+  const hasSelectedAsset = seoImageAsset !== null && !isSeoImageFieldVariable(seoImage);
 
   const [currentPage, setCurrentPage] = useState<Page | null | undefined>(page);
 
@@ -195,12 +186,6 @@ const PageSettingsPanel = React.forwardRef<PageSettingsPanelHandle, PageSettings
     const newTab = value as 'general' | 'seo' | 'custom-code';
     setActiveTab(newTab);
   }, []);
-
-  useEffect(() => {
-    if (uploadedAssetCache && seoImageAsset && uploadedAssetCache.id === seoImageAsset.id) {
-      setUploadedAssetCache(null);
-    }
-  }, [uploadedAssetCache, seoImageAsset]);
 
   const [saveCounter, setSaveCounter] = useState(0);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
@@ -375,8 +360,7 @@ const PageSettingsPanel = React.forwardRef<PageSettingsPanelHandle, PageSettings
       authEnabled !== initial.authEnabled ||
       authPassword !== initial.authPassword ||
       collectionId !== initial.collectionId ||
-      slugFieldId !== initial.slugFieldId ||
-      pendingImageFile !== null
+      slugFieldId !== initial.slugFieldId
     );
 
     // Clear rejected page when user makes changes (allows them to try navigating again)
@@ -386,7 +370,7 @@ const PageSettingsPanel = React.forwardRef<PageSettingsPanelHandle, PageSettings
 
     return hasChanges;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [name, slug, pageFolderId, isIndex, seoTitle, seoDescription, seoImage, seoNoindex, customCodeHead, customCodeBody, authEnabled, authPassword, collectionId, slugFieldId, pendingImageFile, saveCounter]);
+  }, [name, slug, pageFolderId, isIndex, seoTitle, seoDescription, seoImage, seoNoindex, customCodeHead, customCodeBody, authEnabled, authPassword, collectionId, slugFieldId, saveCounter]);
 
   // Expose method to check for unsaved changes externally
   useImperativeHandle(ref, () => ({
@@ -498,8 +482,7 @@ const PageSettingsPanel = React.forwardRef<PageSettingsPanelHandle, PageSettings
       authEnabled !== initialValuesRef.current.authEnabled ||
       authPassword !== initialValuesRef.current.authPassword ||
       collectionId !== initialValuesRef.current.collectionId ||
-      slugFieldId !== initialValuesRef.current.slugFieldId ||
-      pendingImageFile !== null
+      slugFieldId !== initialValuesRef.current.slugFieldId
     );
 
     // If we have unsaved changes, show confirmation dialog BEFORE changing
@@ -575,14 +558,6 @@ const PageSettingsPanel = React.forwardRef<PageSettingsPanelHandle, PageSettings
       setAuthPassword(initialAuthPassword);
       setCollectionId(initialCollectionId);
       setSlugFieldId(initialSlugFieldId);
-      setPendingImageFile(null);
-      setUploadedAssetCache(null); // Clear cache when switching pages
-
-      // Clean up preview URL
-      if (imagePreviewUrl) {
-        URL.revokeObjectURL(imagePreviewUrl);
-        setImagePreviewUrl(null);
-      }
     } else {
       // Reset initial values for new page FIRST
       initialValuesRef.current = {
@@ -616,13 +591,6 @@ const PageSettingsPanel = React.forwardRef<PageSettingsPanelHandle, PageSettings
       setAuthPassword('');
       setCollectionId(null);
       setSlugFieldId(null);
-      setPendingImageFile(null);
-      setUploadedAssetCache(null); // Clear cache for new page
-
-      if (imagePreviewUrl) {
-        URL.revokeObjectURL(imagePreviewUrl);
-        setImagePreviewUrl(null);
-      }
     }
 
     // Clear error state when page changes
@@ -635,17 +603,8 @@ const PageSettingsPanel = React.forwardRef<PageSettingsPanelHandle, PageSettings
         nameInputRef.current?.select();
       });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [currentPage, isErrorPage]);
-
-  // Cleanup preview URL when component unmounts or when preview changes
-  useEffect(() => {
-    return () => {
-      if (imagePreviewUrl) {
-        URL.revokeObjectURL(imagePreviewUrl);
-      }
-    };
-  }, [imagePreviewUrl]);
 
   // Auto-generate slug from name for new pages (only if not index or error page)
   useEffect(() => {
@@ -750,48 +709,25 @@ const PageSettingsPanel = React.forwardRef<PageSettingsPanelHandle, PageSettings
     return basePath;
   }, [pageFolderId, slug, isIndex, folders, isErrorPage, isDynamicPage, collectionId, slugFieldId, currentPage, fields]);
 
-  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    if (!isAssetOfType(file.type, ASSET_CATEGORIES.IMAGES)) {
-      setError('Only image files are allowed');
-      return;
-    }
-
-    const MAX_FILE_SIZE = 10 * 1024 * 1024;
-    if (file.size > MAX_FILE_SIZE) {
-      setError('File size must be less than 10MB');
-      return;
-    }
-
-    if (imagePreviewUrl) {
-      URL.revokeObjectURL(imagePreviewUrl);
-    }
-
-    const previewUrl = URL.createObjectURL(file);
-    setImagePreviewUrl(previewUrl);
-    setPendingImageFile(file);
-    setError(null);
+  const handleOpenFileManager = () => {
+    openFileManager(
+      (asset) => {
+        if (!asset.mime_type || !isAssetOfType(asset.mime_type, ASSET_CATEGORIES.IMAGES)) {
+          return false;
+        }
+        setSeoImage(asset.id);
+      },
+      seoImageId,
+      [ASSET_CATEGORIES.IMAGES]
+    );
   };
 
   const handleRemoveImage = () => {
-    if (imagePreviewUrl) {
-      URL.revokeObjectURL(imagePreviewUrl);
-      setImagePreviewUrl(null);
-    }
-
-    setPendingImageFile(null);
     setSeoImage(null);
-    setUploadedAssetCache(null);
-
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
   };
 
   // Render Select component for image field variables
-  const renderImageFieldSelect = (clearAsset: boolean = false) => {
+  const renderImageFieldSelect = () => {
     if (!isDynamicPage) return null;
 
     const activeCollectionId = collectionId || currentPage?.settings?.cms?.collection_id || '';
@@ -823,29 +759,10 @@ const PageSettingsPanel = React.forwardRef<PageSettingsPanelHandle, PageSettings
                     field_type: field?.type || null,
                   },
                 });
-
-                // Clear uploaded file if switching to field variable
-                if (pendingImageFile) {
-                  setPendingImageFile(null);
-                  if (imagePreviewUrl) {
-                    URL.revokeObjectURL(imagePreviewUrl);
-                    setImagePreviewUrl(null);
-                  }
-                }
-
-                // Clear asset cache and delete asset if needed
-                if (clearAsset) {
-                  setUploadedAssetCache(null);
-                  // Delete asset if it was a string
-                  if (typeof seoImage === 'string' && seoImage) {
-                    deleteAssetApi(seoImage).catch(console.error);
-                    removeAsset(seoImage);
-                  }
-                }
               }}
               disabled={!hasImageFields}
             >
-              <SelectTrigger variant={hasUploadedAsset ? 'overlay' : 'default'} className="w-auto">
+              <SelectTrigger variant={hasSelectedAsset ? 'overlay' : 'default'} className="w-auto">
                 <span className="flex items-center gap-2">
                   <Icon name="database" className="size-3" />
                   {selectedField ? selectedField.name : 'Select field'}
@@ -918,13 +835,6 @@ const PageSettingsPanel = React.forwardRef<PageSettingsPanelHandle, PageSettings
         setAuthPassword(initialValuesRef.current.authPassword);
         setCollectionId(initialValuesRef.current.collectionId);
         setSlugFieldId(initialValuesRef.current.slugFieldId);
-        setPendingImageFile(null);
-
-        // Clean up preview URL
-        if (imagePreviewUrl) {
-          URL.revokeObjectURL(imagePreviewUrl);
-          setImagePreviewUrl(null);
-        }
       }
 
       rejectedPageRef.current = null;
@@ -952,13 +862,6 @@ const PageSettingsPanel = React.forwardRef<PageSettingsPanelHandle, PageSettings
         setAuthPassword(initialValuesRef.current.authPassword);
         setCollectionId(initialValuesRef.current.collectionId);
         setSlugFieldId(initialValuesRef.current.slugFieldId);
-        setPendingImageFile(null);
-
-        // Clean up preview URL
-        if (imagePreviewUrl) {
-          URL.revokeObjectURL(imagePreviewUrl);
-          setImagePreviewUrl(null);
-        }
       }
 
       rejectedPageRef.current = null;
@@ -1098,33 +1001,6 @@ const PageSettingsPanel = React.forwardRef<PageSettingsPanelHandle, PageSettings
     setError(null);
 
     try {
-      let finalSeoImage: string | FieldVariable | null = seoImage;
-
-      if (pendingImageFile) {
-        const uploadedAsset = await uploadFileApi(pendingImageFile, 'page-settings', 'images');
-
-        if (!uploadedAsset) {
-          throw new Error('Failed to upload image');
-        }
-
-        finalSeoImage = uploadedAsset.id;
-        setUploadedAssetCache(uploadedAsset);
-        addAsset(uploadedAsset);
-
-        // Delete old asset if it was a string (asset ID) and different from new one
-        if (typeof seoImage === 'string' && seoImage !== uploadedAsset.id) {
-          await deleteAssetApi(seoImage);
-          removeAsset(seoImage);
-        }
-      } else if (!seoImage && currentPage?.settings?.seo?.image) {
-        // Delete existing asset if it was a string (asset ID)
-        const existingImage = currentPage.settings.seo.image;
-        if (typeof existingImage === 'string') {
-          await deleteAssetApi(existingImage);
-          removeAsset(existingImage);
-        }
-      }
-
       const existingSettings = currentPage?.settings as PageSettings | undefined;
 
       const settings: PageSettings = {
@@ -1136,7 +1012,7 @@ const PageSettingsPanel = React.forwardRef<PageSettingsPanelHandle, PageSettings
         seo: {
           title: seoTitle.trim(),
           description: seoDescription.trim(),
-          image: isErrorPage ? null : finalSeoImage,
+          image: isErrorPage ? null : seoImage,
           noindex: isErrorPage ? true : seoNoindex,
         },
         custom_code: {
@@ -1162,12 +1038,6 @@ const PageSettingsPanel = React.forwardRef<PageSettingsPanelHandle, PageSettings
         settings,
       });
 
-      setPendingImageFile(null);
-      if (imagePreviewUrl) {
-        URL.revokeObjectURL(imagePreviewUrl);
-        setImagePreviewUrl(null);
-      }
-
       const trimmedName = name.trim();
       const trimmedSlug = isErrorPage || isIndex ? '' : (isDynamicPage ? '*' : sanitizeSlug(slug.trim(), false));
       const trimmedSeoTitle = seoTitle.trim();
@@ -1182,7 +1052,8 @@ const PageSettingsPanel = React.forwardRef<PageSettingsPanelHandle, PageSettings
       setSeoTitle(trimmedSeoTitle);
       setSeoDescription(trimmedSeoDescription);
       setSeoNoindex(normalizedSeoNoindex);
-      setSeoImage(finalSeoImage);
+      const normalizedSeoImage = isErrorPage ? null : seoImage;
+      setSeoImage(normalizedSeoImage);
       setCustomCodeHead(trimmedCustomCodeHead);
       setCustomCodeBody(trimmedCustomCodeBody);
       setAuthPassword(trimmedAuthPassword);
@@ -1199,7 +1070,7 @@ const PageSettingsPanel = React.forwardRef<PageSettingsPanelHandle, PageSettings
         isIndex,
         seoTitle: trimmedSeoTitle,
         seoDescription: trimmedSeoDescription,
-        seoImage: finalSeoImage,
+        seoImage: normalizedSeoImage,
         seoNoindex: normalizedSeoNoindex,
         customCodeHead: trimmedCustomCodeHead,
         customCodeBody: trimmedCustomCodeBody,
@@ -1602,7 +1473,7 @@ const PageSettingsPanel = React.forwardRef<PageSettingsPanelHandle, PageSettings
                           value={seoTitle}
                           onChange={setSeoTitle}
                           placeholder={name || 'Page title'}
-                          allowedFieldTypes={SIMPLE_TEXT_FIELD_TYPES}
+                          allowedFieldTypes={RICH_TEXT_FIELD_TYPES}
                           fieldGroups={(() => {
                             const activeCollectionId = collectionId || currentPage?.settings?.cms?.collection_id || '';
                             const pageFields = fields[activeCollectionId] || [];
@@ -1639,7 +1510,7 @@ const PageSettingsPanel = React.forwardRef<PageSettingsPanelHandle, PageSettings
                               ? 'Describe in more detail what error occurred on this page and why.'
                               : 'Describe your business and/or the content of this page.'
                           }
-                          allowedFieldTypes={SIMPLE_TEXT_FIELD_TYPES}
+                          allowedFieldTypes={RICH_TEXT_FIELD_TYPES}
                           fieldGroups={(() => {
                             const activeCollectionId = collectionId || currentPage?.settings?.cms?.collection_id || '';
                             const pageFields = fields[activeCollectionId] || [];
@@ -1670,16 +1541,9 @@ const PageSettingsPanel = React.forwardRef<PageSettingsPanelHandle, PageSettings
                           <FieldLabel>Social preview</FieldLabel>
                           <FieldDescription>Recommended image size is at least 1,200 x 630 pixels.</FieldDescription>
                           <div>
-                            <input
-                              ref={fileInputRef}
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              onChange={handleFileSelect}
-                            />
                             <div className="bg-input rounded-lg w-full aspect-[1.91/1] flex items-center justify-center overflow-hidden relative">
                               {isSeoImageFieldVariable(seoImage) ? null : (() => {
-                                const imageUrl = imagePreviewUrl || displayAsset?.public_url;
+                                const imageUrl = seoImageAsset?.public_url;
                                 return imageUrl ? (
                                   <Image
                                     className="object-cover"
@@ -1696,11 +1560,11 @@ const PageSettingsPanel = React.forwardRef<PageSettingsPanelHandle, PageSettings
 
                                 return (
                                   <div className="flex items-center gap-2 relative z-10">
-                                    {hasUploadedAsset ? (
+                                    {hasSelectedAsset ? (
                                       <Button
                                         variant="overlay"
                                         size="sm"
-                                        onClick={() => fileInputRef.current?.click()}
+                                        onClick={handleOpenFileManager}
                                       >
                                         <Icon name="refresh" />
                                         Replace
@@ -1711,21 +1575,21 @@ const PageSettingsPanel = React.forwardRef<PageSettingsPanelHandle, PageSettings
                                           <Button
                                             variant={hasImage ? 'overlay' : 'secondary'}
                                             size="sm"
-                                            onClick={() => fileInputRef.current?.click()}
+                                            onClick={handleOpenFileManager}
                                           >
-                                            Upload image
+                                            Choose image
                                           </Button>
                                         )}
 
-                                        {isDynamicPage && !hasFieldVariable && !hasUploadedAsset && <span className="text-muted-foreground">or</span>}
+                                        {isDynamicPage && !hasFieldVariable && !hasSelectedAsset && <span className="text-muted-foreground">or</span>}
 
-                                        {!hasUploadedAsset && renderImageFieldSelect(hasFieldVariable)}
+                                        {!hasSelectedAsset && renderImageFieldSelect()}
                                       </>
                                     )}
 
-                                    {(hasUploadedAsset || hasFieldVariable) && (
+                                    {(hasSelectedAsset || hasFieldVariable) && (
                                       <Button
-                                        variant={hasUploadedAsset ? 'overlay' : 'secondary'}
+                                        variant={hasSelectedAsset ? 'overlay' : 'secondary'}
                                         size="sm"
                                         onClick={handleRemoveImage}
                                       >

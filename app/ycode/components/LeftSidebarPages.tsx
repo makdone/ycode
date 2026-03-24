@@ -36,7 +36,8 @@ export default function LeftSidebarPages({
   onPageSelect,
   setCurrentPageId,
 }: LeftSidebarPagesProps) {
-  const { routeType, urlState } = useEditorUrl();
+  const { urlState } = useEditorUrl();
+  const activeSidebarTab = useEditorStore((state) => state.activeSidebarTab);
   const { openPage, openPageEdit, openPageLayers, navigateToLayers, navigateToPage, navigateToPageEdit, navigateToCollections } = useEditorActions();
   const [showPageSettings, setShowPageSettings] = useState(false);
   const [showFolderSettings, setShowFolderSettings] = useState(false);
@@ -178,17 +179,7 @@ export default function LeftSidebarPages({
           selectedItemIdRef.current = result.data.id;
         }
 
-        // Navigate to the new page based on current route type
-        if (routeType === 'layers') {
-          navigateToLayers(result.data.id, urlState.view || undefined, urlState.rightTab || undefined, urlState.layerId || undefined);
-        } else if (routeType === 'page' && urlState.isEditing) {
-          navigateToPageEdit(result.data.id);
-        } else if (routeType === 'page') {
-          navigateToPage(result.data.id, urlState.view || undefined, urlState.rightTab || undefined, urlState.layerId || undefined);
-        } else {
-          // Default to layers if no route type
-          navigateToLayers(result.data.id, urlState.view || undefined, urlState.rightTab || undefined, urlState.layerId || undefined);
-        }
+        navigateToNextPage(result.data.id, urlState.layerId || 'body');
 
         // Automatically open Page settings panel for the newly created page
         setEditingPage(result.data);
@@ -302,32 +293,18 @@ export default function LeftSidebarPages({
       return;
     }
 
-    // Clear layer selection FIRST to release lock on current page's channel
-    // before switching to the new page's channel
+    if (pageId === currentPageId) return;
+
+    // Set to body directly so the layer sync effect won't trigger a second URL update
     const { setSelectedLayerId } = useEditorStore.getState();
-    setSelectedLayerId(null);
+    setSelectedLayerId('body');
 
     // Immediate UI feedback - selection updates instantly
     setSelectedItemId(pageId);
 
-    // Preserve current query params (convert null to undefined)
-    // IMPORTANT: Use 'body' as the layer to avoid carrying over invalid layer IDs from the old page
-    const view = urlState.view || undefined;
-    const rightTab = urlState.rightTab || undefined;
-
     // Defer navigation to avoid blocking UI
     startTransition(() => {
-      // Navigate to the same route type but with the new page ID
-      if (routeType === 'layers') {
-        navigateToLayers(pageId, view, rightTab, 'body');
-      } else if (routeType === 'page' && urlState.isEditing) {
-        navigateToPageEdit(pageId);
-      } else if (routeType === 'page') {
-        navigateToPage(pageId, view, rightTab, 'body');
-      } else {
-        // Default to layers if no route type (shouldn't happen, but safe fallback)
-        navigateToLayers(pageId, view, rightTab, 'body');
-      }
+      navigateToNextPage(pageId);
     });
   };
 
@@ -638,19 +615,19 @@ export default function LeftSidebarPages({
   };
 
   /**
-   * Navigate to a page based on current route type
-   * Uses 'body' as the layer to ensure a clean slate on the new page
+   * Navigate to a page based on current sidebar tab.
+   * Uses store-based tab instead of routeType since tab switches use replaceState.
    */
-  const navigateToNextPage = (pageId: string) => {
-    if (routeType === 'layers') {
-      navigateToLayers(pageId, urlState.view || undefined, urlState.rightTab || undefined, 'body');
-    } else if (routeType === 'page' && urlState.isEditing) {
+  const navigateToNextPage = (pageId: string, layerId = 'body') => {
+    const view = urlState.view || undefined;
+    const rightTab = urlState.rightTab || undefined;
+
+    if (urlState.isEditing) {
       navigateToPageEdit(pageId);
-    } else if (routeType === 'page') {
-      navigateToPage(pageId, urlState.view || undefined, urlState.rightTab || undefined, 'body');
+    } else if (activeSidebarTab === 'pages') {
+      navigateToPage(pageId, view, rightTab, layerId);
     } else {
-      // Default to layers if no route type
-      navigateToLayers(pageId, urlState.view || undefined, urlState.rightTab || undefined, 'body');
+      navigateToLayers(pageId, view, rightTab, layerId);
     }
   };
 

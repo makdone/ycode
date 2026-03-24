@@ -457,6 +457,7 @@ export const DESIGN_COLOR_CSS_MAP: Record<string, string> = {
   color: 'color',
   borderColor: 'borderColor',
   divideColor: '--tw-divide-color',
+  outlineColor: 'outlineColor',
   textDecorationColor: 'textDecorationColor',
 };
 

@@ -143,6 +143,7 @@ function layerFieldVarsContainId(layer: Layer, fieldId: string): boolean {
     if (designColorUsesField(vars.design.color, fieldId)) return true;
     if (designColorUsesField(vars.design.borderColor, fieldId)) return true;
     if (designColorUsesField(vars.design.divideColor, fieldId)) return true;
+    if (designColorUsesField(vars.design.outlineColor, fieldId)) return true;
     if (designColorUsesField(vars.design.textDecorationColor, fieldId)) return true;
   }
 
