@@ -31,16 +31,16 @@ export default function FormSettings({ layer, onLayerUpdate }: FormSettingsProps
   const [isSmtpEnabled, setIsSmtpEnabled] = useState<boolean | null>(null);
   const [emailToInput, setEmailToInput] = useState('');
 
-  // Check if SMTP is enabled in global settings
+  // Check if email is enabled in global settings
   useEffect(() => {
-    const checkSmtpSettings = async () => {
+    const checkEmailSettings = async () => {
       try {
         const response = await fetch('/ycode/api/settings/email');
         if (response.ok) {
           const result = await response.json();
-          const enabled = result.data?.enabled ?? false;
+          const mode = result.data?.mode;
+          const enabled = mode === 'custom' || result.data?.enabled === true;
           setIsSmtpEnabled(enabled);
-          // Auto-expand email section when SMTP is enabled
           if (enabled) {
             setEmailOpen(true);
           }
@@ -52,7 +52,7 @@ export default function FormSettings({ layer, onLayerUpdate }: FormSettingsProps
       }
     };
 
-    checkSmtpSettings();
+    checkEmailSettings();
   }, []);
 
   // Sync local email input with layer data
@@ -203,7 +203,7 @@ export default function FormSettings({ layer, onLayerUpdate }: FormSettingsProps
     >
       {!isSmtpEnabled && isSmtpEnabled !== null && (
         <div className="text-xs text-muted-foreground text-center py-4">
-          Enable <a href="/ycode/settings/email" className="underline hover:text-foreground">SMTP in Settings</a> to use email notifications.
+          Configure <a href="/ycode/settings/email" className="underline hover:text-foreground">Email in Settings</a> to use email notifications.
         </div>
       )}
 

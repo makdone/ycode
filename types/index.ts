@@ -773,8 +773,11 @@ export interface Redirect {
 
 export type SmtpProvider = 'google' | 'microsoft365' | 'mailersend' | 'postmark' | 'sendgrid' | 'mailgun' | 'amazonses' | 'other';
 
+export type EmailMode = 'ycode' | 'custom';
+
 export interface EmailSettings {
   enabled: boolean;
+  mode?: EmailMode;
   provider: SmtpProvider;
   smtpHost: string;
   smtpPort: string;

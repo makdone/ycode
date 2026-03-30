@@ -9,8 +9,6 @@ import {
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
-import { Switch } from '@/components/ui/switch';
-import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -20,8 +18,11 @@ import {
 } from '@/components/ui/select';
 import { SMTP_PRESETS, SMTP_PROVIDER_OPTIONS, type SmtpProvider } from '@/lib/email-presets';
 
+type EmailMode = 'ycode' | 'custom';
+
 interface EmailSettings {
   enabled: boolean;
+  mode?: EmailMode;
   provider: SmtpProvider;
   smtpHost: string;
   smtpPort: string;
@@ -33,6 +34,7 @@ interface EmailSettings {
 
 const DEFAULT_SETTINGS: EmailSettings = {
   enabled: false,
+  mode: undefined,
   provider: 'google',
   smtpHost: SMTP_PRESETS.google.host,
   smtpPort: SMTP_PRESETS.google.port,
@@ -42,6 +44,13 @@ const DEFAULT_SETTINGS: EmailSettings = {
   fromName: '',
 };
 
+function resolveMode(data: Partial<EmailSettings> | null): EmailMode | undefined {
+  if (!data) return undefined;
+  if (data.mode) return data.mode;
+  if (data.enabled) return 'custom';
+  return undefined;
+}
+
 export default function EmailSettingsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -49,12 +58,12 @@ export default function EmailSettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
+  const [selectedMode, setSelectedMode] = useState<EmailMode | undefined>(undefined);
 
-  // Email settings state
   const [settings, setSettings] = useState<EmailSettings>(DEFAULT_SETTINGS);
   const savedSettingsRef = useRef<EmailSettings>(DEFAULT_SETTINGS);
+  const savedModeRef = useRef<EmailMode | undefined>(undefined);
 
-  // Load email settings on mount
   useEffect(() => {
     const loadSettings = async () => {
       try {
@@ -66,6 +75,7 @@ export default function EmailSettingsPage() {
           if (result.data) {
             const loadedSettings: EmailSettings = {
               enabled: result.data.enabled ?? false,
+              mode: result.data.mode,
               provider: result.data.provider ?? 'google',
               smtpHost: result.data.smtpHost ?? SMTP_PRESETS.google.host,
               smtpPort: result.data.smtpPort ?? SMTP_PRESETS.google.port,
@@ -74,8 +84,11 @@ export default function EmailSettingsPage() {
               fromEmail: result.data.fromEmail ?? '',
               fromName: result.data.fromName ?? '',
             };
+            const mode = resolveMode(result.data);
             setSettings(loadedSettings);
+            setSelectedMode(mode);
             savedSettingsRef.current = loadedSettings;
+            savedModeRef.current = mode;
           }
         } else if (response.status !== 404) {
           throw new Error('Failed to load email settings');
@@ -91,12 +104,12 @@ export default function EmailSettingsPage() {
     loadSettings();
   }, []);
 
-  // Check for changes whenever settings update
   useEffect(() => {
     const saved = savedSettingsRef.current;
-    const changed = JSON.stringify(settings) !== JSON.stringify(saved);
-    setHasChanges(changed);
-  }, [settings]);
+    const settingsChanged = JSON.stringify(settings) !== JSON.stringify(saved);
+    const modeChanged = selectedMode !== savedModeRef.current;
+    setHasChanges(settingsChanged || modeChanged);
+  }, [settings, selectedMode]);
 
   const handleProviderChange = (provider: SmtpProvider) => {
     const preset = SMTP_PRESETS[provider];
@@ -117,37 +130,9 @@ export default function EmailSettingsPage() {
     setTestResult(null);
   };
 
-  // Auto-save when SMTP toggle changes
-  const handleSmtpToggle = async (checked: boolean) => {
-    const newSettings = { ...settings, enabled: checked };
-    setSettings(newSettings);
+  const handleModeSelect = (mode: EmailMode) => {
+    setSelectedMode(mode);
     setTestResult(null);
-
-    // Auto-save the toggle state
-    try {
-      setIsSaving(true);
-      setError(null);
-
-      const response = await fetch('/ycode/api/settings/email', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ value: newSettings }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to save email settings');
-      }
-
-      savedSettingsRef.current = { ...newSettings };
-      setHasChanges(false);
-    } catch (err) {
-      console.error('Error saving email settings:', err);
-      setError('Failed to save email settings');
-      // Revert on error
-      setSettings(settings);
-    } finally {
-      setIsSaving(false);
-    }
   };
 
   const handleSave = async () => {
@@ -155,18 +140,25 @@ export default function EmailSettingsPage() {
       setIsSaving(true);
       setError(null);
 
+      const savePayload: EmailSettings = {
+        ...settings,
+        mode: selectedMode,
+        enabled: selectedMode === 'custom',
+      };
+
       const response = await fetch('/ycode/api/settings/email', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ value: settings }),
+        body: JSON.stringify({ value: savePayload }),
       });
 
       if (!response.ok) {
         throw new Error('Failed to save email settings');
       }
 
-      // Update saved reference after successful save
-      savedSettingsRef.current = { ...settings };
+      savedSettingsRef.current = { ...savePayload };
+      savedModeRef.current = selectedMode;
+      setSettings(savePayload);
       setHasChanges(false);
     } catch (err) {
       console.error('Error saving email settings:', err);
@@ -227,165 +219,187 @@ export default function EmailSettingsPage() {
           <span className="text-base font-medium">Email</span>
         </header>
 
-        <div className="flex flex-col gap-6 bg-secondary/20 p-8 rounded-lg">
+        <div className="flex flex-col gap-4">
           {error && (
             <div className="bg-destructive/10 text-destructive px-4 py-2 rounded-md text-sm">
               {error}
             </div>
           )}
 
-          {/* SMTP Toggle */}
-          <div className="flex items-center justify-between">
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="smtp-enabled" className="text-sm font-medium">
-                SMTP
-              </Label>
-              <p className="text-xs text-muted-foreground">
-                Send email notifications for form submissions
+          {/* Ycode Servers option — disabled on opensource */}
+          <div className="relative flex items-start gap-3 rounded-lg border p-4 opacity-50 cursor-not-allowed bg-secondary/20">
+            <div className="flex h-5 items-center">
+              <div className="size-4 rounded-full border-2 border-muted-foreground/30" />
+            </div>
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-muted-foreground">Ycode</span>
+                <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                  Only available on Cloud
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Managed email delivery powered by Ycode — no configuration required
               </p>
             </div>
-            <Switch
-              id="smtp-enabled"
-              checked={settings.enabled}
-              onCheckedChange={handleSmtpToggle}
-              disabled={isSaving}
-            />
           </div>
 
-          {/* SMTP Configuration Fields - only show when enabled */}
-          {settings.enabled && (
-            <>
-              <div className="flex flex-col gap-6 border-t pt-6">
-                {/* Provider Selection */}
-                <Field>
-                  <FieldLabel htmlFor="smtp-provider">Provider</FieldLabel>
-                  <FieldDescription>
-                    Select your email provider for pre-configured settings
-                  </FieldDescription>
-                  <Select
-                    value={settings.provider}
-                    onValueChange={(value) => handleProviderChange(value as SmtpProvider)}
-                  >
-                    <SelectTrigger id="smtp-provider" className="w-full">
-                      <SelectValue placeholder="Select provider" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {SMTP_PROVIDER_OPTIONS.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {currentPreset.note && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {currentPreset.note}
-                    </p>
-                  )}
-                </Field>
-
-                {/* SMTP Host */}
-                <Field>
-                  <FieldLabel htmlFor="smtp-host">SMTP Host</FieldLabel>
-                  <FieldDescription>
-                    The hostname of your SMTP server
-                  </FieldDescription>
-                  <Input
-                    id="smtp-host"
-                    placeholder="smtp.example.com"
-                    value={settings.smtpHost}
-                    onChange={(e) => handleSettingChange('smtpHost', e.target.value)}
-                  />
-                </Field>
-
-                {/* SMTP Port */}
-                <Field>
-                  <FieldLabel htmlFor="smtp-port">SMTP Port</FieldLabel>
-                  <FieldDescription>
-                    The port of your SMTP server (587 for TLS, 465 for SSL)
-                  </FieldDescription>
-                  <Input
-                    id="smtp-port"
-                    placeholder="587"
-                    value={settings.smtpPort}
-                    onChange={(e) => handleSettingChange('smtpPort', e.target.value)}
-                  />
-                </Field>
-
-                {/* SMTP Username */}
-                <Field>
-                  <FieldLabel htmlFor="smtp-user">SMTP Username</FieldLabel>
-                  <FieldDescription>
-                    The username for SMTP authentication
-                  </FieldDescription>
-                  <Input
-                    id="smtp-user"
-                    placeholder="user@example.com"
-                    value={settings.smtpUser}
-                    onChange={(e) => handleSettingChange('smtpUser', e.target.value)}
-                  />
-                </Field>
-
-                {/* SMTP Password */}
-                <Field>
-                  <FieldLabel htmlFor="smtp-password">SMTP Password</FieldLabel>
-                  <FieldDescription>
-                    The password or app-specific password for SMTP authentication
-                  </FieldDescription>
-                  <Input
-                    id="smtp-password"
-                    type="password"
-                    placeholder="••••••••"
-                    value={settings.smtpPassword}
-                    onChange={(e) => handleSettingChange('smtpPassword', e.target.value)}
-                  />
-                </Field>
-
-                {/* From Email */}
-                <Field>
-                  <FieldLabel htmlFor="from-email">From Email</FieldLabel>
-                  <FieldDescription>
-                    The email address that will appear as the sender
-                  </FieldDescription>
-                  <Input
-                    id="from-email"
-                    type="email"
-                    placeholder="noreply@example.com"
-                    value={settings.fromEmail}
-                    onChange={(e) => handleSettingChange('fromEmail', e.target.value)}
-                  />
-                </Field>
-
-                {/* From Name */}
-                <Field>
-                  <FieldLabel htmlFor="from-name">From Name</FieldLabel>
-                  <FieldDescription>
-                    The name that will appear as the sender
-                  </FieldDescription>
-                  <Input
-                    id="from-name"
-                    placeholder="My Company"
-                    value={settings.fromName}
-                    onChange={(e) => handleSettingChange('fromName', e.target.value)}
-                  />
-                </Field>
-
-                {/* Test Result */}
-                {testResult && (
-                  <div
-                    className={`px-4 py-2 rounded-md text-sm ${
-                      testResult.success
-                        ? 'bg-green-500/10 text-green-600 dark:text-green-400'
-                        : 'bg-destructive/10 text-destructive'
-                    }`}
-                  >
-                    {testResult.message}
+          {/* Custom SMTP option */}
+          <button
+            type="button"
+            onClick={() => handleModeSelect('custom')}
+            className={`flex items-start gap-3 rounded-lg border p-4 text-left transition-colors ${
+              selectedMode === 'custom'
+                ? 'border-primary bg-secondary/20 ring-1 ring-primary'
+                : 'bg-secondary/20 hover:border-primary/50'
+            }`}
+          >
+            <div className="flex h-5 items-center">
+              <div
+                className={`size-4 rounded-full border-2 transition-colors ${
+                  selectedMode === 'custom'
+                    ? 'border-primary bg-primary'
+                    : 'border-muted-foreground/30'
+                }`}
+              >
+                {selectedMode === 'custom' && (
+                  <div className="size-full flex items-center justify-center">
+                    <div className="size-1.5 rounded-full bg-primary-foreground" />
                   </div>
                 )}
               </div>
+            </div>
+            <div className="flex-1">
+              <span className="text-sm font-medium">Custom</span>
+              <p className="text-xs text-muted-foreground mt-1">
+                Use your own SMTP server credentials to send emails
+              </p>
+            </div>
+          </button>
 
-              {/* Action Buttons - only show when enabled */}
-              <div className="flex justify-end gap-2 border-t pt-6">
+          {/* SMTP Configuration — shown when Custom is selected */}
+          {selectedMode === 'custom' && (
+            <div className="flex flex-col gap-6 bg-secondary/20 p-8 rounded-lg">
+              <Field>
+                <FieldLabel htmlFor="smtp-provider">Provider</FieldLabel>
+                <FieldDescription>
+                  Select your email provider for pre-configured settings
+                </FieldDescription>
+                <Select
+                  value={settings.provider}
+                  onValueChange={(value) => handleProviderChange(value as SmtpProvider)}
+                >
+                  <SelectTrigger id="smtp-provider" className="w-full">
+                    <SelectValue placeholder="Select provider" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SMTP_PROVIDER_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {currentPreset.note && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {currentPreset.note}
+                  </p>
+                )}
+              </Field>
+
+              <Field>
+                <FieldLabel htmlFor="smtp-host">SMTP Host</FieldLabel>
+                <FieldDescription>
+                  The hostname of your SMTP server
+                </FieldDescription>
+                <Input
+                  id="smtp-host"
+                  placeholder="smtp.example.com"
+                  value={settings.smtpHost}
+                  onChange={(e) => handleSettingChange('smtpHost', e.target.value)}
+                />
+              </Field>
+
+              <Field>
+                <FieldLabel htmlFor="smtp-port">SMTP Port</FieldLabel>
+                <FieldDescription>
+                  The port of your SMTP server (587 for TLS, 465 for SSL)
+                </FieldDescription>
+                <Input
+                  id="smtp-port"
+                  placeholder="587"
+                  value={settings.smtpPort}
+                  onChange={(e) => handleSettingChange('smtpPort', e.target.value)}
+                />
+              </Field>
+
+              <Field>
+                <FieldLabel htmlFor="smtp-user">SMTP Username</FieldLabel>
+                <FieldDescription>
+                  The username for SMTP authentication
+                </FieldDescription>
+                <Input
+                  id="smtp-user"
+                  placeholder="user@example.com"
+                  value={settings.smtpUser}
+                  onChange={(e) => handleSettingChange('smtpUser', e.target.value)}
+                />
+              </Field>
+
+              <Field>
+                <FieldLabel htmlFor="smtp-password">SMTP Password</FieldLabel>
+                <FieldDescription>
+                  The password or app-specific password for SMTP authentication
+                </FieldDescription>
+                <Input
+                  id="smtp-password"
+                  type="password"
+                  placeholder="••••••••"
+                  value={settings.smtpPassword}
+                  onChange={(e) => handleSettingChange('smtpPassword', e.target.value)}
+                />
+              </Field>
+
+              <Field>
+                <FieldLabel htmlFor="from-email">From Email</FieldLabel>
+                <FieldDescription>
+                  The email address that will appear as the sender
+                </FieldDescription>
+                <Input
+                  id="from-email"
+                  type="email"
+                  placeholder="noreply@example.com"
+                  value={settings.fromEmail}
+                  onChange={(e) => handleSettingChange('fromEmail', e.target.value)}
+                />
+              </Field>
+
+              <Field>
+                <FieldLabel htmlFor="from-name">From Name</FieldLabel>
+                <FieldDescription>
+                  The name that will appear as the sender
+                </FieldDescription>
+                <Input
+                  id="from-name"
+                  placeholder="My Company"
+                  value={settings.fromName}
+                  onChange={(e) => handleSettingChange('fromName', e.target.value)}
+                />
+              </Field>
+
+              {testResult && (
+                <div
+                  className={`px-4 py-2 rounded-md text-sm ${
+                    testResult.success
+                      ? 'bg-green-500/10 text-green-600 dark:text-green-400'
+                      : 'bg-destructive/10 text-destructive'
+                  }`}
+                >
+                  {testResult.message}
+                </div>
+              )}
+
+              <div className="flex justify-end border-t pt-6">
                 <Button
                   variant="secondary"
                   onClick={handleTestConnection}
@@ -393,13 +407,16 @@ export default function EmailSettingsPage() {
                 >
                   {isTesting ? <Spinner className="size-4" /> : 'Test Connection'}
                 </Button>
-                {hasChanges && (
-                  <Button onClick={handleSave} disabled={isSaving}>
-                    {isSaving ? <Spinner className="size-4" /> : 'Save changes'}
-                  </Button>
-                )}
               </div>
-            </>
+            </div>
+          )}
+
+          {hasChanges && (
+            <div className="flex justify-end">
+              <Button onClick={handleSave} disabled={isSaving}>
+                {isSaving ? <Spinner className="size-4" /> : 'Save changes'}
+              </Button>
+            </div>
           )}
         </div>
       </div>
