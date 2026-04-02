@@ -467,9 +467,10 @@ export default function AirtableSettings({
     try {
       await airtableApi.disableWebhook(connectionId);
       toast.success('Auto-sync disabled');
-      await refreshConnections();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to disable auto-sync');
+    } finally {
+      await refreshConnections();
     }
   };
 

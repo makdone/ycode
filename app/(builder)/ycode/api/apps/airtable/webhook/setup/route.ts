@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
     const connection = await requireConnectionFromBody(request);
 
     if (connection.webhookId) {
-      return noCache({ error: 'Webhook already registered for this connection' }, 400);
+      return noCache({ error: 'Auto-sync already enabled', detail: 'Disable the existing webhook first.' }, 400);
     }
 
     const token = await requireAirtableToken();
@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
 
     if (!notificationUrl.startsWith('https://')) {
       return noCache(
-        { error: 'Webhook requires a public HTTPS URL. Set NEXT_PUBLIC_SITE_URL in your environment.' },
+        { error: 'HTTPS URL required', detail: 'Set NEXT_PUBLIC_SITE_URL to a public HTTPS URL.' },
         400
       );
     }
@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Error setting up Airtable webhook:', error);
     return noCache(
-      { error: error instanceof Error ? error.message : 'Failed to setup webhook' },
+      { error: 'Failed to enable auto-sync', detail: error instanceof Error ? error.message : 'Unknown error' },
       500
     );
   }
