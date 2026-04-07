@@ -11,7 +11,7 @@
 
 import { randomUUID } from 'crypto';
 
-import { getSupabaseAdmin } from '@/lib/supabase-server';
+import { getSupabaseAdmin, runWithTenantId } from '@/lib/supabase-server';
 import { getAppSettingValue, setAppSetting } from '@/lib/repositories/appSettingsRepository';
 import { slugify } from '@/lib/collection-utils';
 import { isAssetFieldType, isMultipleAssetField, getAssetCategoryForField } from '@/lib/collection-field-utils';
@@ -39,6 +39,10 @@ const SLUG_FIELD_KEY = 'slug';
 const BULK_CHUNK_SIZE = 500;
 const ATTACHMENT_CONCURRENCY = 5;
 const INCREMENTAL_SYNC_THRESHOLD = 100;
+/** Debounce delay so rapid-fire Airtable notifications settle before processing */
+const WEBHOOK_DEBOUNCE_MS = 2000;
+/** Auto-release stale locks after this duration (process crash safety net) */
+const SYNC_LOCK_TIMEOUT_MS = 120_000;
 
 // =============================================================================
 // Connection Helpers
@@ -157,6 +161,86 @@ export async function refreshActiveWebhooks(
   }
 
   return { refreshed, failed };
+}
+
+// =============================================================================
+// Webhook Sync Lock
+// =============================================================================
+
+/**
+ * Atomic distributed lock using an app_settings row as a mutex.
+ * Uses INSERT … ON CONFLICT DO UPDATE WHERE to guarantee only one
+ * serverless invocation processes a given webhook at a time.
+ * Mirrors the legacy Cache::lock() pattern.
+ *
+ * Handles both single-tenant (unique on app_id,key) and multi-tenant
+ * (unique on tenant_id,app_id,key) constraint variants.
+ *
+ * @param tenantId - Captured from request headers before fire-and-forget.
+ *   Passing explicitly avoids relying on AsyncLocalStorage in background context.
+ */
+async function tryClaimSyncLock(webhookId: string, tenantId: string | null): Promise<boolean> {
+  try {
+    const { getKnexClient } = await import('@/lib/knex-client');
+    const knex = await getKnexClient();
+
+    const lockKey = `sync_lock_${webhookId}`;
+    const now = new Date().toISOString();
+    const staleThreshold = new Date(Date.now() - SYNC_LOCK_TIMEOUT_MS).toISOString();
+    const lockValue = JSON.stringify({ locked_at: now });
+
+    const whereClause = `WHERE app_settings.value->>'locked_at' IS NULL
+            OR app_settings.value->>'locked_at' < ?`;
+
+    const result = tenantId
+      ? await knex.raw(
+        `INSERT INTO app_settings (app_id, key, value, created_at, updated_at, tenant_id)
+         VALUES ('airtable', ?, ?::jsonb, ?, ?, ?)
+         ON CONFLICT (tenant_id, app_id, key) DO UPDATE
+           SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
+           ${whereClause}
+         RETURNING id`,
+        [lockKey, lockValue, now, now, tenantId, staleThreshold]
+      )
+      : await knex.raw(
+        `INSERT INTO app_settings (app_id, key, value, created_at, updated_at)
+         VALUES ('airtable', ?, ?::jsonb, ?, ?)
+         ON CONFLICT (app_id, key) DO UPDATE
+           SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
+           ${whereClause}
+         RETURNING id`,
+        [lockKey, lockValue, now, now, staleThreshold]
+      );
+
+    return (result.rows?.length ?? 0) > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** Release the sync lock. Best-effort — stale timeout handles cleanup on crash. */
+async function releaseSyncLock(webhookId: string, tenantId: string | null): Promise<void> {
+  try {
+    const { getKnexClient } = await import('@/lib/knex-client');
+    const knex = await getKnexClient();
+
+    const lockKey = `sync_lock_${webhookId}`;
+    const now = new Date().toISOString();
+
+    const tenantFilter = tenantId ? ` AND tenant_id = ?` : '';
+    const params = tenantId
+      ? [now, lockKey, tenantId]
+      : [now, lockKey];
+
+    await knex.raw(
+      `UPDATE app_settings
+       SET value = '{"locked_at": null}'::jsonb, updated_at = ?
+       WHERE app_id = 'airtable' AND key = ?${tenantFilter}`,
+      params
+    );
+  } catch {
+    // Best-effort — stale timeout handles cleanup
+  }
 }
 
 // =============================================================================
@@ -292,63 +376,83 @@ async function incrementalSync(
  * Extracts per-record changes and runs incremental sync when practical,
  * falling back to full sync for large changesets.
  *
- * Concurrency guard: claims `syncStatus: 'syncing'` before fetching
- * payloads and advances the cursor before processing, so concurrent
- * serverless invocations skip or see an empty payload.
+ * Concurrency: uses a database-level mutex (app_settings row) so only one
+ * serverless invocation processes a given webhook at a time. A 2-second
+ * debounce inside the lock lets rapid-fire Airtable notifications settle,
+ * matching the pattern from the legacy Cache::lock + sleep(2).
  */
 export async function processWebhookNotification(
   baseId: string,
-  webhookId: string
+  webhookId: string,
+  tenantId?: string | null
 ): Promise<SyncResult[]> {
-  const token = await requireAirtableToken();
+  const tid = tenantId ?? null;
+  const lockAcquired = await tryClaimSyncLock(webhookId, tid);
+  if (!lockAcquired) return [];
 
-  const connections = await getConnections();
-  const affectedConnections = connections.filter(
-    (c) => c.baseId === baseId && c.webhookId === webhookId
-  );
-
-  if (affectedConnections.length === 0) return [];
-
-  const results: SyncResult[] = [];
-  for (const conn of affectedConnections) {
-    const freshConn = await getConnectionById(conn.id);
-    if (!freshConn || freshConn.syncStatus === 'syncing') continue;
-
-    await updateConnection(conn.id, { syncStatus: 'syncing', syncError: null });
-
+  const doSync = async (): Promise<SyncResult[]> => {
     try {
-      const cursor = freshConn.webhookCursor || undefined;
-      const payloadResponse = await getWebhookPayloads(token, baseId, webhookId, cursor);
+      // Debounce: let rapid-fire notifications settle before hitting the API
+      await new Promise((resolve) => setTimeout(resolve, WEBHOOK_DEBOUNCE_MS));
 
-      if (payloadResponse.cursor) {
-        await updateConnection(conn.id, { webhookCursor: payloadResponse.cursor });
+      const token = await requireAirtableToken();
+
+      const connections = await getConnections();
+      const affectedConnections = connections.filter(
+        (c) => c.baseId === baseId && c.webhookId === webhookId
+      );
+
+      if (affectedConnections.length === 0) return [];
+
+      const results: SyncResult[] = [];
+      for (const conn of affectedConnections) {
+        const freshConn = await getConnectionById(conn.id);
+        if (!freshConn || freshConn.syncStatus === 'syncing') continue;
+
+        await updateConnection(conn.id, { syncStatus: 'syncing', syncError: null });
+
+        try {
+          const cursor = freshConn.webhookCursor || undefined;
+          const payloadResponse = await getWebhookPayloads(token, baseId, webhookId, cursor);
+
+          if (payloadResponse.cursor) {
+            await updateConnection(conn.id, { webhookCursor: payloadResponse.cursor });
+          }
+
+          if (!payloadResponse.payloads?.length) {
+            await updateConnection(conn.id, { syncStatus: 'idle' });
+            continue;
+          }
+
+          const changes = extractTableChanges(payloadResponse.payloads, conn.tableId);
+          const totalChanges = changes.createdRecordIds.length
+            + changes.changedRecordIds.length
+            + changes.destroyedRecordIds.length;
+
+          if (totalChanges > 0) {
+            const result = totalChanges > INCREMENTAL_SYNC_THRESHOLD
+              ? await fullSync(freshConn)
+              : await incrementalSync(freshConn, changes);
+            results.push(result);
+          } else {
+            await updateConnection(conn.id, { syncStatus: 'idle' });
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Unknown sync error';
+          await updateConnection(conn.id, { syncStatus: 'error', syncError: message });
+        }
       }
 
-      if (!payloadResponse.payloads?.length) {
-        await updateConnection(conn.id, { syncStatus: 'idle' });
-        continue;
-      }
-
-      const changes = extractTableChanges(payloadResponse.payloads, conn.tableId);
-      const totalChanges = changes.createdRecordIds.length
-        + changes.changedRecordIds.length
-        + changes.destroyedRecordIds.length;
-
-      if (totalChanges > 0) {
-        const result = totalChanges > INCREMENTAL_SYNC_THRESHOLD
-          ? await fullSync(freshConn)
-          : await incrementalSync(freshConn, changes);
-        results.push(result);
-      } else {
-        await updateConnection(conn.id, { syncStatus: 'idle' });
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown sync error';
-      await updateConnection(conn.id, { syncStatus: 'error', syncError: message });
+      return results;
+    } finally {
+      await releaseSyncLock(webhookId, tid);
     }
-  }
+  };
 
-  return results;
+  // Wrap in explicit tenant context so all nested getSupabaseAdmin() /
+  // getTenantIdFromHeaders() calls resolve correctly even after the
+  // Next.js request context is gone (fire-and-forget).
+  return tid ? runWithTenantId(tid, doSync) : doSync();
 }
 
 // =============================================================================

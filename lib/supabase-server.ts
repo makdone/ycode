@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from 'async_hooks';
+
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { credentials } from './credentials';
 import { parseSupabaseConfig } from './supabase-config-parser';
@@ -9,6 +11,17 @@ import type { SupabaseConfig, SupabaseCredentials } from '@/types';
  * Creates authenticated Supabase clients for server-side operations
  * Credentials are fetched from file-based storage or environment variables
  */
+
+/**
+ * Explicit tenant context for code running outside of a Next.js request
+ * (e.g. fire-and-forget webhook processing where headers() is unavailable).
+ */
+export const tenantStore = new AsyncLocalStorage<string>();
+
+/** Run an async function with an explicit tenant context. */
+export function runWithTenantId<T>(tenantId: string, fn: () => Promise<T>): Promise<T> {
+  return tenantStore.run(tenantId, fn);
+}
 
 /**
  * Get Supabase credentials from storage
@@ -107,8 +120,8 @@ export async function testSupabaseConnection(
 /**
  * Get tenant ID from request headers.
  *
- * Opensource: always returns null (single-tenant, no tenant scoping needed).
- * Cloud overlay: overridden to read x-tenant-id header set by middleware.
+ * Base implementation: always returns null (single-tenant, no scoping needed).
+ * Overridden via path alias in multi-tenant deployments.
  */
 export async function getTenantIdFromHeaders(): Promise<string | null> {
   return null;

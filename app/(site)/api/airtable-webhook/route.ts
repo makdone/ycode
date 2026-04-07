@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { processWebhookNotification } from '@/lib/apps/airtable/sync-service';
+import { getTenantIdFromHeaders } from '@/lib/supabase-server';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -19,8 +20,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid payload' }, { status: 400 });
     }
 
+    // Capture tenant context while still in request scope — AsyncLocalStorage
+    // may not survive the fire-and-forget boundary below.
+    const tenantId = await getTenantIdFromHeaders();
+
     // Process async — don't block the webhook response
-    processWebhookNotification(baseId, webhookId).catch((err) => {
+    processWebhookNotification(baseId, webhookId, tenantId).catch((err) => {
       console.error('[Airtable Webhook] Sync error:', err);
     });
 
