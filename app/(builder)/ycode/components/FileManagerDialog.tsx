@@ -514,6 +514,30 @@ function FileGridItem({
   );
 }
 
+function FileGridHeader({ children, isSticky = false }: { children: React.ReactNode; isSticky?: boolean }) {
+  return (
+    <div
+      className={cn(
+        'flex items-center justify-between gap-2 min-h-14 shrink-0',
+        isSticky && 'sticky top-0 z-30 bg-background before:absolute before:-top-px before:left-0 before:right-0 before:h-px before:bg-background'
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+const LoadMoreSentinel = React.forwardRef<HTMLDivElement>((_, ref) => (
+  <div
+    ref={ref}
+    className="col-span-full flex items-center justify-center gap-1.5 py-8"
+  >
+    <Spinner className="size-3" />
+    <span className="text-xs text-muted-foreground">Loading more results...</span>
+  </div>
+));
+LoadMoreSentinel.displayName = 'LoadMoreSentinel';
+
 export default function FileManagerDialog({
   open,
   onOpenChange,
@@ -598,6 +622,11 @@ export default function FileManagerDialog({
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const ASSETS_PER_PAGE = 50;
 
+  // Refs for stable IntersectionObserver callback (avoids recreating observer on every state change)
+  const isLoadingAssetsRef = useRef(false);
+  const hasMoreAssetsRef = useRef(true);
+  const currentPageRef = useRef(1);
+
   // Get all descendant folder IDs for a folder (including the folder itself)
   const getAllDescendantFolderIds = useCallback((folderId: string | null): string[] => {
     if (folderId === null) {
@@ -624,9 +653,14 @@ export default function FileManagerDialog({
   }, [searchQuery]);
 
   // --- Remix Icons fetching ---
+  const isLoadingRemixRef = useRef(false);
+  const hasMoreRemixRef = useRef(true);
+  const remixIconsLengthRef = useRef(0);
+
   const loadRemixIcons = useCallback(async (offset: number, reset: boolean = false) => {
-    if (isLoadingRemixIcons && !reset) return;
+    if (isLoadingRemixRef.current && !reset) return;
     setIsLoadingRemixIcons(true);
+    isLoadingRemixRef.current = true;
 
     try {
       const result = await fetchRemixIcons({
@@ -639,45 +673,82 @@ export default function FileManagerDialog({
 
       if (reset || offset === 0) {
         setRemixIcons(result.icons);
+        remixIconsLengthRef.current = result.icons.length;
       } else {
-        setRemixIcons(prev => [...prev, ...result.icons]);
+        setRemixIcons(prev => {
+          const updated = [...prev, ...result.icons];
+          remixIconsLengthRef.current = updated.length;
+          return updated;
+        });
       }
 
       setRemixTotal(result.total);
       setRemixCategories(result.categories);
       setRemixTotalIcons(result.totalIcons);
-      setHasMoreRemixIcons(offset + result.icons.length < result.total);
+      const more = offset + result.icons.length < result.total;
+      setHasMoreRemixIcons(more);
+      hasMoreRemixRef.current = more;
     } catch (error) {
       console.error('Failed to fetch Remix Icons:', error);
     } finally {
       setIsLoadingRemixIcons(false);
+      isLoadingRemixRef.current = false;
     }
-  }, [debouncedSearch, remixCategory, remixStyle, isLoadingRemixIcons]);
+  }, [debouncedSearch, remixCategory, remixStyle]);
 
   // Reset and reload remix icons when search/filters change
   useEffect(() => {
     if (!isRemixIconsView) return;
     setRemixIcons([]);
+    remixIconsLengthRef.current = 0;
     setHasMoreRemixIcons(true);
+    hasMoreRemixRef.current = true;
     loadRemixIcons(0, true);
   }, [isRemixIconsView, debouncedSearch, remixCategory, remixStyle]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Infinite scroll for remix icons
-  useEffect(() => {
-    if (!isRemixIconsView || !remixLoadMoreRef.current || !hasMoreRemixIcons || isLoadingRemixIcons) return;
+  // Stable ref to loadRemixIcons
+  const loadRemixIconsRef = useRef(loadRemixIcons);
+  loadRemixIconsRef.current = loadRemixIcons;
 
-    const observer = new IntersectionObserver(
+  // Infinite scroll for remix icons — recreated when icon count changes
+  const remixObserverRef = useRef<IntersectionObserver | null>(null);
+
+  useEffect(() => {
+    if (!isRemixIconsView) return;
+
+    remixObserverRef.current = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMoreRemixIcons && !isLoadingRemixIcons) {
-          loadRemixIcons(remixIcons.length);
+        if (
+          entries[0].isIntersecting &&
+          hasMoreRemixRef.current &&
+          !isLoadingRemixRef.current
+        ) {
+          loadRemixIconsRef.current(remixIconsLengthRef.current);
         }
       },
-      { threshold: 0.1 }
+      { rootMargin: '0px 0px 500px 0px' }
     );
 
-    observer.observe(remixLoadMoreRef.current);
-    return () => observer.disconnect();
-  }, [isRemixIconsView, hasMoreRemixIcons, isLoadingRemixIcons, remixIcons.length, loadRemixIcons]);
+    if (remixLoadMoreRef.current) {
+      remixObserverRef.current.observe(remixLoadMoreRef.current);
+    }
+
+    return () => {
+      remixObserverRef.current?.disconnect();
+      remixObserverRef.current = null;
+    };
+  }, [isRemixIconsView, remixIcons.length]);
+
+  // Callback ref for remix sentinel
+  const setRemixLoadMoreRef = useCallback((node: HTMLDivElement | null) => {
+    if (remixLoadMoreRef.current && remixObserverRef.current) {
+      remixObserverRef.current.unobserve(remixLoadMoreRef.current);
+    }
+    remixLoadMoreRef.current = node;
+    if (node && remixObserverRef.current) {
+      remixObserverRef.current.observe(node);
+    }
+  }, []);
 
   /** Open the Create SVG dialog pre-filled with a Remix Icon */
   const handleRemixIconClick = useCallback((icon: RemixIcon) => {
@@ -691,9 +762,10 @@ export default function FileManagerDialog({
 
   // Load assets when folder, search, or category changes
   const loadAssets = useCallback(async (page: number, reset: boolean = false) => {
-    if (isLoadingAssets && !reset) return;
+    if (isLoadingAssetsRef.current && !reset) return;
 
     setIsLoadingAssets(true);
+    isLoadingAssetsRef.current = true;
 
     try {
       // Build folder IDs for search (include descendants)
@@ -708,68 +780,119 @@ export default function FileManagerDialog({
         folderId = selectedFolderId;
       }
 
-      const result = await fetchAssets({
-        folderId,
-        folderIds,
-        search: debouncedSearch.trim() || undefined,
-        page,
-        limit: ASSETS_PER_PAGE,
-      });
+      let currentFetchPage = page;
+      let hasMore = true;
 
-      // Filter by category client-side (since category is UI-specific)
-      let filteredAssets = result.assets;
-      if (selectedCategories !== null) {
-        filteredAssets = result.assets.filter((asset) =>
-          matchesCategoryFilter(asset.mime_type, selectedCategories)
-        );
-      }
+      // When category filtering is active, pages may yield zero matching results.
+      // Keep fetching subsequent pages until we find matches or the server is exhausted.
+      let isFirstPage = reset || page === 1;
 
-      if (reset || page === 1) {
-        setAssets(filteredAssets);
-      } else {
-        // Deduplicate when appending to avoid duplicate key errors
-        setAssets(prev => {
-          const existingIds = new Set(prev.map(a => a.id));
-          const newAssets = filteredAssets.filter(a => !existingIds.has(a.id));
-          return [...prev, ...newAssets];
+      while (hasMore) {
+        const result = await fetchAssets({
+          folderId,
+          folderIds,
+          search: debouncedSearch.trim() || undefined,
+          page: currentFetchPage,
+          limit: ASSETS_PER_PAGE,
         });
-      }
 
-      setTotalAssets(result.total);
-      setHasMoreAssets(result.hasMore);
-      setCurrentPage(page);
+        hasMore = result.hasMore;
+
+        // Filter by category client-side (since category is UI-specific)
+        let filteredAssets = result.assets;
+        if (selectedCategories !== null) {
+          filteredAssets = result.assets.filter((asset) =>
+            matchesCategoryFilter(asset.mime_type, selectedCategories)
+          );
+        }
+
+        if (isFirstPage) {
+          setAssets(filteredAssets);
+          isFirstPage = false;
+        } else if (filteredAssets.length > 0) {
+          setAssets(prev => {
+            const existingIds = new Set(prev.map(a => a.id));
+            const newAssets = filteredAssets.filter(a => !existingIds.has(a.id));
+            return [...prev, ...newAssets];
+          });
+        }
+
+        setTotalAssets(result.total);
+        setHasMoreAssets(hasMore);
+        hasMoreAssetsRef.current = hasMore;
+        setCurrentPage(currentFetchPage);
+        currentPageRef.current = currentFetchPage;
+
+        // Stop if we found matching results or the server has no more
+        if (filteredAssets.length > 0 || !hasMore) break;
+
+        currentFetchPage++;
+      }
     } catch (error) {
       console.error('Failed to load assets:', error);
     } finally {
       setIsLoadingAssets(false);
+      isLoadingAssetsRef.current = false;
     }
-  }, [fetchAssets, selectedFolderId, debouncedSearch, selectedCategories, getAllDescendantFolderIds, isLoadingAssets]);
+  }, [fetchAssets, selectedFolderId, debouncedSearch, selectedCategories, getAllDescendantFolderIds]);
 
   // Reset and reload when folder, search, or category changes (skip for virtual folders)
   useEffect(() => {
     if (isVirtualFolder(selectedFolderId)) return;
     setAssets([]);
     setCurrentPage(1);
+    currentPageRef.current = 1;
     setHasMoreAssets(true);
+    hasMoreAssetsRef.current = true;
     loadAssets(1, true);
   }, [selectedFolderId, debouncedSearch, selectedCategories]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Infinite scroll observer (skip for virtual folders - they have their own)
-  useEffect(() => {
-    if (isVirtualFolder(selectedFolderId) || !loadMoreRef.current || !hasMoreAssets || isLoadingAssets) return;
+  // Stable ref to loadAssets so the observer callback never goes stale
+  const loadAssetsRef = useRef(loadAssets);
+  loadAssetsRef.current = loadAssets;
 
-    const observer = new IntersectionObserver(
+  // Infinite scroll observer — recreated when currentPage changes so it re-evaluates
+  // sentinel visibility after each load. Ref-based guards prevent double-firing.
+  const assetsObserverRef = useRef<IntersectionObserver | null>(null);
+
+  useEffect(() => {
+    if (isVirtualFolder(selectedFolderId)) return;
+
+    assetsObserverRef.current = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMoreAssets && !isLoadingAssets) {
-          loadAssets(currentPage + 1);
+        if (
+          entries[0].isIntersecting &&
+          hasMoreAssetsRef.current &&
+          !isLoadingAssetsRef.current
+        ) {
+          loadAssetsRef.current(currentPageRef.current + 1);
         }
       },
-      { threshold: 0.1 }
+      { rootMargin: '0px 0px 300px 0px' }
     );
 
-    observer.observe(loadMoreRef.current);
-    return () => observer.disconnect();
-  }, [selectedFolderId, hasMoreAssets, isLoadingAssets, currentPage, loadAssets]);
+    if (loadMoreRef.current) {
+      assetsObserverRef.current.observe(loadMoreRef.current);
+    }
+
+    return () => {
+      assetsObserverRef.current?.disconnect();
+      assetsObserverRef.current = null;
+    };
+  }, [selectedFolderId, currentPage]);
+
+  // Callback ref for the sentinel: observe/unobserve as it mounts/unmounts
+  const setLoadMoreRef = useCallback((node: HTMLDivElement | null) => {
+    // Unobserve the previous node
+    if (loadMoreRef.current && assetsObserverRef.current) {
+      assetsObserverRef.current.unobserve(loadMoreRef.current);
+    }
+    loadMoreRef.current = node;
+    // Observe the new node
+    if (node && assetsObserverRef.current) {
+      assetsObserverRef.current.observe(node);
+    }
+  }, []);
 
   // Get uploading assets for the current folder
   const currentUploadingAssets = useMemo(() => {
@@ -2094,12 +2217,12 @@ export default function FileManagerDialog({
             </div>
 
             {/* File Grid */}
-            <div className="flex-1 py-5 px-6 overflow-y-auto flex flex-col gap-6">
+            <div className="flex-1 px-6 pb-5 overflow-y-auto flex flex-col">
               {selectedFolderId === VIRTUAL_LIBRARIES_ID ? (
                 <>
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground h-7">
-                    <span className="text-foreground font-medium">Libraries</span>
-                  </div>
+                  <FileGridHeader>
+                    <span className="text-xs text-foreground font-medium">Libraries</span>
+                  </FileGridHeader>
                   <div className="grid grid-cols-[repeat(auto-fill,minmax(110px,1fr))] gap-4">
                     <FileGridItem
                       id={VIRTUAL_ICONS_ID}
@@ -2119,16 +2242,18 @@ export default function FileManagerDialog({
                 </>
               ) : selectedFolderId === VIRTUAL_ICONS_ID ? (
                 <>
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground h-7">
-                    <button
-                      onClick={() => setSelectedFolderId(VIRTUAL_LIBRARIES_ID)}
-                      className="hover:text-foreground transition-colors cursor-pointer"
-                    >
-                      Libraries
-                    </button>
-                    <Icon name="chevronRight" className="size-2.5 opacity-50" />
-                    <span className="text-foreground font-medium">Icons</span>
-                  </div>
+                  <FileGridHeader>
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <button
+                        onClick={() => setSelectedFolderId(VIRTUAL_LIBRARIES_ID)}
+                        className="hover:text-foreground transition-colors cursor-pointer"
+                      >
+                        Libraries
+                      </button>
+                      <Icon name="chevronRight" className="size-2.5 opacity-50" />
+                      <span className="text-foreground font-medium">Icons</span>
+                    </div>
+                  </FileGridHeader>
                   <div className="grid grid-cols-[repeat(auto-fill,minmax(110px,1fr))] gap-4">
                     <FileGridItem
                       id={VIRTUAL_REMIX_ID}
@@ -2149,7 +2274,7 @@ export default function FileManagerDialog({
               ) : isRemixIconsView ? (
                 <>
                   {/* Remix Icons header */}
-                  <div className="flex items-center justify-between gap-2 h-7">
+                  <FileGridHeader isSticky>
                     <div className="flex items-center gap-1 text-xs text-muted-foreground">
                       <button
                         onClick={() => setSelectedFolderId(VIRTUAL_LIBRARIES_ID)}
@@ -2217,7 +2342,7 @@ export default function FileManagerDialog({
                         </SelectContent>
                       </Select>
                     </div>
-                  </div>
+                  </FileGridHeader>
 
                   {/* Remix Icons grid */}
                   {isLoadingRemixIcons && remixIcons.length === 0 ? (
@@ -2258,18 +2383,8 @@ export default function FileManagerDialog({
                         </div>
                       ))}
 
-                      {/* Infinite scroll trigger */}
                       {hasMoreRemixIcons && (
-                        <div
-                          ref={remixLoadMoreRef}
-                          className="col-span-full flex items-center justify-center py-4"
-                        >
-                          {isLoadingRemixIcons ? (
-                            <Spinner />
-                          ) : (
-                            <span className="text-sm text-muted-foreground">Scroll for more</span>
-                          )}
-                        </div>
+                        <LoadMoreSentinel ref={setRemixLoadMoreRef} />
                       )}
                     </div>
                   )}
@@ -2277,7 +2392,7 @@ export default function FileManagerDialog({
               ) : (
                 <>
                   {/* Breadcrumb */}
-                  <div className="flex items-center justify-between gap-2 h-7">
+                  <FileGridHeader isSticky>
                     <div className="flex items-center gap-1 text-xs text-muted-foreground">
                       {searchQuery.trim() ? (
                         <>
@@ -2313,10 +2428,10 @@ export default function FileManagerDialog({
 
                     <div className="flex items-center gap-2">
                       {/* Show asset count */}
-                      {totalAssets > 0 && selectedAssetIds.size === 0 && (
+                      {assets.length > 0 && selectedAssetIds.size === 0 && (
                         <span className="text-xs text-muted-foreground">
-                          {assets.length === totalAssets
-                            ? `${totalAssets} files`
+                          {assets.length >= totalAssets
+                            ? `${assets.length} ${assets.length === 1 ? 'file' : 'files'}`
                             : `${assets.length} of ${totalAssets} files`}
                         </span>
                       )}
@@ -2370,7 +2485,7 @@ export default function FileManagerDialog({
                         </Button>
                       )}
                     </div>
-                  </div>
+                  </FileGridHeader>
 
                   {/* Loading indicator for initial load - show ONLY this, nothing else */}
                   {isLoadingAssets && assets.length === 0 && currentUploadingAssets.length === 0 ? (
@@ -2455,18 +2570,8 @@ export default function FileManagerDialog({
                         />
                       ))}
 
-                      {/* Infinite scroll trigger */}
                       {hasMoreAssets && (
-                        <div
-                          ref={loadMoreRef}
-                          className="col-span-full flex items-center justify-center py-4"
-                        >
-                          {isLoadingAssets ? (
-                            <Spinner />
-                          ) : (
-                            <span className="text-sm text-muted-foreground">Scroll for more</span>
-                          )}
-                        </div>
+                        <LoadMoreSentinel ref={setLoadMoreRef} />
                       )}
                     </div>
                   )}

@@ -93,9 +93,10 @@ export async function getAssetsPaginated(options: GetAssetsOptions = {}): Promis
     query = query.ilike('filename', `%${search.trim()}%`);
   }
 
-  // Apply pagination and ordering
+  // Apply pagination and ordering (id tiebreaker ensures stable order for identical timestamps)
   query = query
     .order('created_at', { ascending: false })
+    .order('id', { ascending: true })
     .range(offset, offset + limit - 1);
 
   const { data, error, count } = await query;
@@ -140,7 +141,8 @@ export async function getAllAssets(folderId?: string | null): Promise<Asset[]> {
       .eq('is_published', false)
       .is('deleted_at', null)
       .range(offset, offset + PAGE_SIZE - 1)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: true });
 
     // Filter by folder if specified
     if (folderId !== undefined) {

@@ -37,6 +37,7 @@ alwaysApply: true
 - **No AI attribution**: never mention Cursor, AI, copilot, or assistant
 - **No filler words**: avoid "various", "some", "minor", "misc" — be specific
 - **No WIP commits**: if the work is incomplete, describe what IS done
+- **No trailer parameters**: do not use `--trailer` flags in git commit commands
 
 ## Examples
 

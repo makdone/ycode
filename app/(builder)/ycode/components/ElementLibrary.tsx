@@ -740,6 +740,16 @@ export default function ElementLibrary({ isOpen, onClose, liveLayerUpdates }: El
         }
       }
 
+      // Check for circular reference: layout may contain component instances
+      // that reference the component being edited (or one of its ancestors)
+      const freshComponents = useComponentsStore.getState().components;
+      const circularError = checkCircularReference(editingComponentId, newLayer, freshComponents);
+      if (circularError) {
+        toast.error('Infinite component loop detected', { description: circularError });
+        onClose();
+        return;
+      }
+
       // Find parent layer and check if it can have children
       const findLayerInTree = (tree: any[], targetId: string): any | null => {
         for (const node of tree) {
@@ -1563,12 +1573,13 @@ export default function ElementLibrary({ isOpen, onClose, liveLayerUpdates }: El
                         key={component.id}
                         component={component}
                         className={cn(
-                          circularComponentIds.has(component.id) && 'opacity-40',
+                          circularComponentIds.has(component.id) && 'opacity-40 pointer-events-none',
                           isHidden && 'hidden',
                         )}
                         onClick={() => handleAddComponent(component.id)}
                         onMouseDown={(e) => {
                           if (e.button !== 0) return;
+                          if (circularComponentIds.has(component.id)) return;
                           const startX = e.clientX;
                           const startY = e.clientY;
                           let dragging = false;

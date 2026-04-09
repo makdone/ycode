@@ -46,6 +46,7 @@ Examples: `feat: add custom domain management`, `fix: prevent primary domain del
 - **Link issues** when applicable: "Closes #123" in the summary
 - **Keep it scannable**: bullets over paragraphs, short lines
 - **Test plan is mandatory**: always include at least one verification step
+- **No trailer parameters**: do not use `--trailer` flags in git commit commands
 
 ## Example
 

@@ -2588,6 +2588,12 @@ const LayerItem: React.FC<{
         ...normalizedAttributes,
       };
 
+      // React treats autoPlay as a DOM property, not an HTML attribute,
+      // so it won't survive SSR or hydration. Remove from props and
+      // apply via ref to avoid both the warning and the rendering issue.
+      const shouldAutoPlay = mediaProps.autoplay === true;
+      delete mediaProps.autoplay;
+
       if (mediaSrc) {
         mediaProps.src = mediaSrc;
       }
@@ -2596,27 +2602,36 @@ const LayerItem: React.FC<{
         mediaProps.poster = posterUrl;
       }
 
-      // Handle special attributes that need to be set on the DOM element (not as props)
-      // Volume must be set via JavaScript on the DOM element
-      if ((htmlTag === 'audio' || htmlTag === 'video') && normalizedAttributes?.volume) {
+      // Handle special attributes that need to be set on the DOM element
+      // (autoplay and volume must be set via JavaScript on the DOM element)
+      if (htmlTag === 'audio' || htmlTag === 'video') {
         const originalRef = mediaProps.ref;
-        const volumeValue = parseInt(normalizedAttributes.volume) / 100; // Convert 0-100 to 0-1
+        const volumeValue = normalizedAttributes?.volume
+          ? parseInt(normalizedAttributes.volume) / 100
+          : undefined;
 
-        mediaProps.ref = (element: HTMLAudioElement | HTMLVideoElement | null) => {
-          // Call original ref if it exists
-          if (originalRef) {
-            if (typeof originalRef === 'function') {
-              originalRef(element);
-            } else {
-              (originalRef as React.MutableRefObject<HTMLAudioElement | HTMLVideoElement | null>).current = element;
+        if (shouldAutoPlay || volumeValue !== undefined) {
+          mediaProps.ref = (element: HTMLAudioElement | HTMLVideoElement | null) => {
+            if (originalRef) {
+              if (typeof originalRef === 'function') {
+                originalRef(element);
+              } else {
+                (originalRef as React.MutableRefObject<HTMLAudioElement | HTMLVideoElement | null>).current = element;
+              }
             }
-          }
 
-          // Set volume on the DOM element
-          if (element) {
-            element.volume = volumeValue;
-          }
-        };
+            if (element) {
+              if (shouldAutoPlay) {
+                element.autoplay = true;
+                element.setAttribute('autoplay', '');
+                element.play().catch(() => {});
+              }
+              if (volumeValue !== undefined) {
+                element.volume = volumeValue;
+              }
+            }
+          };
+        }
       }
 
       return (

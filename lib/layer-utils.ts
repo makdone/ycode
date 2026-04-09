@@ -2254,6 +2254,7 @@ function resolveComponentsInLayers(
   components: Component[],
   parentComponentVariables?: ComponentVariable[],
   parentOverrides?: Layer['componentOverrides'],
+  _visitedComponentIds?: Set<string>,
 ): Layer[] {
   // First, resolve variableLinks at this level using applyComponentOverrides
   // This handles nested component instances whose variableLinks point to parentComponentVariables
@@ -2261,12 +2262,23 @@ function resolveComponentsInLayers(
     ? applyComponentOverrides(layers, parentOverrides, parentComponentVariables)
     : layers;
 
+  const visited = _visitedComponentIds ?? new Set<string>();
+
   return effectiveLayers.map(layer => {
     // If this layer is a component instance, populate its children from the component
     if (layer.componentId) {
+      // Circular reference guard
+      if (visited.has(layer.componentId)) {
+        console.warn('[resolveComponentsInLayers] Circular component reference detected, skipping:', layer.componentId);
+        return { ...layer, children: [] };
+      }
+
       const component = components.find(c => c.id === layer.componentId);
 
       if (component && component.layers && component.layers.length > 0) {
+        const innerVisited = new Set(visited);
+        innerVisited.add(layer.componentId);
+
         // The component's first layer is the actual content (Section, etc.)
         const componentContent = component.layers[0];
 
@@ -2279,7 +2291,7 @@ function resolveComponentsInLayers(
         // Recursively resolve any nested components within the transformed children
         // Pass current component's variables and this instance's overrides
         const resolvedChildren = resolveComponentsInLayers(
-          transformedChildren, components, component.variables, layer.componentOverrides,
+          transformedChildren, components, component.variables, layer.componentOverrides, innerVisited,
         );
 
         // Build ID map for remapping root layer interactions
@@ -2333,7 +2345,7 @@ function resolveComponentsInLayers(
     if (layer.children && layer.children.length > 0) {
       return {
         ...layer,
-        children: resolveComponentsInLayers(layer.children, components, parentComponentVariables, parentOverrides),
+        children: resolveComponentsInLayers(layer.children, components, parentComponentVariables, parentOverrides, visited),
       };
     }
 

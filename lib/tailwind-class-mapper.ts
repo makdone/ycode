@@ -245,21 +245,22 @@ const CLASS_PROPERTY_MAP: Record<string, RegExp> = {
   // Typography
   fontFamily: /^font-(sans|serif|mono|\[.+\])$/,
   // Updated to match partial arbitrary values like text-n, text-no, text-non (not just complete text-[10rem])
-  // Excludes text-align values (left, center, right, justify, start, end)
-  fontSize: /^text-(?!(?:left|center|right|justify|start|end)(?:\s|$)).+$/,
+  // Excludes text-align values and text-wrap utilities (wrap, nowrap, balance, pretty)
+  fontSize: /^text-(?!(?:left|center|right|justify|start|end|wrap|nowrap|balance|pretty)(?:\s|$)).+$/,
   fontWeight: /^font-(thin|extralight|light|normal|medium|semibold|bold|extrabold|black|\[.+\])$/,
   lineHeight: /^leading-(none|tight|snug|normal|relaxed|loose|\d+|\[.+\])$/,
   letterSpacing: /^tracking-(tighter|tight|normal|wide|wider|widest|\[.+\]|.+)$/,
   textAlign: /^text-(left|center|right|justify|start|end)$/,
+  textWrap: /^text-(wrap|nowrap|balance|pretty)$/,
   textTransform: /^(uppercase|lowercase|capitalize|normal-case)$/,
   textDecoration: /^(underline|overline|line-through|no-underline)$/,
   textDecorationColor: /^decoration-\[.+\](\/\d+)?$/,
   textDecorationThickness: /^decoration-(\d+|auto|from-font|\[(?!#|rgb|hsl).+\])$/,
   underlineOffset: /^underline-offset-.+$/,
   // Updated to match partial arbitrary values like text-r, text-re, text-red (not just complete text-[#FF0000])
-  // Excludes fontSize named values and text-align values
+  // Excludes fontSize named values, text-align values, and text-wrap utilities
   // Includes opacity modifier: text-[#cc8d8d]/59
-  color: /^text-(?!(?:xs|sm|base|lg|xl|2xl|3xl|4xl|5xl|6xl|7xl|8xl|9xl|left|center|right|justify|start|end)(?:\s|$)).+(\/\d+)?$/,
+  color: /^text-(?!(?:xs|sm|base|lg|xl|2xl|3xl|4xl|5xl|6xl|7xl|8xl|9xl|left|center|right|justify|start|end|wrap|nowrap|balance|pretty)(?:\s|$)).+(\/\d+)?$/,
   placeholderColor: /^placeholder:text-.+(\/\d+)?$/,
 
   // Backgrounds
