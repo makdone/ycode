@@ -3,8 +3,6 @@
 import React, { useCallback, useRef, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 interface SpacingValues {
@@ -359,11 +357,6 @@ export default function MarginPadding({ values, onChange }: MarginPaddingProps) 
   const dragEnd = useCallback(() => { setDraggingEdge(null); setDragModifiers({ altKey: false, shiftKey: false }); }, []);
   const isDragActive = !!draggingEdge;
 
-  const handleMarginAuto = useCallback(() => {
-    onChange('marginLeft', 'auto');
-    onChange('marginRight', 'auto');
-  }, [onChange]);
-
   return (
     <div className="flex flex-col items-center gap-3">
     <div className="grid grid-cols-[44px_44px_1fr_44px_44px] grid-rows-[auto_auto_auto_auto_auto] max-w-[214px] mx-auto">
@@ -467,22 +460,6 @@ export default function MarginPadding({ values, onChange }: MarginPaddingProps) 
       </div>
     </div>
 
-      {/* Margin-auto button */}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            onClick={handleMarginAuto}
-            variant="outline"
-            size="sm"
-            className="text-xs"
-          >
-            Margin Auto
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>
-          Center horizontally (margin-left & margin-right: auto)
-        </TooltipContent>
-      </Tooltip>
     </div>
   );
 }
