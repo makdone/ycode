@@ -1162,7 +1162,7 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(({
                 className="w-auto min-w-0 shrink-0"
                 onClick={() => editor.chain().focus().insertHtmlEmbed().run()}
               >
-                <Icon name="code" className="size-3" />
+                <Icon name="code-block" className="size-3" />
               </button>
             </ToggleGroupItem>
           </ToggleGroup>
