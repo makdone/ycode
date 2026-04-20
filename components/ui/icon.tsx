@@ -17,7 +17,7 @@ export interface IconProps extends React.SVGProps<SVGSVGElement> {
     | 'paintbrush' | 'swatch' | 'cube' | 'triangle-down' | 'triangle-right' | 'plus-circle' | 'plus-circle-solid' | 'detach' | 'email' | 'phone' | 'paperclip' | 'unlink' | 'map'
     | 'paragraph' | 'droplet' | 'expand' | 'collapse' | 'filter' | 'crosshair' | 'lightbox' | 'slider' | 'slide' | 'slides' | 'slide-button-prev' | 'slide-button-next'
     | 'slide-bullets' | 'slide-bullet' | 'slide-navigation' | 'slide-fraction' | 'loop-alternate' | 'loop-repeat' | 'listItem' | 'external-link'
-    | 'settings' | 'center-block' | 'table' | 'table-row' | 'table-cell' | 'add-column' | 'add-row' | 'delete-column' | 'delete-row' | 'delete-table'
+    | 'settings' | 'center-block' | 'table' | 'table-row' | 'table-cell' | 'add-column' | 'add-row' | 'delete-column' | 'delete-row' | 'delete-table' | 'header' | 'body'
   );
 }
 
@@ -49,6 +49,18 @@ const ICONS: Record<IconProps['name'], React.ReactNode> = {
   table: (
     <>
       <path d="M9.5,0 C10.8807119,0 12,1.11928813 12,2.5 L12,9.5 C12,10.8807119 10.8807119,12 9.5,12 L2.5,12 C1.11928813,12 0,10.8807119 0,9.5 L0,2.5 C0,1.11928813 1.11928813,0 2.5,0 L9.5,0 Z M3,11 L4,11 L4,9 L1,9 C1,10.1045695 1.8954305,11 3,11 Z M11,9 L5,9 L5,11 L9,11 C10.0543618,11 10.9181651,10.1841222 10.9945143,9.14926234 L11,9 Z M1,8 L4,8 L4,6 L1,6 L1,8 Z M11,5 L11,3 L5,3 L5,5 L11,5 Z M1,5 L4,5 L4,3 L1,3 L1,5 Z M11,6 L5,6 L5,8 L11,8 L11,6 Z" />
+    </>
+  ),
+  header: (
+    <>
+      <path d="M3,5 L9,5 C10.6568542,5 12,6.34314575 12,8 L12,11 C12,11.5522847 11.5522847,12 11,12 L1,12 C0.44771525,12 -2.65431532e-16,11.5522847 0,11 L0,8 C-2.02906125e-16,6.34314575 1.34314575,5 3,5 Z" opacity="0.15" />
+      <path d="M9.5,0 C10.8807119,0 12,1.11928813 12,2.5 L12,2.5 L12,9.5 C12,10.8807119 10.8807119,12 9.5,12 L9.5,12 L2.5,12 C1.11928813,12 0,10.8807119 0,9.5 L0,9.5 L0,2.5 C0,1.11928813 1.11928813,0 2.5,0 L2.5,0 Z M9.5,1 L2.5,1 C1.67157288,1 1,1.67157288 1,2.5 L1,2.5 L1,9.5 C1,10.3284271 1.67157288,11 2.5,11 L2.5,11 L9.5,11 C10.3284271,11 11,10.3284271 11,9.5 L11,9.5 L11,2.5 C11,1.67157288 10.3284271,1 9.5,1 L9.5,1 Z M9,2 C9.55228475,2 10,2.44771525 10,3 L10,3 L10,4 L2,4 L2,3 C2,2.44771525 2.44771525,2 3,2 L3,2 Z" />
+    </>
+  ),
+  body: (
+    <>
+      <path d="M2.5,1 L9.5,1 C10.3284271,1 11,1.67157288 11,2.5 L11,4 L11,4 L1,4 L1,2.5 C1,1.67157288 1.67157288,1 2.5,1 Z M1,8 L11,8 L11,9.5 C11,10.3284271 10.3284271,11 9.5,11 L2.5,11 C1.67157288,11 1,10.3284271 1,9.5 L1,8 L1,8 Z" fillOpacity="0.15" />
+      <path d="M9.5,0 C10.8807119,0 12,1.11928813 12,2.5 L12,9.5 C12,10.8807119 10.8807119,12 9.5,12 L2.5,12 C1.11928813,12 0,10.8807119 0,9.5 L0,2.5 C0,1.11928813 1.11928813,0 2.5,0 Z M9.5,1 L2.5,1 C1.67157288,1 1,1.67157288 1,2.5 L1,9.5 C1,10.3284271 1.67157288,11 2.5,11 L9.5,11 C10.3284271,11 11,10.3284271 11,9.5 L11,2.5 C11,1.67157288 10.3284271,1 9.5,1 Z M10,5 L10,7 L2,7 L2,5 L10,5 Z" fillRule="nonzero" />
     </>
   ),
   'table-row': (
