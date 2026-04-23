@@ -473,7 +473,8 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
             console.error('[Editor] Error loading initial data:', response.error);
 
             if (response.error === 'Not authenticated') {
-              toast.error('You have been disconnected, please reload the page');
+              toast.error('You have been disconnected, please log in again');
+              useAuthStore.getState().signOut();
             }
 
             setBuilderDataPreloaded(true);
