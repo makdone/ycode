@@ -36,6 +36,7 @@ export interface TypographyDesign {
   textAlign?: string;
   textTransform?: string;
   textDecoration?: string;
+  lineClamp?: string;
   textDecorationColor?: string;
   textDecorationThickness?: string;
   underlineOffset?: string;
