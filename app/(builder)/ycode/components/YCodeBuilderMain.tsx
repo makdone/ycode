@@ -589,7 +589,22 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
       }
     } else if (routeType === 'collections-base') {
       // On base collections route, don't set a selected collection
-    } else if (routeType === 'component' && resourceId && !isExitingComponentModeRef.current) {
+    }
+
+    // Ensure a currentPageId is set on non-design routes (CMS, Forms) so
+    // preview can navigate to a page — default to homepage if unset
+    if (!currentPageId && pages.length > 0) {
+      const isNonDesignRoute = routeType === 'collection' || routeType === 'collections-base' || routeType === 'forms';
+      if (isNonDesignRoute) {
+        const homePage = findHomepage(pages);
+        const defaultPage = homePage || pages[0];
+        if (defaultPage) {
+          setCurrentPageId(defaultPage.id);
+        }
+      }
+    }
+
+    if (routeType === 'component' && resourceId && !isExitingComponentModeRef.current) {
       const { getComponentById, loadComponentDraft } = useComponentsStore.getState();
       const component = getComponentById(resourceId);
       if (component && editingComponentId !== resourceId) {
@@ -1860,8 +1875,8 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
         signOut={signOut}
         showPageDropdown={showPageDropdown}
         setShowPageDropdown={setShowPageDropdown}
-        currentPage={routeType === 'settings' || routeType === 'profile' || routeType === 'forms' || routeType === 'integrations' ? undefined : currentPage}
-        currentPageId={routeType === 'settings' || routeType === 'profile' || routeType === 'forms' || routeType === 'integrations' ? null : currentPageId}
+        currentPage={routeType === 'settings' || routeType === 'profile' || routeType === 'integrations' ? undefined : currentPage}
+        currentPageId={routeType === 'settings' || routeType === 'profile' || routeType === 'integrations' ? null : currentPageId}
         pages={routeType === 'settings' || routeType === 'profile' || routeType === 'forms' || routeType === 'integrations' ? [] : pages}
         setCurrentPageId={routeType === 'settings' || routeType === 'profile' || routeType === 'forms' || routeType === 'integrations' ? () => {} : setCurrentPageId}
         isSaving={routeType === 'settings' || routeType === 'localization' || routeType === 'profile' || routeType === 'forms' || routeType === 'integrations' ? false : isCurrentlySaving}
