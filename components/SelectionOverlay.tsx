@@ -83,20 +83,27 @@ export function SelectionOverlay({
   ) => {
     if (!container) return;
 
-    if (!layerId || layerId === 'body') {
+    if (!layerId) {
       container.style.display = 'none';
       return;
     }
 
-    let targetElements: NodeListOf<Element>;
-    if (blockIndex !== undefined && blockIndex !== null && listItemIndex !== undefined && listItemIndex !== null) {
-      targetElements = iframeDoc.querySelectorAll(
+    const isBody = layerId === 'body';
+    let targetElements: Element[];
+    if (isBody) {
+      // The Body layer's wrapper (#canvas-body) uses display:contents and has
+      // no box. Its visible representation on the canvas is the entire iframe
+      // surface. We render a single outline using the iframe element's rect
+      // below, but we still need a non-empty list to drive the loop.
+      targetElements = [iframeElement];
+    } else if (blockIndex !== undefined && blockIndex !== null && listItemIndex !== undefined && listItemIndex !== null) {
+      targetElements = Array.from(iframeDoc.querySelectorAll(
         `[data-layer-id="${layerId}"] [data-block-index="${blockIndex}"] [data-list-item-index="${listItemIndex}"]`
-      );
+      ));
     } else if (blockIndex !== undefined && blockIndex !== null) {
-      targetElements = iframeDoc.querySelectorAll(`[data-layer-id="${layerId}"] [data-block-index="${blockIndex}"]`);
+      targetElements = Array.from(iframeDoc.querySelectorAll(`[data-layer-id="${layerId}"] [data-block-index="${blockIndex}"]`));
     } else {
-      targetElements = iframeDoc.querySelectorAll(`[data-layer-id="${layerId}"]`);
+      targetElements = Array.from(iframeDoc.querySelectorAll(`[data-layer-id="${layerId}"]`));
     }
     if (targetElements.length === 0) {
       container.style.display = 'none';
@@ -120,13 +127,25 @@ export function SelectionOverlay({
     }
 
     targetElements.forEach((targetElement, idx) => {
-      const elementRect = targetElement.getBoundingClientRect();
       const child = container.children[idx] as HTMLElement;
 
-      const top = iframeRect.top - containerRect.top + (elementRect.top * scale);
-      const left = iframeRect.left - containerRect.left + (elementRect.left * scale);
-      const width = elementRect.width * scale;
-      const height = elementRect.height * scale;
+      let top: number;
+      let left: number;
+      let width: number;
+      let height: number;
+      if (isBody) {
+        // Body outline always covers the full visible canvas (iframe area).
+        top = iframeRect.top - containerRect.top;
+        left = iframeRect.left - containerRect.left;
+        width = iframeRect.width;
+        height = iframeRect.height;
+      } else {
+        const elementRect = targetElement.getBoundingClientRect();
+        top = iframeRect.top - containerRect.top + (elementRect.top * scale);
+        left = iframeRect.left - containerRect.left + (elementRect.left * scale);
+        width = elementRect.width * scale;
+        height = elementRect.height * scale;
+      }
 
       child.className = `absolute ${outlineClass}`;
       child.style.display = 'block';

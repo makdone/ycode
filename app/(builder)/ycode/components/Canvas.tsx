@@ -160,26 +160,34 @@ function CanvasContent({
 
   // Select body layer when clicking on empty canvas space.
   // The #canvas-body div uses display:contents so it has no box — clicks on
-  // empty space land on the iframe <body>, which is outside the React root.
-  // We attach a native listener on the iframe body to handle this.
+  // empty space land on the iframe <body> (or sometimes <html> / one of the
+  // display:contents wrappers), which is outside the React root and therefore
+  // outside the layer onClick chain. We attach a native listener on the iframe
+  // document so any click that doesn't end up on an actual layer element
+  // (i.e. nothing with [data-layer-id] except the body wrapper itself) falls
+  // through to selecting the Body layer.
   useEffect(() => {
     if (!bodyRef.current) return;
-    const iframeBody = bodyRef.current.ownerDocument.body;
+    const iframeDoc = bodyRef.current.ownerDocument;
+    const iframeBody = iframeDoc.body;
 
     setPortalContainer(iframeBody);
 
     const handleBodyClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      const isCanvasChrome = target === iframeBody
-        || target.id === 'canvas-mount'
-        || target.id === 'canvas-body';
-      if (isCanvasChrome) {
-        onLayerClick('body');
-      }
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      // Walk up from the click target. If we find any layer element with
+      // data-layer-id !== 'body', that layer's own onClick handles selection
+      // and we should ignore this fallthrough. Otherwise the click landed on
+      // empty body space (or html / the display:contents wrappers) and we
+      // select the Body layer.
+      const layerEl = target.closest?.('[data-layer-id]') as HTMLElement | null;
+      if (layerEl && layerEl.getAttribute('data-layer-id') !== 'body') return;
+      onLayerClick('body');
     };
 
-    iframeBody.addEventListener('click', handleBodyClick);
-    return () => iframeBody.removeEventListener('click', handleBodyClick);
+    iframeDoc.addEventListener('click', handleBodyClick);
+    return () => iframeDoc.removeEventListener('click', handleBodyClick);
   }, [onLayerClick]);
 
   const bodyLayer = layers.find(l => l.id === 'body');

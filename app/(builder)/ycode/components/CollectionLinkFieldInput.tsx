@@ -69,6 +69,7 @@ export default function CollectionLinkFieldInput({
 }: CollectionLinkFieldInputProps) {
   const [collectionItems, setCollectionItems] = useState<CollectionItemWithValues[]>([]);
   const [loadingItems, setLoadingItems] = useState(false);
+  const [collectionItemSearch, setCollectionItemSearch] = useState('');
 
   // Stores
   const pages = usePagesStore((state) => state.pages);
@@ -339,18 +340,45 @@ export default function CollectionLinkFieldInput({
                 <Label className="text-xs text-muted-foreground">CMS item</Label>
                 <Select
                   value={collectionItemId || ''}
-                  onValueChange={handleCollectionItemChange}
+                  onValueChange={(value) => {
+                    handleCollectionItemChange(value);
+                    setCollectionItemSearch('');
+                  }}
+                  onOpenChange={(open) => {
+                    if (!open) setCollectionItemSearch('');
+                  }}
                   disabled={disabled || loadingItems}
                 >
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder={loadingItems ? 'Loading...' : 'Select...'} />
                   </SelectTrigger>
-                  <SelectContent>
-                    {collectionItems.map((item) => (
-                      <SelectItem key={item.id} value={item.id}>
-                        {getItemDisplayName(item.id)}
-                      </SelectItem>
-                    ))}
+                  <SelectContent
+                    searchable
+                    searchValue={collectionItemSearch}
+                    onSearchChange={setCollectionItemSearch}
+                    searchPlaceholder="Search items..."
+                    className="w-72"
+                  >
+                    {(() => {
+                      const query = collectionItemSearch.trim().toLowerCase();
+                      const filtered = query
+                        ? collectionItems.filter(item =>
+                          getItemDisplayName(item.id).toLowerCase().includes(query)
+                        )
+                        : collectionItems;
+                      if (filtered.length === 0) {
+                        return (
+                          <div className="px-2 py-4 text-center text-xs text-muted-foreground">
+                            {query ? 'No items found' : 'No items available'}
+                          </div>
+                        );
+                      }
+                      return filtered.map((item) => (
+                        <SelectItem key={item.id} value={item.id}>
+                          {getItemDisplayName(item.id)}
+                        </SelectItem>
+                      ));
+                    })()}
                   </SelectContent>
                 </Select>
               </div>

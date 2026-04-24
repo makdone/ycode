@@ -2293,7 +2293,7 @@ const CenterCanvas = React.memo(function CenterCanvas({
       {/* Canvas Area */}
       <div
         ref={canvasContainerRef}
-        className="flex-1 relative overflow-hidden bg-neutral-50 dark:bg-neutral-950/80"
+        className="flex-1 relative overflow-hidden bg-neutral-50 dark:bg-neutral-950/80 select-none"
       >
         {/* Loading skeleton overlay when draft is being fetched */}
         {isDraftLoading && (
