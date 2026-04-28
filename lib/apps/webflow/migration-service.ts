@@ -211,7 +211,7 @@ interface CollectionScaffold {
 async function ensureScaffolds(
   webflowCollections: WebflowCollection[],
   existingMappings: WebflowCollectionMapping[],
-  errors: string[]
+  _errors: string[]
 ): Promise<CollectionScaffold[]> {
   const mappingByWebflowId = new Map<string, WebflowCollectionMapping>(
     existingMappings.map((m) => [m.webflowCollectionId, m])
@@ -226,19 +226,20 @@ async function ensureScaffolds(
     const wf = webflowCollections[i];
     const existing = mappingByWebflowId.get(wf.id);
 
-    if (existing) {
-      const collection = await getCollectionById(existing.ycodeCollectionId);
-      if (!collection) {
-        errors.push(
-          `Skipped ${wf.displayName}: previously mapped YCode collection no longer exists.`
-        );
-        continue;
-      }
-      wfToYcodeCollectionId.set(wf.id, collection.id);
+    // Reuse the existing YCode collection only if it's still present (and not
+    // soft-deleted). If the user deleted the YCode collection after a previous
+    // migration, drop the stale mapping and recreate the collection from
+    // scratch so re-importing actually brings the collection back.
+    const existingCollection = existing
+      ? await getCollectionById(existing.ycodeCollectionId)
+      : null;
+
+    if (existing && existingCollection) {
+      wfToYcodeCollectionId.set(wf.id, existingCollection.id);
       scaffolds.push({
         webflowCollection: wf,
-        ycodeCollectionId: collection.id,
-        ycodeCollectionName: collection.name,
+        ycodeCollectionId: existingCollection.id,
+        ycodeCollectionName: existingCollection.name,
         fieldIdMap: { ...existing.fieldIdMap },
         fieldSlugMap: { ...existing.fieldSlugMap },
         recordIdFieldId: existing.recordIdFieldId,
