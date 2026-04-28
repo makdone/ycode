@@ -375,7 +375,7 @@ export default function FieldFormDialog({
                 {fieldOptions.length > 0 && (
                   <div className="flex flex-col gap-2">
                     {fieldOptions.map((option) => (
-                      <div key={option.id} className="flex items-center gap-2">
+                      <div key={option.id} className="flex items-center gap-1">
                         <Input
                           value={option.name}
                           onChange={(e) => handleUpdateOptionName(option.id, e.target.value)}
@@ -390,7 +390,7 @@ export default function FieldFormDialog({
                           onClick={() => handleRemoveOption(option.id)}
                           aria-label="Remove option"
                         >
-                          <Icon name="trash" className="size-3" />
+                          <Icon name="x" />
                         </Button>
                       </div>
                     ))}
