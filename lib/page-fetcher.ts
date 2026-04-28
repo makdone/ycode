@@ -2110,12 +2110,12 @@ export async function resolveCollectionLayers(
           existingPlaceholder?.variables?.text?.type === 'dynamic_text'
             ? existingPlaceholder.variables.text.data.content
             : null
-        ) || 'Select...';
+        ) || 'All';
         const placeholderOption: Layer = {
           id: existingPlaceholder?.id || `${layer.id}-opt-placeholder`,
           name: 'option',
           classes: '',
-          attributes: { value: '', disabled: true, hidden: true },
+          attributes: { value: '' },
           settings: { isPlaceholder: true },
           variables: {
             text: { type: 'dynamic_text' as const, data: { content: placeholderText } },

@@ -113,6 +113,17 @@ async function getIdsMatchingFilter(
       return new Set(data.map(d => d.item_id));
     }
     case 'is': {
+      if (filter.fieldType === 'boolean') {
+        const targetBool = value.toLowerCase() === 'true';
+        const data = await chunkedQuery(chunk => selectIdsAndValues(chunk), allItemIds);
+        const result = new Set<string>();
+        for (const row of data) {
+          const raw = String(row.value ?? '').toLowerCase();
+          const isTruthy = raw === 'true' || raw === '1' || raw === 'yes';
+          if (isTruthy === targetBool) result.add(row.item_id);
+        }
+        return result;
+      }
       const data = await chunkedQuery(
         chunk => selectIds(chunk).ilike('value', escapeLikeValue(value)),
         allItemIds,
@@ -144,6 +155,17 @@ async function getIdsMatchingFilter(
       return new Set([...allSet].filter(id => !matchIds.has(id)));
     }
     case 'is_not': {
+      if (filter.fieldType === 'boolean') {
+        const targetBool = value.toLowerCase() === 'true';
+        const data = await chunkedQuery(chunk => selectIdsAndValues(chunk), allItemIds);
+        const result = new Set<string>();
+        for (const row of data) {
+          const raw = String(row.value ?? '').toLowerCase();
+          const isTruthy = raw === 'true' || raw === '1' || raw === 'yes';
+          if (isTruthy !== targetBool) result.add(row.item_id);
+        }
+        return result;
+      }
       const data = await chunkedQuery(
         chunk => selectIds(chunk).ilike('value', escapeLikeValue(value)),
         allItemIds,

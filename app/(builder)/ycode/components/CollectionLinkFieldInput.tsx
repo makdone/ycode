@@ -186,6 +186,8 @@ export default function CollectionLinkFieldInput({
   // Handle link type change
   const handleLinkTypeChange = useCallback(
     (newType: CollectionLinkType | 'none') => {
+      if (!newType || newType === linkType) return;
+
       if (newType === 'none') {
         updateLinkValue(null);
         return;
@@ -205,7 +207,7 @@ export default function CollectionLinkFieldInput({
 
       updateLinkValue(newValue);
     },
-    [updateLinkValue]
+    [updateLinkValue, linkType]
   );
 
   // Handle URL change

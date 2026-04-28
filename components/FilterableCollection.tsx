@@ -101,6 +101,7 @@ export default function FilterableCollection({
     const parent = getParent();
     if (!parent) return;
     if (!append) {
+      hideSSR();
       clearFilteredDOM();
     }
     const temp = document.createElement('div');
@@ -110,7 +111,7 @@ export default function FilterableCollection({
       if (child instanceof Element) child.setAttribute(FC_FILTERED_ATTR, '');
       parent.appendChild(child);
     }
-  }, [getParent, clearFilteredDOM]);
+  }, [getParent, hideSSR, clearFilteredDOM]);
 
   // Capture SSR children on mount (before paint) and hide if pending
   useLayoutEffect(() => {
@@ -594,7 +595,16 @@ export default function FilterableCollection({
 
   useEffect(() => {
     const filterGroups = buildApiFilters();
-    const hasRuntimeControls = filterGroups.length > 0 || hasRuntimeSortOverride;
+    const hasActiveInputValues = filters.groups.some(g =>
+      g.conditions.some(c => {
+        if (!c.inputLayerId) return false;
+        for (const layerValues of Object.values(filterValues)) {
+          if (c.inputLayerId in layerValues && layerValues[c.inputLayerId]) return true;
+        }
+        return false;
+      })
+    );
+    const hasRuntimeControls = hasActiveInputValues || hasRuntimeSortOverride;
     const filterKey = JSON.stringify({
       filterGroups,
       sortBy: effectiveSortBy,
@@ -624,14 +634,8 @@ export default function FilterableCollection({
         window.history.replaceState({}, '', cleanUrl.toString());
       }
 
-      if (strippedPaginationParamRef.current || (paginationMode === 'load_more' && !wasEmpty)) {
-        strippedPaginationParamRef.current = false;
-        const reloadUrl = new URL(window.location.href);
-        reloadUrl.searchParams.delete(fpKey);
-        reloadUrl.searchParams.delete(pKey);
-        window.location.href = reloadUrl.toString();
-        return;
-      }
+      strippedPaginationParamRef.current = false;
+      useFilterStore.getState().syncToUrl();
 
       setHasActiveFilters(false);
       setIsFiltering(false);
@@ -651,27 +655,7 @@ export default function FilterableCollection({
       return;
     }
 
-    // On initial load, static filters are already applied server-side during SSR.
-    // Only fetch if user-interactive inputs actually have values (e.g. from URL params).
-    if (wasEmpty && !hasRuntimeSortOverride) {
-      const hasActiveInputValues = filters.groups.some(g =>
-        g.conditions.some(c => {
-          if (!c.inputLayerId) return false;
-          for (const layerValues of Object.values(filterValues)) {
-            if (c.inputLayerId in layerValues && layerValues[c.inputLayerId]) return true;
-          }
-          return false;
-        })
-      );
-
-      if (!hasActiveInputValues) {
-        showSSR();
-        return;
-      }
-    }
-
     setHasActiveFilters(true);
-    hideSSR();
 
     const currentUrl = new URL(window.location.href);
     const fpValue = currentUrl.searchParams.get(fpKey);
@@ -698,7 +682,7 @@ export default function FilterableCollection({
 
     const startOffset = (startPage - 1) * (limit || 10);
     fetchFiltered(filterGroups, startOffset, false);
-  }, [filterValues, buildApiFilters, fetchFiltered, paginationMode, attachPaginationIntercept, detachPaginationIntercept, restoreSsrPagination, getSsrPaginationWrapper, updateEmptyStateElements, fpKey, pKey, limit, hasRuntimeSortOverride, effectiveSortBy, effectiveSortOrder, hideSSR, showSSR, clearFilteredDOM]);
+  }, [filterValues, buildApiFilters, fetchFiltered, paginationMode, attachPaginationIntercept, detachPaginationIntercept, restoreSsrPagination, getSsrPaginationWrapper, updateEmptyStateElements, fpKey, pKey, limit, hasRuntimeSortOverride, effectiveSortBy, effectiveSortOrder, showSSR, clearFilteredDOM]);
 
   useEffect(() => {
     if (!hasActiveFilters || paginationMode !== 'pages') return;

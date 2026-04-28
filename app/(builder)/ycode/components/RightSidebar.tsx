@@ -64,6 +64,8 @@ import InteractionsPanel from './InteractionsPanel';
 import LayoutControls from './LayoutControls';
 import LayerStylesPanel from './LayerStylesPanel';
 import PositionControls from './PositionControls';
+import TransformControls from './TransformControls';
+import TransitionControls from './TransitionControls';
 import SettingsPanel from './SettingsPanel';
 import SizingControls from './SizingControls';
 import SpacingControls from './SpacingControls';
@@ -506,6 +508,20 @@ const RightSidebar = React.memo(function RightSidebar({
         // In text style mode, hide position controls
         if (showTextStyleControls) return false;
         // Position controls: show for all
+        return true;
+
+      case 'transforms':
+        // In text style mode, hide transform controls
+        if (showTextStyleControls) return false;
+        // Hide for text-only layers (not buttons)
+        if (isTextLayer(layer) && !isButtonLayer(layer)) return false;
+        return true;
+
+      case 'transitions':
+        // In text style mode, hide transition controls
+        if (showTextStyleControls) return false;
+        // Transitions: show for all non-text layers (and buttons)
+        if (isTextLayer(layer) && !isButtonLayer(layer)) return false;
         return true;
 
       default:
@@ -1863,6 +1879,14 @@ const RightSidebar = React.memo(function RightSidebar({
 
           {shouldShowControl('position', selectedLayer) && !showTextStyleControls && (
             <PositionControls layer={selectedLayer} onLayerUpdate={handleLayerUpdate} />
+          )}
+
+          {shouldShowControl('transforms', selectedLayer) && (
+            <TransformControls layer={selectedLayer} onLayerUpdate={handleLayerUpdate} />
+          )}
+
+          {shouldShowControl('transitions', selectedLayer) && (
+            <TransitionControls layer={selectedLayer} onLayerUpdate={handleLayerUpdate} />
           )}
 
           {/* Classes panel - shows classes for active text style or layer */}

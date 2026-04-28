@@ -169,14 +169,14 @@ function buildOptionLayer(id: string, label: string, value: string): Layer {
 }
 
 /**
- * Build a placeholder option layer (disabled, selected, hidden, value="")
+ * Build a placeholder option layer (value="", selectable to clear selection)
  */
 function buildPlaceholderOption(id: string, text: string): Layer {
   return {
     id,
     name: 'option',
     classes: '',
-    attributes: { value: '', disabled: 'true', hidden: 'true' },
+    attributes: { value: '' },
     settings: { isPlaceholder: true },
     variables: {
       text: {
