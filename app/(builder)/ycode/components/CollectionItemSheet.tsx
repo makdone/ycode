@@ -53,7 +53,10 @@ import { toast } from 'sonner';
 import ReferenceFieldCombobox from './ReferenceFieldCombobox';
 import CollectionLinkFieldInput from './CollectionLinkFieldInput';
 import ColorFieldInput from './ColorFieldInput';
-import AssetFieldCard from './AssetFieldCard';
+import AssetFieldCard, { SortableAssetFieldCard } from './AssetFieldCard';
+import { DndContext, closestCenter, useSensor, useSensors, PointerSensor } from '@dnd-kit/core';
+import type { DragEndEvent } from '@dnd-kit/core';
+import { SortableContext, rectSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import type { Asset, CollectionItemWithValues } from '@/types';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Label } from '@/components/ui/label';
@@ -104,6 +107,10 @@ export default function CollectionItemSheet({
   const [expandedRichTextField, setExpandedRichTextField] = useState<string | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const pendingStatusActionRef = useRef<StatusAction | null>(null);
+
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  );
 
   const collection = collections.find(c => c.id === collectionId);
   const collectionFields = useMemo(
@@ -736,21 +743,51 @@ export default function CollectionItemSheet({
                                 formField.onChange(JSON.stringify(assetIds.filter(id => id !== assetId)));
                               };
 
+                              const handleAssetDragEnd = (event: DragEndEvent) => {
+                                const { active, over } = event;
+                                if (!over || active.id === over.id) return;
+                                const oldIndex = assetIds.indexOf(String(active.id));
+                                const newIndex = assetIds.indexOf(String(over.id));
+                                if (oldIndex === -1 || newIndex === -1) return;
+                                formField.onChange(JSON.stringify(arrayMove(assetIds, oldIndex, newIndex)));
+                              };
+
                               return (
                                 <div className="space-y-2">
-                                  {assetIds.length > 0 && (
+                                  {assetIds.length > 1 ? (
+                                    <DndContext
+                                      sensors={dndSensors}
+                                      collisionDetection={closestCenter}
+                                      onDragEnd={handleAssetDragEnd}
+                                    >
+                                      <SortableContext
+                                        items={assetIds}
+                                        strategy={rectSortingStrategy}
+                                      >
+                                        <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(min(100%,320px),1fr))]">
+                                          {assetIds.map((assetId) => (
+                                            <SortableAssetFieldCard
+                                              key={assetId}
+                                              id={assetId}
+                                              asset={getAsset(assetId)}
+                                              fieldType={field.type}
+                                              onChangeFile={() => handleReplaceAsset(assetId)}
+                                              onRemove={() => handleRemoveAsset(assetId)}
+                                            />
+                                          ))}
+                                        </div>
+                                      </SortableContext>
+                                    </DndContext>
+                                  ) : assetIds.length === 1 ? (
                                     <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(min(100%,320px),1fr))]">
-                                      {assetIds.map((assetId) => (
-                                        <AssetFieldCard
-                                          key={assetId}
-                                          asset={getAsset(assetId)}
-                                          fieldType={field.type}
-                                          onChangeFile={() => handleReplaceAsset(assetId)}
-                                          onRemove={() => handleRemoveAsset(assetId)}
-                                        />
-                                      ))}
+                                      <AssetFieldCard
+                                        asset={getAsset(assetIds[0])}
+                                        fieldType={field.type}
+                                        onChangeFile={() => handleReplaceAsset(assetIds[0])}
+                                        onRemove={() => handleRemoveAsset(assetIds[0])}
+                                      />
                                     </div>
-                                  )}
+                                  ) : null}
                                   <Button
                                     type="button"
                                     variant="secondary"

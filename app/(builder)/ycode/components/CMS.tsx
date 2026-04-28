@@ -36,6 +36,7 @@ import { useSettingsStore } from '@/stores/useSettingsStore';
 import { slugify, isTruthyBooleanValue, parseMultiReferenceValue, getSortParams } from '@/lib/collection-utils';
 import { getSampleCollectionOptions } from '@/lib/sample-collections';
 import { ASSET_CATEGORIES, getOptimizedImageUrl, isAssetOfType } from '@/lib/asset-utils';
+import { parseMultiAssetFieldValue } from '@/lib/multi-asset-utils';
 import { type FieldType, findDisplayField, getItemDisplayName, getFieldIcon, isMultipleAssetField, findStatusFieldId, isDateFieldType } from '@/lib/collection-field-utils';
 import { CollectionStatusPill, parseStatusValue } from './CollectionStatusPill';
 import { extractPlainTextFromTiptap } from '@/lib/tiptap-utils';
@@ -1627,9 +1628,8 @@ const CMS = React.memo(function CMS() {
 
                       // Image fields - show thumbnail (match file manager: SVG inline, raster via img + checkerboard)
                       if (field.type === 'image' && value) {
-                        // Handle multi-asset fields (value is an array)
                         const assetIds: string[] = isMultipleAssetField(field)
-                          ? (Array.isArray(value) ? value : [])
+                          ? parseMultiAssetFieldValue(value)
                           : [value as string];
 
                         if (assetIds.length === 0) {
@@ -1706,9 +1706,8 @@ const CMS = React.memo(function CMS() {
 
                       // Audio/Video/Document fields - show icon with filename in tooltip
                       if ((field.type === 'audio' || field.type === 'video' || field.type === 'document') && value) {
-                        // Handle multi-asset fields (value is an array)
                         const assetIds: string[] = isMultipleAssetField(field)
-                          ? (Array.isArray(value) ? value : [])
+                          ? parseMultiAssetFieldValue(value)
                           : [value as string];
 
                         if (assetIds.length === 0) {
