@@ -28,7 +28,7 @@ const FIELD_TYPE_MAP: Record<WebflowFieldType, CollectionFieldType> = {
   Date: 'date_only',
   Switch: 'boolean',
   Color: 'color',
-  Option: 'status',
+  Option: 'option',
   Reference: 'reference',
   MultiReference: 'multi_reference',
   File: 'document',
@@ -199,6 +199,9 @@ export function transformFieldValue(
 /**
  * Resolve an Option field's id to its display name using the field's
  * `validations.options` list. Returns the original id if no match is found.
+ *
+ * Names are trimmed to match how YCode stores option values (the builder
+ * trims option names on save and uses them as the persisted value).
  */
 export function resolveOptionLabel(
   optionId: string,
@@ -206,5 +209,5 @@ export function resolveOptionLabel(
 ): string {
   if (!options) return optionId;
   const match = options.find((o) => o.id === optionId);
-  return match?.name ?? optionId;
+  return match?.name.trim() ?? optionId;
 }

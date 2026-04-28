@@ -21,6 +21,7 @@ import {
 import {
   createField,
   getFieldsByCollectionId,
+  updateField,
 } from '@/lib/repositories/collectionFieldRepository';
 import {
   createItemsBulk,
@@ -55,7 +56,7 @@ import type {
   WebflowImport,
   WebflowItem,
 } from './types';
-import type { CollectionField } from '@/types';
+import type { CollectionField, CollectionFieldData } from '@/types';
 
 // =============================================================================
 // Constants
@@ -120,6 +121,72 @@ export async function removeImport(importId: string): Promise<boolean> {
 // =============================================================================
 // Schema Creation
 // =============================================================================
+
+/**
+ * Build the `data` payload for a YCode field from a Webflow field. Carries
+ * over `validations.options` for Option fields and flags multi-asset fields.
+ */
+function buildFieldData(wfField: WebflowField): CollectionFieldData {
+  if (isMultiAssetType(wfField.type)) {
+    return { multiple: true };
+  }
+
+  if (wfField.type === 'Option') {
+    const wfOptions = wfField.validations?.options ?? [];
+    return {
+      options: wfOptions.map((o) => ({ id: o.id, name: o.name.trim() })),
+    };
+  }
+
+  return {};
+}
+
+/**
+ * Merge Webflow option choices into an existing YCode Option field. Adds new
+ * choices and refreshes renamed labels, keeping existing options to avoid
+ * orphaning item values that reference them.
+ */
+async function syncOptionFieldChoices(
+  ycodeField: CollectionField,
+  wfField: WebflowField
+): Promise<void> {
+  const wfOptions = wfField.validations?.options ?? [];
+  if (wfOptions.length === 0) return;
+
+  const existing = Array.isArray(ycodeField.data?.options)
+    ? ycodeField.data.options
+    : [];
+  const existingById = new Map(existing.map((o) => [o.id, o]));
+
+  const merged: { id: string; name: string }[] = [];
+  let changed = false;
+
+  for (const wfOption of wfOptions) {
+    const trimmed = wfOption.name.trim();
+    const prev = existingById.get(wfOption.id);
+    if (!prev) {
+      merged.push({ id: wfOption.id, name: trimmed });
+      changed = true;
+    } else {
+      if (prev.name !== trimmed) changed = true;
+      merged.push({ id: wfOption.id, name: trimmed });
+    }
+  }
+
+  // Carry over any YCode-only options (added manually in YCode) so we don't
+  // lose them on re-sync.
+  for (const opt of existing) {
+    if (!wfOptions.some((wf) => wf.id === opt.id)) {
+      merged.push(opt);
+    }
+  }
+
+  if (!changed) return;
+
+  await updateField(ycodeField.id, {
+    data: { ...(ycodeField.data ?? {}), options: merged },
+  });
+}
 
 interface CollectionScaffold {
   webflowCollection: WebflowCollection;
@@ -207,7 +274,18 @@ async function ensureScaffolds(
     let order = ycodeFields.reduce((max, f) => Math.max(max, (f.order ?? 0) + 1), 0);
 
     for (const wfField of wf.fields ?? []) {
-      if (scaffold.fieldIdMap[wfField.id]) continue;
+      const existingFieldId = scaffold.fieldIdMap[wfField.id];
+      if (existingFieldId) {
+        // Re-sync: keep YCode's option list in step with Webflow when Webflow
+        // adds new choices to an Option field after the initial migration.
+        if (wfField.type === 'Option') {
+          const existingField = ycodeFields.find((f) => f.id === existingFieldId);
+          if (existingField) {
+            await syncOptionFieldChoices(existingField, wfField);
+          }
+        }
+        continue;
+      }
 
       // Try to recover the mapping by slug before creating a duplicate field.
       const slug = slugify(wfField.slug);
@@ -215,6 +293,9 @@ async function ensureScaffolds(
       if (matched) {
         scaffold.fieldIdMap[wfField.id] = matched.id;
         scaffold.fieldSlugMap[wfField.slug] = matched.id;
+        if (wfField.type === 'Option') {
+          await syncOptionFieldChoices(matched, wfField);
+        }
         continue;
       }
 
@@ -230,7 +311,7 @@ async function ensureScaffolds(
         collection_id: scaffold.ycodeCollectionId,
         order: order++,
         reference_collection_id: referenceCollectionId,
-        data: isMultiAssetType(wfField.type) ? { multiple: true } : {},
+        data: buildFieldData(wfField),
         is_published: false,
       });
 
