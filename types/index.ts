@@ -135,6 +135,25 @@ export interface PositioningDesign {
   zIndex?: string;
 }
 
+export interface TransformsDesign {
+  isActive?: boolean;
+  scale?: string;
+  rotate?: string;
+  translateX?: string;
+  translateY?: string;
+  skewX?: string;
+  skewY?: string;
+  transformOrigin?: string;
+}
+
+export interface TransitionsDesign {
+  isActive?: boolean;
+  transitionProperty?: string;
+  duration?: string;
+  easing?: string;
+  delay?: string;
+}
+
 export interface DesignProperties {
   layout?: LayoutDesign;
   typography?: TypographyDesign;
@@ -144,6 +163,8 @@ export interface DesignProperties {
   backgrounds?: BackgroundsDesign;
   effects?: EffectsDesign;
   positioning?: PositioningDesign;
+  transforms?: TransformsDesign;
+  transitions?: TransitionsDesign;
 }
 
 export interface FormSettings {
