@@ -66,8 +66,10 @@ import {
   updateInteractionById,
   updateInteractionTweens,
   updateTweenById,
+  parseAnimationValue,
+  formatAnimationValue,
 } from '@/lib/animation-utils';
-import type { TriggerType, PropertyType } from '@/lib/animation-utils';
+import type { TriggerType, PropertyType, ParsedAnimationValue } from '@/lib/animation-utils';
 
 // 4. Types
 import type { Layer, LayerInteraction, InteractionTimeline, InteractionTween, TweenProperties, Breakpoint } from '@/types';
@@ -2078,25 +2080,8 @@ export default function InteractionsPanel({
                         });
                       };
 
-                      const applyFromPreview = (value: string | null) => {
-                        // Skip display
+                      const applyPreview = (value: string | null) => {
                         if (prop.key === 'display') return;
-
-                        if (value === null || value === undefined) return;
-                        const gsapValue = toGsapValue(value, prop);
-                        if (gsapValue !== undefined) {
-                          applyPreviewStyles(
-                            selectedTween.layer_id,
-                            { [prop.key]: gsapValue },
-                            { splitText: selectedTween.splitText, duration: selectedTween.duration }
-                          );
-                        }
-                      };
-
-                      const applyToPreview = (value: string | null) => {
-                        // Skip display
-                        if (prop.key === 'display') return;
-
                         if (value === null || value === undefined) return;
                         const gsapValue = toGsapValue(value, prop);
                         if (gsapValue !== undefined) {
@@ -2110,29 +2095,23 @@ export default function InteractionsPanel({
 
                       const handlePreviewFrom = () => {
                         if (isFromCurrent) return;
-                        // Clear any existing preview (e.g., from played animation) before applying
                         clearAllPreviewStyles();
-                        applyFromPreview(fromValue as string);
+                        applyPreview(fromValue as string);
                       };
 
                       const handlePreviewTo = () => {
-                        // Clear any existing preview (e.g., from played animation) before applying
                         clearAllPreviewStyles();
-                        const toValue = selectedTween.to[prop.key];
-                        applyToPreview(toValue as string);
+                        applyPreview(selectedTween.to[prop.key] as string);
                       };
 
                       /** Helper to update property and apply preview after iframe re-renders */
                       const handlePropertyChange = (updateFn: () => void, applyPreviewFn: () => void) => {
                         isChangingPropertyRef.current = true;
                         updateFn();
-                        // Apply preview after iframe re-renders (double RAF to ensure DOM is updated)
                         requestAnimationFrame(() => {
                           requestAnimationFrame(() => {
-                            // Update originalStyle after iframe re-renders (element may have been recreated)
                             const element = getIframeElement(selectedTween.layer_id);
                             if (element && previewedElementRef.current?.layerId === selectedTween.layer_id) {
-                              // If element was recreated, clear any cached SplitText instance
                               if (element !== previewedElementRef.current.element) {
                                 const oldSplitInstance = splitTextInstancesRef.current.get(selectedTween.layer_id);
                                 if (oldSplitInstance) {
@@ -2156,20 +2135,54 @@ export default function InteractionsPanel({
                         });
                       };
 
+                      // Parse stored values into number + unit for multi-unit properties
+                      const parsedFrom = prop.units ? parseAnimationValue(fromValue, prop.unit) : null;
+                      const parsedTo = prop.units ? parseAnimationValue(toValue, prop.unit) : null;
+
+                      /** Resolve the stored value: combine number+unit for multi-unit props, pass through otherwise */
+                      const resolveValue = (inputValue: string, parsed: ParsedAnimationValue | null): string => {
+                        if (prop.units && parsed) return formatAnimationValue(inputValue, parsed.unit);
+                        return inputValue;
+                      };
+
+                      const setToValue = (value: string | null) => {
+                        handleUpdateTween(selectedTween.id, {
+                          to: { ...selectedTween.to, [prop.key]: value },
+                        });
+                      };
+
                       const handleFromChange = (value: string) => {
-                        handlePropertyChange(
-                          () => setFromValue(value),
-                          () => applyFromPreview(value)
-                        );
+                        const resolved = resolveValue(value, parsedFrom);
+                        handlePropertyChange(() => setFromValue(resolved), () => applyPreview(resolved));
+                      };
+
+                      const handleFromUnitChange = (newUnit: string) => {
+                        if (!parsedFrom) return;
+                        const resolved = formatAnimationValue(parsedFrom.number, newUnit);
+                        handlePropertyChange(() => setFromValue(resolved), () => applyPreview(resolved));
                       };
 
                       const handleToChange = (value: string) => {
-                        handlePropertyChange(
-                          () => handleUpdateTween(selectedTween.id, {
-                            to: { ...selectedTween.to, [prop.key]: value },
-                          }),
-                          () => applyToPreview(value)
-                        );
+                        const resolved = resolveValue(value, parsedTo);
+                        handlePropertyChange(() => setToValue(resolved), () => applyPreview(resolved));
+                      };
+
+                      const handleToUnitChange = (newUnit: string) => {
+                        if (!parsedTo) return;
+                        const resolved = formatAnimationValue(parsedTo.number, newUnit);
+                        handlePropertyChange(() => setToValue(resolved), () => applyPreview(resolved));
+                      };
+
+                      /** Deferred blur: clears preview after pending RAF callbacks complete */
+                      const handleBlur = () => {
+                        const rafId1 = requestAnimationFrame(() => {
+                          const rafId2 = requestAnimationFrame(() => {
+                            clearPreviewStyles();
+                            pendingClearRAFsRef.current = pendingClearRAFsRef.current.filter(id => id !== rafId1 && id !== rafId2);
+                          });
+                          pendingClearRAFsRef.current.push(rafId2);
+                        });
+                        pendingClearRAFsRef.current.push(rafId1);
                       };
 
                       return (
@@ -2230,25 +2243,46 @@ export default function InteractionsPanel({
                                       ))}
                                     </SelectContent>
                                   </Select>
+                                ) : prop.units ? (
+                                  <Select
+                                    value={parsedFrom?.unit || prop.unit}
+                                    onValueChange={handleFromUnitChange}
+                                  >
+                                    <InputGroup className="flex-1 h-7">
+                                      <InputGroupInput
+                                        value={parsedFrom?.number ?? ''}
+                                        onChange={(e) => handleFromChange(e.target.value)}
+                                        onFocus={handlePreviewFrom}
+                                        onBlur={handleBlur}
+                                        placeholder="0"
+                                        className="text-xs pr-0.5"
+                                      />
+                                      <SelectTrigger className="h-full w-auto min-w-0 gap-0 border-0 border-l rounded-none bg-transparent pl-0.5 pr-1.5 text-xs text-muted-foreground shadow-none focus:ring-0 [&>svg]:hidden">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                    </InputGroup>
+                                    <SelectContent
+                                      align="end"
+                                      className="min-w-[--radix-select-trigger-width]"
+                                    >
+                                      {prop.units.map((u) => (
+                                        <SelectItem
+                                          key={u}
+                                          value={u}
+                                          className="text-xs"
+                                        >
+                                          {u}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
                                 ) : prop.unit ? (
                                   <InputGroup className="flex-1 h-7">
                                     <InputGroupInput
                                       value={fromValue ?? ''}
                                       onChange={(e) => handleFromChange(e.target.value)}
                                       onFocus={handlePreviewFrom}
-                                      onBlur={() => {
-                                        // Defer clearing to ensure any pending RAF callbacks complete first
-                                        // Store RAF IDs so they can be canceled if a new preview is applied
-                                        const rafId1 = requestAnimationFrame(() => {
-                                          const rafId2 = requestAnimationFrame(() => {
-                                            clearPreviewStyles();
-                                            // Remove this RAF ID from the pending list
-                                            pendingClearRAFsRef.current = pendingClearRAFsRef.current.filter(id => id !== rafId1 && id !== rafId2);
-                                          });
-                                          pendingClearRAFsRef.current.push(rafId2);
-                                        });
-                                        pendingClearRAFsRef.current.push(rafId1);
-                                      }}
+                                      onBlur={handleBlur}
                                       placeholder="0"
                                       className="text-xs"
                                     />
@@ -2261,19 +2295,7 @@ export default function InteractionsPanel({
                                     value={fromValue ?? ''}
                                     onChange={(e) => handleFromChange(e.target.value)}
                                     onFocus={handlePreviewFrom}
-                                    onBlur={() => {
-                                      // Defer clearing to ensure any pending RAF callbacks complete first
-                                      // Store RAF IDs so they can be canceled if a new preview is applied
-                                      const rafId1 = requestAnimationFrame(() => {
-                                        const rafId2 = requestAnimationFrame(() => {
-                                          clearPreviewStyles();
-                                          // Remove this RAF ID from the pending list
-                                          pendingClearRAFsRef.current = pendingClearRAFsRef.current.filter(id => id !== rafId1 && id !== rafId2);
-                                        });
-                                        pendingClearRAFsRef.current.push(rafId2);
-                                      });
-                                      pendingClearRAFsRef.current.push(rafId1);
-                                    }}
+                                    onBlur={handleBlur}
                                     placeholder="0"
                                     className="flex-1 h-7 text-xs"
                                   />
@@ -2341,25 +2363,46 @@ export default function InteractionsPanel({
                                   ))}
                                 </SelectContent>
                               </Select>
+                            ) : prop.units ? (
+                              <Select
+                                value={parsedTo?.unit || prop.unit}
+                                onValueChange={handleToUnitChange}
+                              >
+                                <InputGroup className="flex-1 h-7">
+                                  <InputGroupInput
+                                    value={parsedTo?.number ?? ''}
+                                    onChange={(e) => handleToChange(e.target.value)}
+                                    onFocus={handlePreviewTo}
+                                    onBlur={handleBlur}
+                                    placeholder="0"
+                                    className="text-xs pr-0.5"
+                                  />
+                                  <SelectTrigger className="h-full w-auto min-w-0 gap-0 border-0 border-l rounded-none bg-transparent pl-0.5 pr-1.5 text-xs text-muted-foreground shadow-none focus:ring-0 [&>svg]:hidden">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                </InputGroup>
+                                <SelectContent
+                                  align="end"
+                                  className="min-w-[--radix-select-trigger-width]"
+                                >
+                                  {prop.units.map((u) => (
+                                    <SelectItem
+                                      key={u}
+                                      value={u}
+                                      className="text-xs"
+                                    >
+                                      {u}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
                             ) : prop.unit ? (
                               <InputGroup className="flex-1 h-7">
                                 <InputGroupInput
                                   value={toValue ?? ''}
                                   onChange={(e) => handleToChange(e.target.value)}
                                   onFocus={handlePreviewTo}
-                                  onBlur={() => {
-                                    // Defer clearing to ensure any pending RAF callbacks complete first
-                                    // Store RAF IDs so they can be canceled if a new preview is applied
-                                    const rafId1 = requestAnimationFrame(() => {
-                                      const rafId2 = requestAnimationFrame(() => {
-                                        clearPreviewStyles();
-                                        // Remove this RAF ID from the pending list
-                                        pendingClearRAFsRef.current = pendingClearRAFsRef.current.filter(id => id !== rafId1 && id !== rafId2);
-                                      });
-                                      pendingClearRAFsRef.current.push(rafId2);
-                                    });
-                                    pendingClearRAFsRef.current.push(rafId1);
-                                  }}
+                                  onBlur={handleBlur}
                                   placeholder="0"
                                   className="text-xs"
                                 />
@@ -2372,19 +2415,7 @@ export default function InteractionsPanel({
                                 value={toValue ?? ''}
                                 onChange={(e) => handleToChange(e.target.value)}
                                 onFocus={handlePreviewTo}
-                                onBlur={() => {
-                                  // Defer clearing to ensure any pending RAF callbacks complete first
-                                  // Store RAF IDs so they can be canceled if a new preview is applied
-                                  const rafId1 = requestAnimationFrame(() => {
-                                    const rafId2 = requestAnimationFrame(() => {
-                                      clearPreviewStyles();
-                                      // Remove this RAF ID from the pending list
-                                      pendingClearRAFsRef.current = pendingClearRAFsRef.current.filter(id => id !== rafId1 && id !== rafId2);
-                                    });
-                                    pendingClearRAFsRef.current.push(rafId2);
-                                  });
-                                  pendingClearRAFsRef.current.push(rafId1);
-                                }}
+                                onBlur={handleBlur}
                                 placeholder="0"
                                 className="flex-1 h-7 text-xs"
                               />
