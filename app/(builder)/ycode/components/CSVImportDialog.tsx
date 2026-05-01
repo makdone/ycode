@@ -200,7 +200,8 @@ export function CSVImportDialog({
 
   const hasMappedColumns = getMappedFieldIds().size > 0;
 
-  const BATCH_SIZE = 50;
+  const BATCH_SIZE_INITIAL = 20;
+  const BATCH_SIZE_MIN = 1;
 
   // Start import
   const startImport = async () => {
@@ -235,13 +236,15 @@ export function CSVImportDialog({
     }
   };
 
-  // Process import by sending batches of CSV rows to the server
+  // Process import by sending batches of CSV rows to the server.
+  // Adapts batch size downward on 413 (payload too large) responses.
   const processImport = async (id: string) => {
     abortRef.current = false;
     let offset = 0;
+    let batchSize = BATCH_SIZE_INITIAL;
 
     while (!abortRef.current && offset < rows.length) {
-      const batch = rows.slice(offset, offset + BATCH_SIZE);
+      const batch = rows.slice(offset, offset + batchSize);
 
       try {
         const response = await fetch('/ycode/api/collections/import/process', {
@@ -253,6 +256,14 @@ export function CSVImportDialog({
             startIndex: offset,
           }),
         });
+
+        if (response.status === 413) {
+          if (batchSize <= BATCH_SIZE_MIN) {
+            throw new Error('Row payload too large for server — try removing large content from the CSV');
+          }
+          batchSize = Math.max(BATCH_SIZE_MIN, Math.floor(batchSize / 2));
+          continue;
+        }
 
         const data = await response.json();
 
