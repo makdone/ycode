@@ -10,6 +10,7 @@ import { insertValuesBulk } from '@/lib/repositories/collectionItemValueReposito
 import { getFieldsByCollectionId } from '@/lib/repositories/collectionFieldRepository';
 import {
   convertValueForFieldType,
+  parseCSVText,
   SKIP_COLUMN,
   AUTO_FIELD_KEYS,
   truncateValue,
@@ -23,6 +24,8 @@ import { uploadFile } from '@/lib/file-upload';
 import { findAssetsByFilenames } from '@/lib/repositories/assetRepository';
 import { generateCollectionItemContentHash } from '@/lib/hash-utils';
 import { noCache } from '@/lib/api-response';
+import { getSupabaseAdmin } from '@/lib/supabase-server';
+import { STORAGE_BUCKET } from '@/lib/asset-constants';
 import { randomUUID } from 'crypto';
 import type { CollectionField } from '@/types';
 
@@ -186,30 +189,24 @@ function prepareRow(
   };
 }
 
+const BATCH_SIZE = 20;
+
 /**
  * POST /ycode/api/collections/import/process
- * Process a batch of CSV rows for an import job.
- * The client sends rows directly — no CSV data is stored in the DB.
+ * Process the next batch of rows for an import job.
+ * Reads the CSV file directly from Supabase Storage — no row data in the request body.
  *
  * Body:
  *  - importId: string - The import job to process
- *  - rows: Record<string, string>[] - The batch of CSV rows to process
- *  - startIndex: number - The 0-based offset of this batch within the full CSV
  */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
-    const { importId, rows: rowsToProcess, startIndex: batchStartIndex } = body;
+    const { importId } = body;
 
     if (!importId) {
       return noCache({ error: 'importId is required' }, 400);
     }
-
-    if (!Array.isArray(rowsToProcess) || rowsToProcess.length === 0) {
-      return noCache({ error: 'rows array is required and must not be empty' }, 400);
-    }
-
-    const startIndex: number = typeof batchStartIndex === 'number' ? batchStartIndex : 0;
 
     let importJob = await getImportById(importId);
     if (!importJob) {
@@ -244,6 +241,50 @@ export async function POST(request: NextRequest) {
       });
     }
     importJob = freshImportJob;
+
+    // Read CSV from Supabase Storage
+    const csvMeta = importJob.csv_data as { storage_path?: string } | null;
+    if (!csvMeta?.storage_path) {
+      return noCache({ error: 'Import job has no CSV file reference' }, 400);
+    }
+
+    const supabase = await getSupabaseAdmin();
+    if (!supabase) {
+      return noCache({ error: 'Storage not configured' }, 500);
+    }
+
+    const { data: fileBlob, error: downloadError } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .download(csvMeta.storage_path);
+
+    if (downloadError || !fileBlob) {
+      console.error('Failed to download CSV from storage:', downloadError);
+      return noCache({ error: 'Failed to read CSV file from storage' }, 500);
+    }
+
+    const csvText = await fileBlob.text();
+    const parsed = parseCSVText(csvText);
+
+    // Determine which rows to process in this batch
+    const startIndex = importJob.processed_rows + importJob.failed_rows;
+    const rowsToProcess = parsed.rows.slice(startIndex, startIndex + BATCH_SIZE);
+
+    if (rowsToProcess.length === 0) {
+      // All rows have been processed
+      const errors = importJob.errors || [];
+      await completeImport(importJob.id, importJob.processed_rows, importJob.failed_rows, errors);
+      return noCache({
+        data: {
+          importId: importJob.id,
+          status: 'completed',
+          totalRows: importJob.total_rows,
+          processedRows: importJob.processed_rows,
+          failedRows: importJob.failed_rows,
+          isComplete: true,
+          errors: errors.slice(-10),
+        }
+      });
+    }
 
     // Get collection fields (1 query, reused for all rows)
     const fields = await getFieldsByCollectionId(importJob.collection_id, false);
@@ -439,6 +480,11 @@ export async function POST(request: NextRequest) {
 
     if (isComplete) {
       await completeImport(importJob.id, processedCount, failedCount, errors);
+
+      // Clean up the CSV file from storage
+      try {
+        await supabase.storage.from(STORAGE_BUCKET).remove([csvMeta.storage_path]);
+      } catch { /* best-effort cleanup */ }
     }
 
     return noCache({

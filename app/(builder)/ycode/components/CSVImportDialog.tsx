@@ -200,22 +200,60 @@ export function CSVImportDialog({
 
   const hasMappedColumns = getMappedFieldIds().size > 0;
 
-  const BATCH_SIZE_INITIAL = 20;
-  const BATCH_SIZE_MIN = 1;
+  // Upload the CSV file to Supabase Storage via presigned URL
+  const uploadCSVToStorage = async (): Promise<string> => {
+    if (!file) throw new Error('No file selected');
 
-  // Start import
+    // 1. Get a presigned upload URL from the server
+    const presignResponse = await fetch('/ycode/api/files/presign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        filename: file.name,
+        mimeType: 'text/csv',
+        fileSize: file.size,
+        category: 'documents',
+      }),
+    });
+
+    if (!presignResponse.ok) {
+      const errorData = await presignResponse.json();
+      throw new Error(errorData.error || 'Failed to get upload URL');
+    }
+
+    const { data: presignData } = await presignResponse.json();
+
+    // 2. Upload directly to Supabase Storage (bypasses serverless body limit)
+    const uploadResponse = await fetch(presignData.signedUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'text/csv' },
+      body: file,
+    });
+
+    if (!uploadResponse.ok) {
+      throw new Error('Failed to upload CSV file to storage');
+    }
+
+    return presignData.storagePath;
+  };
+
+  // Start import: upload file → create job → poll for progress
   const startImport = async () => {
     setImporting(true);
     setError(null);
 
     try {
-      // Create lightweight import job (no CSV data stored in DB)
+      // Upload CSV to storage first
+      const csvStoragePath = await uploadCSVToStorage();
+
+      // Create import job with the storage reference
       const response = await fetch(`/ycode/api/collections/${collectionId}/import`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           columnMapping,
           totalRows: rows.length,
+          csvStoragePath,
         }),
       });
 
@@ -228,7 +266,6 @@ export function CSVImportDialog({
       setImportId(data.data.importId);
       setStep('progress');
 
-      // Start processing batches, sending rows directly
       processImport(data.data.importId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start import');
@@ -236,37 +273,18 @@ export function CSVImportDialog({
     }
   };
 
-  // Process import by sending batches of CSV rows to the server.
-  // Adapts batch size downward on 413 (payload too large) responses.
+  // Poll the server to process batches until complete.
+  // The server reads CSV from storage and manages its own batch size.
   const processImport = async (id: string) => {
     abortRef.current = false;
-    let offset = 0;
-    let batchSize = BATCH_SIZE_INITIAL;
 
-    while (!abortRef.current && offset < rows.length) {
-      const batch = rows.slice(offset, offset + batchSize);
-
+    while (!abortRef.current) {
       try {
         const response = await fetch('/ycode/api/collections/import/process', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            importId: id,
-            rows: batch,
-            startIndex: offset,
-          }),
+          body: JSON.stringify({ importId: id }),
         });
-
-        if (response.status === 413) {
-          if (batchSize <= BATCH_SIZE_MIN) {
-            // Single row exceeds server body limit — skip it and continue
-            console.warn(`Row ${offset + 1} payload too large (413), skipping`);
-            offset += 1;
-            continue;
-          }
-          batchSize = Math.max(BATCH_SIZE_MIN, Math.floor(batchSize / 2));
-          continue;
-        }
 
         const data = await response.json();
 
@@ -285,8 +303,6 @@ export function CSVImportDialog({
           onImportComplete?.();
           return;
         }
-
-        offset += batch.length;
       } catch (err) {
         console.error('Process error:', err);
         setImporting(false);
