@@ -172,7 +172,10 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
     urlState.view || 'desktop'
   );
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const lastLayersByPageRef = useRef<Map<string, string>>(new Map());
+  // Tracks the last-seen layers reference per page. Reference equality is
+  // sufficient because store mutators always produce a new layers array on
+  // actual changes (React relies on this for re-rendering).
+  const lastLayersByPageRef = useRef<Map<string, Layer[]>>(new Map());
   const previousPageIdRef = useRef<string | null>(null);
   const previousResourceIdRef = useRef<string | null>(null); // Track URL resourceId changes
   const hasInitializedLayerFromUrlRef = useRef(false);
@@ -905,11 +908,11 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
       return;
     }
 
-    const currentLayersJSON = JSON.stringify(currentDraft.layers);
-    const lastLayersJSON = lastLayersByPageRef.current.get(currentPageId);
+    const currentLayers = currentDraft.layers;
+    const lastLayers = lastLayersByPageRef.current.get(currentPageId);
 
-    // Only trigger save if layers actually changed for THIS page
-    if (lastLayersJSON && lastLayersJSON !== currentLayersJSON) {
+    // Only trigger save if the layers array reference actually changed for THIS page
+    if (lastLayers && lastLayers !== currentLayers) {
       if (consumePageMcpSync(currentPageId)) {
         // MCP already saved to DB — cancel any pending autosave and accept
         if (saveTimeoutRef.current) {
@@ -923,8 +926,7 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
       }
     }
 
-    // Update the ref for next comparison (store per page)
-    lastLayersByPageRef.current.set(currentPageId, currentLayersJSON);
+    lastLayersByPageRef.current.set(currentPageId, currentLayers);
   }, [currentPageId, currentDraft, debouncedSave]);
 
   // Cleanup save timeout on unmount only
@@ -1018,17 +1020,21 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
         clearTimeout(saveTimeouts[editingComponentId]);
       }
 
-      // Immediately save component draft (ensures all changes are persisted)
+      // Capture whether this draft has any unpersisted edits before saving,
+      // since saveComponentDraft will reset the dirty flag on success.
+      const wasDirty = !!useComponentsStore.getState().componentDraftDirty[editingComponentId];
+
+      // Immediately save component draft (ensures all changes are persisted).
+      // This is a no-op if the draft is not dirty.
       await saveComponentDraft(editingComponentId);
 
-      // Get the updated component to get its layers
-      const updatedComponent = getComponentById(editingComponentId);
-      if (updatedComponent) {
-        // Update all instances across pages with the new layers
-        await updateComponentOnLayers(editingComponentId, updatedComponent.layers);
+      // Only sync across pages and broadcast when the user actually edited
+      // the component during this editing session.
+      if (wasDirty) {
+        updateComponentOnLayers(editingComponentId);
 
-        // Broadcast component layers update to collaborators
-        if (liveComponentUpdates) {
+        const updatedComponent = getComponentById(editingComponentId);
+        if (updatedComponent && liveComponentUpdates) {
           liveComponentUpdates.broadcastComponentLayersUpdate(editingComponentId, updatedComponent.layers);
         }
       }
@@ -1073,16 +1079,9 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
           }
         }
       } else {
-        // Returning to a page
-        // Exit edit mode to clear the state and pop the stack
-        setEditingComponentId(null, null);
-
-        // Small delay to ensure state clears
-        await new Promise(resolve => setTimeout(resolve, 10));
         // Returning to a page (or no stack entry)
         let targetPageId = returnToPageId;
         if (!targetPageId) {
-          // No return page - use homepage or first available page
           const homePage = findHomepage(pages);
           const defaultPage = homePage || pages[0];
           targetPageId = defaultPage?.id || null;
@@ -1093,21 +1092,24 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
           return;
         }
 
-        // Navigate to the target page, including the layer ID in the URL
-        // This ensures the URL sync effect will restore the correct layer
+        // Clear edit mode state synchronously, then navigate.
+        // The URL sync effect will restore the correct layer from the URL.
+        setEditingComponentId(null, null);
         navigateToLayers(
           targetPageId,
-          undefined, // view - use current
-          undefined, // rightTab - use current
-          returnToLayerId || returnDestination?.layerId || undefined // layerId - restore the original layer
+          undefined,
+          undefined,
+          returnToLayerId || returnDestination?.layerId || undefined
         );
       }
-
-      // Wait for navigation to complete
-      await new Promise(resolve => setTimeout(resolve, 100));
     } finally {
-      // Clear flag after exit completes
-      isExitingComponentModeRef.current = false;
+      // Defer clearing the guard until after the URL update has propagated.
+      // Otherwise the URL sync effect may re-run with the old `routeType ===
+      // 'component'` (because router.push is async) while the guard is already
+      // cleared, and re-enter component edit mode.
+      setTimeout(() => {
+        isExitingComponentModeRef.current = false;
+      }, 0);
     }
 
     // Selection will be restored by the URL sync effect

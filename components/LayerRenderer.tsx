@@ -105,6 +105,7 @@ interface LayerRendererProps {
   liveLayerUpdates?: UseLiveLayerUpdatesReturn | null; // For collaboration broadcasts
   liveComponentUpdates?: UseLiveComponentUpdatesReturn | null; // For component collaboration broadcasts
   parentComponentLayerId?: string; // ID of the parent component layer (if rendering inside a component)
+  parentComponentId?: string; // ID of the parent component (mirror of parentComponentLayerId for double-click-to-edit)
   parentComponentOverrides?: Layer['componentOverrides']; // Override values from parent component instance
   parentComponentVariables?: ComponentVariable[]; // Component's variables for default value lookup
   editingComponentVariables?: ComponentVariable[]; // Variables when directly editing a component
@@ -129,6 +130,8 @@ interface LayerRendererProps {
   serverSettings?: Record<string, unknown>;
   /** When true, the component root layer (layer.id === parentComponentLayerId) renders its own context menu */
   componentRootContextMenu?: boolean;
+  /** Called when a component instance is double-clicked on the canvas (edit mode only). */
+  onComponentEdit?: (componentId: string, instanceLayerId: string) => void;
 }
 
 const LayerRenderer: React.FC<LayerRendererProps> = ({
@@ -160,6 +163,7 @@ const LayerRenderer: React.FC<LayerRendererProps> = ({
   liveLayerUpdates,
   liveComponentUpdates,
   parentComponentLayerId,
+  parentComponentId,
   parentComponentOverrides,
   parentComponentVariables,
   editingComponentVariables,
@@ -177,6 +181,7 @@ const LayerRenderer: React.FC<LayerRendererProps> = ({
   isSlideChild: isSlideChildProp,
   serverSettings,
   componentRootContextMenu,
+  onComponentEdit,
 }) => {
   const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState<string>('');
@@ -304,6 +309,7 @@ const LayerRenderer: React.FC<LayerRendererProps> = ({
         liveLayerUpdates={liveLayerUpdates}
         liveComponentUpdates={liveComponentUpdates}
         parentComponentLayerId={parentComponentLayerId}
+        parentComponentId={parentComponentId}
         parentComponentOverrides={parentComponentOverrides}
         parentComponentVariables={parentComponentVariables}
         editingComponentVariables={editingComponentVariables}
@@ -322,6 +328,7 @@ const LayerRenderer: React.FC<LayerRendererProps> = ({
         isSlideChild={isSlideChildProp}
         serverSettings={serverSettings}
         componentRootContextMenu={componentRootContextMenu}
+        onComponentEdit={onComponentEdit}
       />
     );
   };
@@ -369,6 +376,7 @@ const LayerItem: React.FC<{
   liveLayerUpdates?: UseLiveLayerUpdatesReturn | null;
   liveComponentUpdates?: UseLiveComponentUpdatesReturn | null;
   parentComponentLayerId?: string; // ID of the parent component layer (if this layer is inside a component)
+  parentComponentId?: string; // ID of the parent component (mirrors parentComponentLayerId)
   parentComponentOverrides?: Layer['componentOverrides']; // Override values from parent component instance
   parentComponentVariables?: ComponentVariable[]; // Component's variables for default value lookup
   editingComponentVariables?: ComponentVariable[]; // Variables when directly editing a component
@@ -387,6 +395,7 @@ const LayerItem: React.FC<{
   isSlideChild?: boolean;
   serverSettings?: Record<string, unknown>;
   componentRootContextMenu?: boolean;
+  onComponentEdit?: (componentId: string, instanceLayerId: string) => void;
 }> = ({
   layer,
   isEditMode,
@@ -421,6 +430,7 @@ const LayerItem: React.FC<{
   liveLayerUpdates,
   liveComponentUpdates,
   parentComponentLayerId,
+  parentComponentId,
   parentComponentOverrides,
   parentComponentVariables,
   editingComponentVariables,
@@ -435,6 +445,7 @@ const LayerItem: React.FC<{
   anchorMap,
   resolvedAssets,
   components: componentsProp,
+  onComponentEdit,
   ancestorComponentIds,
   isSlideChild,
   serverSettings,
@@ -532,10 +543,11 @@ const LayerItem: React.FC<{
     resolvedAssets,
     components: componentsProp,
     serverSettings,
+    onComponentEdit,
   // selectedLayerId and hoveredLayerId kept in the object for SSR/published mode
   // but excluded from deps so changes don't cascade re-renders in edit mode.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [isEditMode, isPublished, onLayerClick, onLayerUpdate, onLayerHover, pageId, collectionLayerData, collectionLayerItemId, effectiveLayerDataMap, pageCollectionItemId, pageCollectionItemData, pageCollectionSortedItemIds, hiddenLayerInfo, editorHiddenLayerIds, editorBreakpoint, currentLocale, availableLocales, localeSelectorFormat, liveLayerUpdates, liveComponentUpdates, isInsideForm, isInsideLink, parentFormSettings, pages, folders, collectionItemSlugs, isPreview, translations, anchorMap, resolvedAssets, componentsProp, serverSettings]);
+  }), [isEditMode, isPublished, onLayerClick, onLayerUpdate, onLayerHover, pageId, collectionLayerData, collectionLayerItemId, effectiveLayerDataMap, pageCollectionItemId, pageCollectionItemData, pageCollectionSortedItemIds, hiddenLayerInfo, editorHiddenLayerIds, editorBreakpoint, currentLocale, availableLocales, localeSelectorFormat, liveLayerUpdates, liveComponentUpdates, isInsideForm, isInsideLink, parentFormSettings, pages, folders, collectionItemSlugs, isPreview, translations, anchorMap, resolvedAssets, componentsProp, serverSettings, onComponentEdit]);
 
   // Callback for rendering embedded components inside rich-text content
   // Clicks on the embedded component's internal layers should select the text layer
@@ -1607,6 +1619,7 @@ const LayerItem: React.FC<{
           activeLayerId={activeLayerId}
           projected={projected}
           parentComponentLayerId={layer.id}
+          parentComponentId={layer.componentId}
           parentComponentOverrides={effectiveOverrides}
           parentComponentVariables={component?.variables}
           ancestorComponentIds={effectiveAncestorIds}
@@ -1921,6 +1934,15 @@ const LayerItem: React.FC<{
       elementProps.onDoubleClick = (e: React.MouseEvent) => {
         if (isLockedByOther) return;
         e.stopPropagation();
+
+        // Component instance (or any layer inside one): open the master
+        // component for editing. Mirrors the "Edit component" sidebar button.
+        const componentEditTargetId = layer.componentId || parentComponentId;
+        const componentEditInstanceLayerId = layer.componentId ? layer.id : parentComponentLayerId;
+        if (onComponentEdit && componentEditTargetId && componentEditInstanceLayerId) {
+          onComponentEdit(componentEditTargetId, componentEditInstanceLayerId);
+          return;
+        }
 
         // Any element with CMS field binding: open collection item editor
         const cmsBinding = getLayerCmsFieldBinding(layer);
@@ -2752,6 +2774,11 @@ const LayerItem: React.FC<{
       );
     }
 
+    // Resolved parent-component context to pass to child LayerRenderers.
+    // Innermost component wins so double-click-to-edit targets the correct component.
+    const childParentComponentLayerId = layer.componentId ? layer.id : parentComponentLayerId;
+    const childParentComponentId = layer.componentId || parentComponentId;
+
     // Collection layers - repeat the element for each item (design applies to each looped item)
     if (isCollectionLayer && isEditMode) {
       if (isLoadingLayerData) {
@@ -2900,7 +2927,8 @@ const LayerItem: React.FC<{
                     currentLocale={currentLocale}
                     availableLocales={availableLocales}
                     liveLayerUpdates={liveLayerUpdates}
-                    parentComponentLayerId={parentComponentLayerId || (layer.componentId ? layer.id : undefined)}
+                    parentComponentLayerId={childParentComponentLayerId}
+                    parentComponentId={childParentComponentId}
                     parentComponentOverrides={parentComponentOverrides}
                     parentComponentVariables={parentComponentVariables}
                     editingComponentVariables={editingComponentVariables}
@@ -2918,6 +2946,7 @@ const LayerItem: React.FC<{
                     ancestorComponentIds={effectiveAncestorIds}
                     isSlideChild={layer.name === 'slides'}
                     serverSettings={serverSettings}
+                    onComponentEdit={onComponentEdit}
                   />
                 )}
               </Tag>
@@ -2976,7 +3005,8 @@ const LayerItem: React.FC<{
               availableLocales={availableLocales}
               localeSelectorFormat={format}
               liveLayerUpdates={liveLayerUpdates}
-              parentComponentLayerId={layer.componentId ? layer.id : parentComponentLayerId}
+              parentComponentLayerId={childParentComponentLayerId}
+              parentComponentId={childParentComponentId}
               parentComponentOverrides={parentComponentOverrides}
               parentComponentVariables={parentComponentVariables}
               editingComponentVariables={editingComponentVariables}
@@ -2986,6 +3016,7 @@ const LayerItem: React.FC<{
               components={componentsProp}
               ancestorComponentIds={effectiveAncestorIds}
               serverSettings={serverSettings}
+              onComponentEdit={onComponentEdit}
             />
           )}
 
@@ -3042,7 +3073,8 @@ const LayerItem: React.FC<{
             availableLocales={availableLocales}
             localeSelectorFormat={localeSelectorFormat}
             liveLayerUpdates={liveLayerUpdates}
-            parentComponentLayerId={parentComponentLayerId || (layer.componentId ? layer.id : undefined)}
+            parentComponentLayerId={childParentComponentLayerId}
+            parentComponentId={childParentComponentId}
             parentComponentOverrides={parentComponentOverrides}
             parentComponentVariables={parentComponentVariables}
             editingComponentVariables={editingComponentVariables}
@@ -3060,6 +3092,7 @@ const LayerItem: React.FC<{
             ancestorComponentIds={effectiveAncestorIds}
             isSlideChild={layer.name === 'slides'}
             serverSettings={serverSettings}
+            onComponentEdit={onComponentEdit}
           />
         )}
       </Tag>
