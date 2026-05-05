@@ -81,6 +81,7 @@ export async function testSupabaseDirectConnection(credentials: {
   dbName: string;
   dbUser: string;
   dbPassword: string;
+  ssl?: boolean;
 }): Promise<{
   success: boolean;
   error?: string;
@@ -98,7 +99,7 @@ export async function testSupabaseDirectConnection(credentials: {
         database: credentials.dbName,
         user: credentials.dbUser,
         password: credentials.dbPassword,
-        ssl: { rejectUnauthorized: false },
+        ssl: credentials.ssl === false ? false : { rejectUnauthorized: false },
       },
       pool: {
         min: 0,

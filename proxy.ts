@@ -25,6 +25,9 @@ const PUBLIC_API_EXACT = [
 /**
  * Derive the Supabase project URL and anon key from environment variables.
  * Returns null if env vars are not set (pre-setup or local dev without .env.local).
+ *
+ * Uses SUPABASE_URL when set (self-hosted instances), otherwise derives from
+ * the project ref in the connection string (hosted Supabase).
  */
 function getSupabaseEnvConfig(): { url: string; anonKey: string } | null {
   const anonKey = process.env.SUPABASE_PUBLISHABLE_KEY
@@ -33,8 +36,14 @@ function getSupabaseEnvConfig(): { url: string; anonKey: string } | null {
 
   if (!anonKey || !connectionUrl) return null;
 
-  // Extract project ID from connection URL
-  // e.g. "postgresql://postgres.abc123:..." → "abc123"
+  if (process.env.SUPABASE_URL) {
+    return {
+      url: process.env.SUPABASE_URL.replace(/\/+$/, ''),
+      anonKey,
+    };
+  }
+
+  // Hosted Supabase: extract project ID from connection URL
   const match = connectionUrl.match(/\/\/postgres\.([a-z0-9]+):/);
   if (!match) return null;
 

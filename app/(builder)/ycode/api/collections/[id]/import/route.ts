@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { createImport } from '@/lib/repositories/collectionImportRepository';
+import { createImport, cleanupStaleImports } from '@/lib/repositories/collectionImportRepository';
 import { getCollectionById } from '@/lib/repositories/collectionRepository';
 import { noCache } from '@/lib/api-response';
 import { getErrorMessage } from '@/lib/csv-utils';
@@ -59,6 +59,9 @@ export async function POST(
         400
       );
     }
+
+    // Clean up orphaned CSV files from abandoned imports (fire-and-forget)
+    cleanupStaleImports().catch(() => {});
 
     const importJob = await createImport({
       collection_id: id,

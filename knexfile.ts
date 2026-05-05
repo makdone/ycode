@@ -23,6 +23,7 @@ async function getSupabaseConnectionParams() {
   }
 
   const connectionParams = parseSupabaseConfig(config);
+  const isSelfHosted = !!config.supabaseUrl;
 
   return {
     host: connectionParams.dbHost,
@@ -30,7 +31,7 @@ async function getSupabaseConnectionParams() {
     database: connectionParams.dbName,
     user: connectionParams.dbUser,
     password: connectionParams.dbPassword,
-    ssl: { rejectUnauthorized: false },
+    ssl: isSelfHosted ? false : { rejectUnauthorized: false },
   };
 }
 

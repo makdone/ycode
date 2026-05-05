@@ -856,6 +856,7 @@ export interface SupabaseConfig {
   serviceRoleKey: string;
   connectionUrl: string; // With [YOUR-PASSWORD] placeholder
   dbPassword: string; // Actual password to replace [YOUR-PASSWORD]
+  supabaseUrl?: string; // Explicit API URL for self-hosted instances (e.g. https://supabase.my-company.com)
 }
 
 // Internal credentials structure (derived from SupabaseConfig)
@@ -866,7 +867,7 @@ export interface SupabaseCredentials {
   dbPassword: string;
   // Derived properties
   projectId: string;
-  projectUrl: string; // API URL: https://[PROJECT_ID].supabase.co
+  projectUrl: string; // API URL — explicit or derived from project ID
   dbHost: string;
   dbPort: number;
   dbName: string;

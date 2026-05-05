@@ -106,19 +106,19 @@ export async function testSupabaseConnection(
       },
     });
 
-    // Test connection by trying to list users (requires service role key)
-    // This verifies both connection and authentication
     const { error } = await client.auth.admin.listUsers({
       page: 1,
       perPage: 1,
     });
 
     if (error) {
+      console.error('[testSupabaseConnection] Failed:', { url: parsed.projectUrl, error: error.message, status: error.status });
       return { success: false, error: error.message };
     }
 
     return { success: true };
   } catch (error) {
+    console.error('[testSupabaseConnection] Failed:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Connection failed',
