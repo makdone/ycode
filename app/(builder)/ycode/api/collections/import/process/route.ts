@@ -6,7 +6,7 @@ import {
   completeImport,
 } from '@/lib/repositories/collectionImportRepository';
 import { createItemsBulk, deleteItem, getMaxIdValue, getMaxManualOrder } from '@/lib/repositories/collectionItemRepository';
-import { insertValuesBulk } from '@/lib/repositories/collectionItemValueRepository';
+import { insertValuesBulk, insertValuesDirectPg } from '@/lib/repositories/collectionItemValueRepository';
 import { getFieldsByCollectionId } from '@/lib/repositories/collectionFieldRepository';
 import {
   convertValueForFieldType,
@@ -33,10 +33,19 @@ interface UploadedAsset {
   publicUrl: string;
 }
 
+/** Encode a URL that may contain unencoded characters like spaces. */
+function sanitizeUrl(url: string): string {
+  try {
+    return new URL(url).href;
+  } catch {
+    return encodeURI(url);
+  }
+}
+
 /** Extract a decoded filename from a URL, or empty string if none found. */
 function extractFilenameFromUrl(url: string): string {
   try {
-    const segment = new URL(url).pathname.split('/').pop();
+    const segment = new URL(sanitizeUrl(url)).pathname.split('/').pop();
     if (segment && segment.includes('.')) {
       return decodeURIComponent(segment);
     }
@@ -47,7 +56,7 @@ function extractFilenameFromUrl(url: string): string {
 /** Download a file from a URL and upload it to the asset manager. */
 async function downloadAndUploadAsset(url: string): Promise<UploadedAsset | null> {
   try {
-    const response = await fetch(url, {
+    const response = await fetch(sanitizeUrl(url), {
       headers: { 'User-Agent': 'Ycode-CSV-Import/1.0' },
     });
 
@@ -57,7 +66,6 @@ async function downloadAndUploadAsset(url: string): Promise<UploadedAsset | null
     }
 
     const contentType = response.headers.get('content-type') || 'application/octet-stream';
-    const blob = await response.blob();
 
     let filename = extractFilenameFromUrl(url);
     if (!filename) {
@@ -65,7 +73,9 @@ async function downloadAndUploadAsset(url: string): Promise<UploadedAsset | null
       filename = `imported-${Date.now()}.${ext}`;
     }
 
-    const file = new File([blob], filename, { type: contentType });
+    // Use arrayBuffer directly — avoids the extra blob→File copy
+    const buffer = await response.arrayBuffer();
+    const file = new File([buffer], filename, { type: contentType });
     const asset = await uploadFile(file, 'csv-import');
 
     if (!asset) {
@@ -213,10 +223,9 @@ async function loadBatchFromStorage(
   console.warn(`[csv-import] Downloaded batch from storage: ${(text.length / 1024).toFixed(0)}KB`);
   const rows = JSON.parse(text) as Record<string, string>[];
 
-  // Clean up the batch file immediately
   try {
     await supabase.storage.from(STORAGE_BUCKET).remove([batchPath]);
-  } catch { /* best-effort */ }
+  } catch { /* best-effort cleanup */ }
 
   return { rows, supabase };
 }
@@ -287,6 +296,7 @@ export async function POST(request: NextRequest) {
     // Resolve rows: body → batch file in storage
     let rowsToProcess: Record<string, string>[];
     let supabaseForCleanup: Awaited<ReturnType<typeof getSupabaseAdmin>> = null;
+    let isStorageFallback = false;
 
     if (clientRows && Array.isArray(clientRows) && clientRows.length > 0) {
       rowsToProcess = clientRows;
@@ -296,6 +306,7 @@ export async function POST(request: NextRequest) {
       const storageResult = await loadBatchFromStorage(batchStoragePath);
       rowsToProcess = storageResult.rows;
       supabaseForCleanup = storageResult.supabase;
+      isStorageFallback = true;
     } else {
       rowsToProcess = [];
     }
@@ -417,7 +428,7 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      const ASSET_CONCURRENCY = 10;
+      const ASSET_CONCURRENCY = isStorageFallback ? 5 : 20;
       for (let i = 0; i < urlsToDownload.length; i += ASSET_CONCURRENCY) {
         const batch = urlsToDownload.slice(i, i + ASSET_CONCURRENCY);
         const results = await Promise.allSettled(
@@ -474,18 +485,56 @@ export async function POST(request: NextRequest) {
     if (preparedRows.length > 0) {
       await createItemsBulk(preparedRows.map(r => r.item));
 
+      const LARGE_VALUE_THRESHOLD = 500_000;
+
+      // Separate rows with large values (need Knex direct PG) from normal ones
+      const normalRows: PreparedRow[] = [];
+      const largeRows: PreparedRow[] = [];
+
       for (const row of preparedRows) {
+        if (row.values.some(v => (v.value?.length ?? 0) > LARGE_VALUE_THRESHOLD)) {
+          largeRows.push(row);
+        } else {
+          normalRows.push(row);
+        }
+      }
+
+      // Bulk insert all normal values in one call
+      if (normalRows.length > 0) {
+        const allValues = normalRows.flatMap(r => r.values);
+        try {
+          if (allValues.length > 0) {
+            await insertValuesBulk(allValues);
+          }
+          processedCount += normalRows.length;
+        } catch (error) {
+          // Fallback: insert per row to identify which one failed
+          for (const row of normalRows) {
+            try {
+              if (row.values.length > 0) {
+                await insertValuesBulk(row.values);
+              }
+              processedCount++;
+            } catch (rowError) {
+              failedCount++;
+              errors.push(`Row ${row.rowNumber}: DB insert failed — ${getErrorMessage(rowError)}`);
+              try { await deleteItem(row.itemId); } catch { /* best-effort */ }
+            }
+          }
+        }
+      }
+
+      // Large rows use direct PG with extended timeout
+      for (const row of largeRows) {
         try {
           if (row.values.length > 0) {
-            await insertValuesBulk(row.values);
+            await insertValuesDirectPg(row.values);
           }
           processedCount++;
         } catch (error) {
           failedCount++;
           errors.push(`Row ${row.rowNumber}: DB insert failed — ${getErrorMessage(error)}`);
-          try {
-            await deleteItem(row.itemId);
-          } catch { /* best-effort cleanup */ }
+          try { await deleteItem(row.itemId); } catch { /* best-effort */ }
         }
       }
     }

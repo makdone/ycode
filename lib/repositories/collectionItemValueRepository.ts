@@ -1,4 +1,4 @@
-import { getSupabaseAdmin } from '@/lib/supabase-server';
+import { getSupabaseAdmin, getTenantIdFromHeaders } from '@/lib/supabase-server';
 import { SUPABASE_QUERY_LIMIT } from '@/lib/supabase-constants';
 import { getKnexClient } from '@/lib/knex-client';
 import type { CollectionItemValue, CollectionFieldType } from '@/types';
@@ -73,6 +73,38 @@ export async function insertValuesBulk(
   if (error) {
     throw new Error(`Failed to bulk insert values: ${error.message}`);
   }
+}
+
+/**
+ * Insert values via Knex (direct PG connection) with an extended timeout.
+ * Used for oversized values that exceed PostgREST's statement timeout.
+ * Sets tenant context when available so DB triggers can populate tenant_id.
+ */
+export async function insertValuesDirectPg(
+  values: Array<{ item_id: string; field_id: string; value: string | null; is_published?: boolean }>
+): Promise<void> {
+  if (values.length === 0) return;
+
+  const knex = await getKnexClient();
+  const tenantId = await getTenantIdFromHeaders();
+  const now = new Date().toISOString();
+  const rows = values.map(v => ({
+    id: randomUUID(),
+    item_id: v.item_id,
+    field_id: v.field_id,
+    value: v.value,
+    is_published: v.is_published ?? false,
+    created_at: now,
+    updated_at: now,
+  }));
+
+  await knex.transaction(async (trx) => {
+    await trx.raw("SET LOCAL statement_timeout = '60s'");
+    if (tenantId) {
+      await trx.raw('SELECT set_tenant_context(?::uuid)', [tenantId]);
+    }
+    await trx('collection_item_values').insert(rows);
+  });
 }
 
 export interface UpdateCollectionItemValueData {

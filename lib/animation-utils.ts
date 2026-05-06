@@ -49,7 +49,7 @@ export function createSplitTextAnimation(
 
 // Types
 export type TriggerType = 'click' | 'hover' | 'scroll-into-view' | 'while-scrolling' | 'load';
-export type PropertyType = 'position-x' | 'position-y' | 'scale' | 'rotation' | 'skew-x' | 'skew-y' | 'opacity' | 'width' | 'height' | 'display' | 'split-text';
+export type PropertyType = 'position-x' | 'position-y' | 'scale' | 'rotation' | 'skew-x' | 'skew-y' | 'opacity' | 'width' | 'height' | 'background-color' | 'display' | 'split-text';
 
 export interface PropertyConfig {
   key: keyof TweenProperties;
@@ -105,6 +105,51 @@ export function formatAnimationValue(number: string, unit: string): string {
   if (!number) return '';
   if (!unit) return number;
   return `${number}${unit}`;
+}
+
+// Optional module-level resolver for ColorPicker color variable references
+// (e.g. "color:var(--{id})"). Consumers can register a resolver so GSAP
+// receives raw rgba values that it can interpolate; without one, the CSS
+// `var(--id)` form is emitted instead (suitable for static initial CSS where
+// the browser resolves it natively).
+let _colorVariableResolver: ((id: string) => string | undefined) | null = null;
+
+/** Register a resolver mapping a color variable id to its raw value
+ * ("#hex" or "#hex/opacity"). Pass null to clear. */
+export function setColorVariableResolver(
+  resolver: ((id: string) => string | undefined) | null
+): void {
+  _colorVariableResolver = resolver;
+}
+
+/**
+ * Convert a ColorPicker-formatted color (`#hex`, `#hex/opacity`, or
+ * `color:var(--id)`) to a CSS-tweenable string. Plain hex strings are
+ * returned as-is.
+ */
+function colorToCss(value: string): string {
+  if (!value) return value;
+
+  const varMatch = value.match(/^color:var\(--([^)]+)\)$/);
+  if (varMatch) {
+    const id = varMatch[1];
+    const raw = _colorVariableResolver?.(id);
+    if (raw) return colorToCss(raw);
+    // Fallback: emit a plain CSS var() — the browser resolves it natively
+    // (e.g. for SSR-injected initial animation styles).
+    return `var(--${id})`;
+  }
+
+  const parts = value.split('/');
+  if (parts.length < 2) return value;
+  const hex = parts[0];
+  const opacity = parseInt(parts[1], 10) / 100;
+  if (Number.isNaN(opacity)) return hex;
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  if ([r, g, b].some(Number.isNaN)) return hex;
+  return `rgba(${r},${g},${b},${opacity})`;
 }
 
 // Constants
@@ -216,6 +261,17 @@ export const PROPERTY_OPTIONS: PropertyOption[] = [
     }],
   },
   {
+    type: 'background-color',
+    label: 'Background color',
+    properties: [{
+      key: 'backgroundColor',
+      unit: '',
+      defaultFrom: '#ffffff',
+      defaultFromAfterCurrent: '#ffffff',
+      defaultTo: '#000000',
+    }],
+  },
+  {
     type: 'display',
     label: 'Display',
     properties: [{
@@ -309,6 +365,9 @@ export function toGsapValue(value: string | null | undefined, prop: PropertyConf
   if (value === null || value === undefined) return undefined;
   if (prop.key === 'autoAlpha') {
     return Number(value) / 100;
+  }
+  if (prop.key === 'backgroundColor') {
+    return colorToCss(value);
   }
   return resolveCssValue(value, prop);
 }
@@ -566,6 +625,8 @@ export function generateInitialAnimationCSS(layers: Layer[]): InitialAnimationRe
                   styles.push(`width: ${cssVal}`);
                 } else if (prop.key === 'height') {
                   styles.push(`height: ${cssVal}`);
+                } else if (prop.key === 'backgroundColor') {
+                  styles.push(`background-color: ${colorToCss(value)}`);
                 } else if (prop.key === 'display') {
                   // Track elements that should start hidden using data attribute
                   if (value === 'hidden') {

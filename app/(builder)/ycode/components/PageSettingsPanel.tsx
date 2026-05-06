@@ -123,6 +123,7 @@ const PageSettingsPanel = React.forwardRef<PageSettingsPanelHandle, PageSettings
   const [seoImage, setSeoImage] = useState<string | FieldVariable | null>(null);
   const [seoNoindex, setSeoNoindex] = useState(false);
   const { openFileManager } = useEditorStore();
+  const leftSidebarWidth = useEditorStore((state) => state.leftSidebarWidth);
 
   const nameInputRef = useRef<HTMLInputElement>(null);
 
@@ -1145,12 +1146,16 @@ const PageSettingsPanel = React.forwardRef<PageSettingsPanelHandle, PageSettings
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 left-64 z-40"
+        className="fixed inset-0 z-40"
+        style={{ left: `${leftSidebarWidth}px` }}
         onClick={handleClose}
       />
 
       {/* Panel */}
-      <div className="fixed top-14 left-64 bottom-0 w-125 bg-background border-r z-50 flex flex-col">
+      <div
+        className="fixed top-14 bottom-0 w-125 bg-background border-r z-50 flex flex-col"
+        style={{ left: `${leftSidebarWidth}px` }}
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4">
           <div className="flex items-center justify-center gap-1.5">

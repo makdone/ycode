@@ -281,6 +281,39 @@ const LayerRow = React.memo(function LayerRow({
   // Check if this is the Body layer (locked)
   const isLocked = node.layer.id === 'body';
 
+  const [isHovered, setIsHovered] = React.useState(false);
+
+  const rowBg = isSelected && !usePurpleStyle && !isStateActive
+    ? 'var(--primary)'
+    : isSelected && !usePurpleStyle && isStateActive
+      ? '#8dd92f'
+      : isSelected && usePurpleStyle
+        ? 'rgb(168 85 247)'
+        : isChildOfSelected && !usePurpleStyle && !isStateActive
+          ? isHovered
+            ? 'color-mix(in oklch, var(--primary) 20%, var(--background))'
+            : 'color-mix(in oklch, var(--primary) 15%, var(--background))'
+          : isChildOfSelected && !usePurpleStyle && isStateActive
+            ? isHovered
+              ? 'color-mix(in oklch, #8dd92f 20%, var(--background))'
+              : 'color-mix(in oklch, #8dd92f 15%, var(--background))'
+            : isChildOfSelected && usePurpleStyle
+              ? 'color-mix(in oklch, rgb(168 85 247) 10%, var(--background))'
+              : !isDragActive && !isDragging && !isLockedByOther && isHovered
+                ? 'color-mix(in oklch, var(--foreground) 8%, var(--background))'
+                : 'transparent';
+
+  const hasAlwaysVisibleIcons = !!node.layer.settings?.hidden
+    || isLockedByOther
+    || interactionTriggerLayerIds.includes(node.id)
+    || interactionTargetLayerIds.includes(node.id);
+
+  const iconBg = rowBg === 'transparent'
+    ? 'var(--background)'
+    : isSelected || isChildOfSelected || hasAlwaysVisibleIcons
+      ? rowBg
+      : 'transparent';
+
   // Sublayer rows (content blocks or text style targets)
   if (node.sublayer) {
     const handleSublayerClick = () => {
@@ -310,58 +343,84 @@ const LayerRow = React.memo(function LayerRow({
     const isSubCollapsed = node.collapsed || false;
 
     return (
-      <div className="relative">
-        {node.depth > 0 && (
-          <>
-            {Array.from({ length: node.depth }).map((_, i) => (
-              <div
-                key={i}
-                className={cn(
-                  'absolute z-10 top-0 bottom-0 w-px',
-                  (isChildOfSelected || isSelected) ? 'dark:bg-white/10 bg-neutral-900/10' : 'dark:bg-secondary bg-neutral-900/10',
-                )}
-                style={{ left: `${i * 14 + 16}px` }}
-              />
-            ))}
-          </>
-        )}
-        <div
-          className={cn(
-            'group relative flex items-center h-8 cursor-pointer',
-            isSelected && !isStateActive && 'bg-primary text-primary-foreground rounded-lg',
-            isSelected && isStateActive && 'bg-[#8dd92f] text-black rounded-lg',
-            !isSelected && isChildOfSelected && !isStateActive && 'dark:bg-primary/15 bg-primary/10 text-current/70',
-            !isSelected && isChildOfSelected && isStateActive && 'dark:bg-[#8dd92f]/15 bg-[#8dd92f]/10 text-current/70',
-            !isSelected && isChildOfSelected && isLastVisibleDescendant && 'rounded-b-lg',
-            !isSelected && isChildOfSelected && !isLastVisibleDescendant && 'rounded-none',
-            !isSelected && !isChildOfSelected && 'rounded-lg text-secondary-foreground/80 dark:text-muted-foreground',
-          )}
-          style={{ paddingLeft: `${node.depth * 14 + 8}px` }}
-          onClick={handleSublayerClick}
-        >
-          {hasExpandableChildren ? (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggle(node.id);
-              }}
-              className={cn(
-                'w-4 h-4 flex items-center justify-center shrink-0',
-                isSubCollapsed ? '' : 'rotate-90',
-              )}
-            >
-              <Icon name="chevronRight" className={cn('size-2.5 opacity-50', isSelected && 'opacity-80')} />
-            </button>
-          ) : (
-            <div className="w-4 h-4 shrink-0" />
-          )}
-          <Icon
-            name={node.sublayer.icon as any}
-            className={cn('size-3 mx-1.5 shrink-0', isSelected ? 'opacity-70' : 'opacity-40')}
+      <div className="relative flex" style={{ width: '100%', minWidth: '100%' }}>
+        {/* Background layer - stays fixed */}
+        <div className="absolute inset-0 pointer-events-none">
+          <div
+            className={cn(
+              'sticky left-0 h-full',
+              isSelected && !isStateActive && 'bg-primary rounded-lg',
+              isSelected && isStateActive && 'bg-[#8dd92f] rounded-lg',
+              !isSelected && isChildOfSelected && !isStateActive && 'dark:bg-primary/15 bg-primary/10',
+              !isSelected && isChildOfSelected && isStateActive && 'dark:bg-[#8dd92f]/15 bg-[#8dd92f]/10',
+              !isSelected && isChildOfSelected && isLastVisibleDescendant && 'rounded-b-lg',
+              !isSelected && isChildOfSelected && !isLastVisibleDescendant && 'rounded-none',
+              !isSelected && !isChildOfSelected && 'rounded-lg',
+            )}
+            style={{ width: 'var(--tree-available-width)' }}
           />
-          <span className={cn('text-2xs truncate select-none', isSelected ? 'opacity-90' : 'opacity-60')}>
-            {node.sublayer.label}
-          </span>
+        </div>
+
+        {/* Content layer */}
+        <div className="relative flex w-full min-w-full flex-1">
+          {node.depth > 0 && (
+            <>
+              {Array.from({ length: node.depth }).map((_, i) => (
+                <div
+                  key={i}
+                  className={cn(
+                    'absolute z-10 top-0 bottom-0 w-px pointer-events-none',
+                    (isChildOfSelected || isSelected) ? 'dark:bg-white/10 bg-neutral-900/10' : 'dark:bg-secondary bg-neutral-900/10',
+                  )}
+                  style={{ left: `${i * 14 + 16}px` }}
+                />
+              ))}
+            </>
+          )}
+          <div
+            className={cn(
+              'group relative flex items-center h-8 cursor-pointer',
+              isSelected && !isStateActive && 'text-primary-foreground',
+              isSelected && isStateActive && 'text-black',
+              !isSelected && isChildOfSelected && 'text-current/70',
+              !isSelected && !isChildOfSelected && 'text-secondary-foreground/80 dark:text-muted-foreground',
+            )}
+            style={{ width: 'max-content', minWidth: '100%' }}
+            onClick={handleSublayerClick}
+          >
+            {/* Indent spacer */}
+            <div style={{ width: `${node.depth * 14 + 8}px`, flex: 'none' }} />
+
+            {/* Content area */}
+            <div
+              className="flex items-center flex-1"
+              style={{ maxWidth: 'var(--tree-available-width)' }}
+            >
+              {hasExpandableChildren ? (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggle(node.id);
+                  }}
+                  className={cn(
+                    'w-4 h-4 flex items-center justify-center shrink-0',
+                    isSubCollapsed ? '' : 'rotate-90',
+                  )}
+                >
+                  <Icon name="chevronRight" className={cn('size-2.5 opacity-50', isSelected && 'opacity-80')} />
+                </button>
+              ) : (
+                <div className="w-4 h-4 shrink-0" />
+              )}
+              <Icon
+                name={node.sublayer.icon as any}
+                className={cn('size-3 mx-1.5 shrink-0', isSelected ? 'opacity-70' : 'opacity-40')}
+              />
+              <span className={cn('flex-1 text-2xs truncate select-none min-w-0', isSelected ? 'opacity-90' : 'opacity-60')}>
+                {node.sublayer.label}
+              </span>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -378,273 +437,270 @@ const LayerRow = React.memo(function LayerRow({
       liveComponentUpdates={liveComponentUpdates}
       editingComponentId={editingComponentId}
     >
-      <div className="relative">
-        {/* Vertical connector lines - one for each depth level */}
-        {node.depth > 0 && (
-          <>
-            {Array.from({ length: node.depth }).map((_, i) => {
-              const shouldHighlight = (isSelected || isChildOfSelected) && highlightedDepths.has(i);
-              return (
-                <div
-                  key={i}
-                  className={cn(
-                    'absolute z-10 top-0 bottom-0 w-px ',
-                    shouldHighlight && 'bg-white/30',
-                    isSelected && 'bg-white/10!',
-                    isChildOfSelected && 'dark:bg-white/10 bg-neutral-900/10',
-                    !shouldHighlight && !isChildOfSelected && 'dark:bg-secondary bg-neutral-900/10',
-                  )}
-                  style={{
-                    left: `${i * 14 + 16}px`,
-                  }}
-                />
-              );
-            })}
-          </>
-        )}
+      <div
+        className="relative flex"
+        style={{ width: '100%', minWidth: '100%' }}
+        onMouseEnter={() => { if (!isDragging) setIsHovered(true); }}
+        onMouseLeave={() => setIsHovered(false)}
+      >
+        {/* Background layer - stays fixed when scrolling horizontally */}
+        <div className="absolute inset-0 pointer-events-none">
+          <div
+            className={cn(
+              'sticky left-0 h-full',
+              isSelected && !hasVisibleChildren && 'rounded-lg',
+              isSelected && hasVisibleChildren && 'rounded-t-lg',
+              !isSelected && isChildOfSelected && !isLastVisibleDescendant && 'rounded-none',
+              !isSelected && isChildOfSelected && isLastVisibleDescendant && 'rounded-b-lg',
+              !isSelected && !isChildOfSelected && 'rounded-lg',
+            )}
+            style={{ width: 'var(--tree-available-width)', background: rowBg }}
+          />
+        </div>
 
-        {/* Drop Indicators - using shared components */}
-        {isOver && dropPosition === 'above' && (
-          <DropLineIndicator position="above" offsetLeft={node.depth * 14 + 8} />
-        )}
-        {isOver && dropPosition === 'below' && (
-          <DropLineIndicator position="below" offsetLeft={node.depth * 14 + 8} />
-        )}
-        {isOver && dropPosition === 'inside' && (
-          <DropContainerIndicator />
-        )}
-
-        {/* Main Row */}
-        <div
-          ref={setRefs}
-          {...(isRenaming ? {} : attributes)}
-          {...(isRenaming ? {} : listeners)}
-          data-drag-active={isDragActive}
-          data-layer-id={node.id}
-          className={cn(
-            'group relative flex items-center h-8 outline-none focus:outline-none',
-            // Locked by another user - show as non-interactive
-            isLockedByOther ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
-            // Conditional rounding based on position in selected group
-            // Selected parent: rounded top, rounded bottom ONLY if no visible children
-            isSelected && !hasVisibleChildren && 'rounded-lg', // No children: fully rounded
-            isSelected && hasVisibleChildren && 'rounded-t-lg', // Has children: only top rounded
-            // Children of selected should have NO rounding, EXCEPT last visible descendant gets bottom rounding
-            !isSelected && isChildOfSelected && !isLastVisibleDescendant && 'rounded-none',
-            !isSelected && isChildOfSelected && isLastVisibleDescendant && 'rounded-b-lg',
-            // Not in group: fully rounded
-            !isSelected && !isChildOfSelected && 'rounded-lg text-secondary-foreground/80 dark:text-muted-foreground',
-            // Background colors
-            !isDragActive && !isDragging && !isLockedByOther && 'hover:bg-secondary/50',
-            // Component instances OR component edit mode use purple, regular layers use blue
-            // When a UI state (hover/focus/active/etc.) is active, use green (#8dd92f)
-            isSelected && !usePurpleStyle && !isStateActive && 'bg-primary text-primary-foreground hover:bg-primary',
-            isSelected && !usePurpleStyle && isStateActive && 'bg-[#8dd92f] text-black hover:bg-[#8dd92f]',
-            isSelected && usePurpleStyle && 'bg-purple-500 text-white hover:bg-purple-500',
-            !isSelected && isChildOfSelected && !usePurpleStyle && !isStateActive && 'dark:bg-primary/15 bg-primary/10 text-current/70 hover:bg-primary/15 dark:hover:bg-primary/20',
-            !isSelected && isChildOfSelected && !usePurpleStyle && isStateActive && 'dark:bg-[#8dd92f]/15 bg-[#8dd92f]/10 text-current/70 hover:bg-[#8dd92f]/15 dark:hover:bg-[#8dd92f]/20',
-            !isSelected && isChildOfSelected && usePurpleStyle && 'dark:bg-purple-500/10 bg-purple-500/10 text-current/70 hover:bg-purple-500/15 dark:hover:bg-purple-500/20',
-            isSelected && !isDragActive && !isDragging && '',
-            isDragging && '',
-            !isDragActive && ''
+        {/* Content layer - scrolls horizontally */}
+        <div className="relative flex w-full min-w-full flex-1">
+          {/* Vertical connector lines */}
+          {node.depth > 0 && (
+            <>
+              {Array.from({ length: node.depth }).map((_, i) => {
+                const shouldHighlight = (isSelected || isChildOfSelected) && highlightedDepths.has(i);
+                return (
+                  <div
+                    key={i}
+                    className={cn(
+                      'absolute z-10 top-0 bottom-0 w-px pointer-events-none',
+                      shouldHighlight && 'bg-white/30',
+                      isSelected && 'bg-white/10!',
+                      isChildOfSelected && 'dark:bg-white/10 bg-neutral-900/10',
+                      !shouldHighlight && !isChildOfSelected && 'dark:bg-secondary bg-neutral-900/10',
+                    )}
+                    style={{
+                      left: `${i * 14 + 16}px`,
+                    }}
+                  />
+                );
+              })}
+            </>
           )}
-          style={{ paddingLeft: `${node.depth * 14 + 8}px` }}
-          onMouseEnter={() => {
-            if (!isDragging) {
-              setHoveredLayerId(node.id);
-            }
-          }}
-          onMouseLeave={() => {
-            setHoveredLayerId(null);
-          }}
-          onClick={(e) => {
-            if (isRenaming) return;
-            // Block click if layer is locked by another user
-            if (isLockedByOther) {
-              e.stopPropagation();
-              e.preventDefault();
-              return;
-            }
-            // Normal click: Select only this layer
-            onSelect(node.id);
-          }}
-        >
-          {/* Expand/Collapse Button - show for elements that can have children or richText sublayers */}
-          {(node.canHaveChildren || hasSublayers) ? (
-            effectiveHasChildren ? (
-              <button
-                onClick={(e) => {
+
+          {/* Drop Indicators */}
+          {isOver && dropPosition === 'above' && (
+            <DropLineIndicator position="above" offsetLeft={node.depth * 14 + 8} />
+          )}
+          {isOver && dropPosition === 'below' && (
+            <DropLineIndicator position="below" offsetLeft={node.depth * 14 + 8} />
+          )}
+          {isOver && dropPosition === 'inside' && (
+            <DropContainerIndicator />
+          )}
+
+          {/* Main Row */}
+          <div
+            ref={setRefs}
+            {...(isRenaming ? {} : attributes)}
+            {...(isRenaming ? {} : listeners)}
+            data-drag-active={isDragActive}
+            data-layer-id={node.id}
+            className={cn(
+              'group relative flex items-center h-8 outline-none focus:outline-none',
+              isLockedByOther ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
+              isSelected && 'text-primary-foreground',
+              isSelected && isStateActive && 'text-black',
+              isSelected && usePurpleStyle && 'text-white',
+              !isSelected && !isChildOfSelected && 'text-secondary-foreground/80 dark:text-muted-foreground',
+              !isSelected && isChildOfSelected && 'text-current/70',
+            )}
+            style={{ width: 'max-content', minWidth: '100%' }}
+            onMouseEnter={() => { if (!isDragging) setHoveredLayerId(node.id); }}
+            onMouseLeave={() => setHoveredLayerId(null)}
+            onClick={(e) => {
+              if (isRenaming) return;
+              if (isLockedByOther) {
+                e.stopPropagation();
+                e.preventDefault();
+                return;
+              }
+              onSelect(node.id);
+            }}
+          >
+          {/* Indent spacer */}
+          <div style={{ width: `${node.depth * 14 + 8}px`, flex: 'none' }} />
+
+          {/* Content area - fixed max-width so names truncate, scroll is for hierarchy */}
+          <div className="flex items-center flex-1" style={{ maxWidth: 'var(--tree-available-width)' }}>
+            {/* Expand/Collapse Button */}
+            {(node.canHaveChildren || hasSublayers) ? (
+              effectiveHasChildren ? (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (!shouldHideChildren) {
+                      onToggle(node.id);
+                    }
+                  }}
+                  className={cn(
+                    'w-4 h-4 flex items-center justify-center shrink-0',
+                    isCollapsed ? '' : 'rotate-90',
+                    shouldHideChildren && 'opacity-30 cursor-not-allowed'
+                  )}
+                  disabled={shouldHideChildren}
+                >
+                  <Icon name="chevronRight" className={cn('size-2.5 opacity-50', isSelected && 'opacity-80')} />
+                </button>
+              ) : (
+                <div className="w-4 h-4 shrink-0" />
+              )
+            ) : (
+              <div className="w-4 h-4 shrink-0 flex items-center justify-center">
+                <div className={cn('ml-px w-1.5 h-px bg-white opacity-0', isSelected && 'opacity-0')} />
+              </div>
+            )}
+
+            {/* Layer Icon */}
+            {isComponentInstance ? (
+              <Icon name="component" className="size-3 mx-1.5 shrink-0" />
+            ) : layerIcon ? (
+              <Icon
+                name={layerIcon}
+                className={cn(
+                  'size-3 mx-1.5 opacity-50 shrink-0',
+                  isSelected && 'opacity-100',
+                )}
+              />
+            ) : (
+              <div
+                className={cn(
+                  'size-3 bg-secondary rounded mx-1.5 shrink-0',
+                  isSelected && 'opacity-10 dark:bg-white'
+                )}
+              />
+            )}
+
+            {/* Label / Inline Rename Input */}
+            {isRenaming ? (
+              <Input
+                ref={renameInputRef}
+                variant="rename-selected"
+                data-renaming
+                className="grow mr-2"
+                defaultValue={node.layer.customName || ''}
+                placeholder={getLayerDisplayLabel({ ...node.layer, customName: undefined }, {
+                  component_name: appliedComponent?.name,
+                  collection_name: finalCollectionName,
+                  source_field_name: sourceFieldName ?? undefined,
+                }, activeBreakpoint)}
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+                onBlur={(e) => {
+                  if (!renameReadyRef.current) return;
+                  const val = e.currentTarget.value.trim();
+                  onRenameConfirm(node.id, val || null);
+                }}
+                onKeyDown={(e) => {
                   e.stopPropagation();
-                  if (!shouldHideChildren) {
-                    onToggle(node.id);
+                  if (e.key === 'Enter') {
+                    const val = (e.target as HTMLInputElement).value.trim();
+                    onRenameConfirm(node.id, val || null);
+                  } else if (e.key === 'Escape') {
+                    onRenameConfirm(node.id, node.layer.customName || null);
                   }
                 }}
-                className={cn(
-                  'w-4 h-4 flex items-center justify-center shrink-0',
-                  isCollapsed ? '' : 'rotate-90',
-                  shouldHideChildren && 'opacity-30 cursor-not-allowed'
-                )}
-                disabled={shouldHideChildren}
-              >
-                <Icon name="chevronRight" className={cn('size-2.5 opacity-50', isSelected && 'opacity-80')} />
-              </button>
+              />
             ) : (
-              <div className="w-4 h-4 shrink-0" />
-            )
-          ) : (
-            <div className="w-4 h-4 shrink-0 flex items-center justify-center">
-              <div className={cn('ml-px w-1.5 h-px bg-white opacity-0', isSelected && 'opacity-0')} />
-            </div>
-          )}
-
-          {/* Layer Icon */}
-          {isComponentInstance ? (
-            <Icon name="component" className="size-3 mx-1.5 shrink-0" />
-          ) : layerIcon ? (
-            <Icon
-              name={layerIcon}
-              className={cn(
-                'size-3 mx-1.5 opacity-50 shrink-0',
-                isSelected && 'opacity-100',
-              )}
-            />
-          ) : (
-            <div
-              className={cn(
-                'size-3 bg-secondary rounded mx-1.5 shrink-0',
-                isSelected && 'opacity-10 dark:bg-white'
-              )}
-            />
-          )}
-
-          {/* Label / Inline Rename Input */}
-          {isRenaming ? (
-            <Input
-              ref={renameInputRef}
-              variant="rename-selected"
-              data-renaming
-              className="grow mr-2"
-              defaultValue={node.layer.customName || ''}
-              placeholder={getLayerDisplayLabel({ ...node.layer, customName: undefined }, {
-                component_name: appliedComponent?.name,
-                collection_name: finalCollectionName,
-                source_field_name: sourceFieldName ?? undefined,
-              }, activeBreakpoint)}
-              onClick={(e) => e.stopPropagation()}
-              onMouseDown={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
-              onBlur={(e) => {
-                if (!renameReadyRef.current) return;
-                const val = e.currentTarget.value.trim();
-                onRenameConfirm(node.id, val || null);
-              }}
-              onKeyDown={(e) => {
-                e.stopPropagation();
-                if (e.key === 'Enter') {
-                  const val = (e.target as HTMLInputElement).value.trim();
-                  onRenameConfirm(node.id, val || null);
-                } else if (e.key === 'Escape') {
-                  onRenameConfirm(node.id, node.layer.customName || null);
-                }
-              }}
-            />
-          ) : (
-            <span
-              className="grow text-xs font-medium overflow-hidden text-ellipsis whitespace-nowrap select-none"
-              onDoubleClick={(e) => {
-                e.stopPropagation();
-                if (node.id !== 'body') {
-                  onRenameStart(node.id);
-                }
-              }}
-            >
-              {getLayerDisplayLabel(node.layer, {
-                component_name: appliedComponent?.name,
-                collection_name: finalCollectionName,
-                source_field_name: sourceFieldName ?? undefined,
-              }, activeBreakpoint)}
-            </span>
-          )}
-
-          {/* Lock Indicator - show when layer is locked by another user */}
-          {isLockedByOther && (
-            <div className="mr-2 shrink-0">
-              <CollaboratorBadge
-                collaborator={{
-                  userId: lockOwnerUser?.user_id || '',
-                  email: lockOwnerUser?.email,
-                  color: lockOwnerUser?.color,
+              <span
+                className="flex-1 text-xs font-medium truncate select-none min-w-0"
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  if (node.id !== 'body') {
+                    onRenameStart(node.id);
+                  }
                 }}
-                size="xs"
-                tooltipPrefix="Editing by"
-              />
-            </div>
-          )}
+              >
+                {getLayerDisplayLabel(node.layer, {
+                  component_name: appliedComponent?.name,
+                  collection_name: finalCollectionName,
+                  source_field_name: sourceFieldName ?? undefined,
+                }, activeBreakpoint)}
+              </span>
+            )}
+          </div>
 
-          {/* Style Indicator - temporarily disabled */}
-          {/* {node.layer.styleId && (
-            <div className="flex items-center gap-1 mr-2 shrink-0">
-              <LayersIcon className="w-3 h-3 text-purple-400" />
-              {(() => {
-                const appliedStyle = getStyleById(node.layer.styleId);
-                return appliedStyle && hasStyleOverrides(node.layer, appliedStyle) && (
-                  <div className="w-1.5 h-1.5 rounded-full bg-orange-400" title="Style overridden" />
-                );
-              })()}
-            </div>
-          )} */}
-
-          {/* Interaction trigger indicator */}
-          {interactionTriggerLayerIds.includes(node.id) && (
-            <Icon
-              name="zap"
-              className={cn(
-                'size-3 mr-2 shrink-0',
-                activeInteractionTriggerLayerId === node.id ? 'text-white/80' : 'text-white/40'
-              )}
-            />
-          )}
-
-          {/* Interaction target indicator */}
-          {interactionTargetLayerIds.includes(node.id) && !interactionTriggerLayerIds.includes(node.id) && (
-            <Icon
-              name="zap-outline"
-              className={cn(
-                'size-3 mr-2 shrink-0',
-                activeInteractionTargetLayerIds.includes(node.id) ? 'text-white/70' : 'text-white/40'
-              )}
-            />
-          )}
-
-          {/* Visibility toggle */}
-          {node.id !== 'body' && !isRenaming && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleVisibility(node.id);
-              }}
-              onPointerDown={(e) => e.stopPropagation()}
-              className={cn(
-                'size-6 flex items-center justify-center shrink-0 mr-1 rounded cursor-pointer',
-                node.layer.settings?.hidden
-                  ? cn(
-                    'opacity-60',
-                    isSelected ? 'opacity-80 hover:opacity-100' : 'hover:opacity-100'
-                  )
-                  : cn(
-                    'opacity-0 group-hover:opacity-40',
-                    isSelected ? 'group-hover:opacity-60' : '',
-                    'hover:opacity-100!'
-                  ),
-              )}
-              aria-label={node.layer.settings?.hidden ? 'Show element' : 'Hide element'}
+          {/* Right icons overlay - sticky to right edge, starts after chevron+icon area */}
+          <div
+            className="absolute top-0 bottom-0 right-0 flex justify-end pointer-events-none"
+            style={{ left: `${node.depth * 14 + 8 + 36}px` }}
+          >
+            <div
+              className="sticky right-0 h-full flex items-center pointer-events-auto gap-0.5 px-1 rounded-r-lg"
+              style={{ background: iconBg }}
             >
-              <Icon
-                name={node.layer.settings?.hidden ? 'eye-off' : 'eye'}
-                className="size-3"
-              />
-            </button>
-          )}
+              {isLockedByOther && (
+                <div className="mr-1 shrink-0">
+                  <CollaboratorBadge
+                    collaborator={{
+                      userId: lockOwnerUser?.user_id || '',
+                      email: lockOwnerUser?.email,
+                      color: lockOwnerUser?.color,
+                    }}
+                    size="xs"
+                    tooltipPrefix="Editing by"
+                  />
+                </div>
+              )}
+
+              {interactionTriggerLayerIds.includes(node.id) && (
+                <Icon
+                  name="zap"
+                  className={cn(
+                    'size-3 mr-1 shrink-0',
+                    activeInteractionTriggerLayerId === node.id ? 'text-white/80' : 'text-white/40'
+                  )}
+                />
+              )}
+
+              {interactionTargetLayerIds.includes(node.id) && !interactionTriggerLayerIds.includes(node.id) && (
+                <Icon
+                  name="zap-outline"
+                  className={cn(
+                    'size-3 mr-1 shrink-0',
+                    activeInteractionTargetLayerIds.includes(node.id) ? 'text-white/70' : 'text-white/40'
+                  )}
+                />
+              )}
+
+              {node.id !== 'body' && !isRenaming && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleVisibility(node.id);
+                  }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  className={cn(
+                    'items-center justify-center shrink-0 mr-1 rounded cursor-pointer',
+                    node.layer.settings?.hidden
+                      ? cn(
+                        'size-6 flex opacity-60',
+                        isSelected ? 'opacity-80 hover:opacity-100' : 'hover:opacity-100'
+                      )
+                      : cn(
+                        'size-0 hidden group-hover:flex group-hover:size-6 group-hover:opacity-40',
+                        isSelected ? 'group-hover:opacity-60' : '',
+                        'hover:opacity-100!'
+                      ),
+                  )}
+                  aria-label={node.layer.settings?.hidden ? 'Show element' : 'Hide element'}
+                >
+                  <Icon
+                    name={node.layer.settings?.hidden ? 'eye-off' : 'eye'}
+                    className="size-3"
+                  />
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
         </div>
       </div>
     </LayerContextMenu>
@@ -780,7 +836,7 @@ export default function LayersTree({
   const [shouldScrollToSelected, setShouldScrollToSelected] = useState(false);
 
   // Pull multi-select state and breakpoint from editor store
-  const { selectedLayerIds: storeSelectedLayerIds, lastSelectedLayerId, toggleSelection, selectRange, editingComponentId, activeBreakpoint, activeSublayerIndex: storeActiveSublayerIndex, activeTextStyleKey: storeActiveTextStyleKey, activeListItemIndex: storeActiveListItemIndex } = useEditorStore();
+  const { selectedLayerIds: storeSelectedLayerIds, lastSelectedLayerId, toggleSelection, selectRange, editingComponentId, activeBreakpoint, activeSublayerIndex: storeActiveSublayerIndex, activeTextStyleKey: storeActiveTextStyleKey, activeListItemIndex: storeActiveListItemIndex, leftSidebarWidth } = useEditorStore();
 
   // Get component by ID function for drag overlay
   const { getComponentById } = useComponentsStore();
@@ -1205,6 +1261,9 @@ export default function LayersTree({
   }, []);
 
   const ROW_HEIGHT = 32;
+  const treeAvailableWidth = leftSidebarWidth - 32;
+  const maxDepth = useMemo(() => flattenedNodes.reduce((max, n) => Math.max(max, n.depth), 0), [flattenedNodes]);
+
   const virtualizer = useVirtualizer({
     count: flattenedNodes.length,
     getScrollElement: () => scrollContainerRef.current,
@@ -1229,6 +1288,7 @@ export default function LayersTree({
     const virtualItems = virtualizer.getVirtualItems();
     const item = virtualItems.find(v => v.index === idx);
 
+    let needsVerticalScroll = true;
     if (item) {
       const wrapperTop = wrapperRef.current?.getBoundingClientRect().top ?? 0;
       const scrollTop = scrollEl.getBoundingClientRect().top;
@@ -1237,24 +1297,34 @@ export default function LayersTree({
       const viewBottom = scrollTop + scrollEl.clientHeight - SCROLL_MARGIN;
 
       if (itemScreenTop >= viewTop && itemScreenTop + ROW_HEIGHT <= viewBottom) {
-        return;
+        needsVerticalScroll = false;
       }
     }
 
-    // Jump to item first so virtualizer renders it, then center manually
-    const isAbove = idx * ROW_HEIGHT < scrollEl.scrollTop;
-    virtualizer.scrollToIndex(idx, { align: isAbove ? 'start' : 'end' });
+    if (needsVerticalScroll) {
+      const isAbove = idx * ROW_HEIGHT < scrollEl.scrollTop;
+      virtualizer.scrollToIndex(idx, { align: isAbove ? 'start' : 'end' });
+    }
 
     const timeout = setTimeout(() => {
       const wrapperEl = wrapperRef.current;
       if (!wrapperEl || !scrollEl) return;
 
-      const wrapperRect = wrapperEl.getBoundingClientRect();
-      const scrollRect = scrollEl.getBoundingClientRect();
-      const wrapperOffset = wrapperRect.top - scrollRect.top + scrollEl.scrollTop;
-      const itemTop = wrapperOffset + idx * ROW_HEIGHT;
-      const targetScroll = itemTop - (scrollEl.clientHeight / 2) + (ROW_HEIGHT / 2);
-      scrollEl.scrollTo({ top: Math.max(0, targetScroll), behavior: 'smooth' });
+      if (needsVerticalScroll) {
+        const wrapperRect = wrapperEl.getBoundingClientRect();
+        const scrollRect = scrollEl.getBoundingClientRect();
+        const wrapperOffset = wrapperRect.top - scrollRect.top + scrollEl.scrollTop;
+        const itemTop = wrapperOffset + idx * ROW_HEIGHT;
+        const targetScroll = itemTop - (scrollEl.clientHeight / 2) + (ROW_HEIGHT / 2);
+        scrollEl.scrollTo({ top: Math.max(0, targetScroll), behavior: 'smooth' });
+      }
+
+      // Horizontal scroll: align to parent's parent layer's chevron - 2px
+      const node = flattenedNodes[idx];
+      const targetLeft = node && node.depth > 0 ? (node.depth - 2) * 14 - 2 : 0;
+      if (Math.abs(scrollEl.scrollLeft - targetLeft) > 1) {
+        scrollEl.scrollTo({ left: targetLeft, behavior: 'smooth' });
+      }
     }, 100);
 
     return () => clearTimeout(timeout);
@@ -1917,7 +1987,7 @@ export default function LayersTree({
       onDragEnd={handleDragEnd}
       onDragCancel={handleDragCancel}
     >
-      <div ref={wrapperRef} style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+      <div ref={wrapperRef} style={{ height: virtualizer.getTotalSize(), position: 'relative', minWidth: maxDepth > 0 ? `${maxDepth * 14 + 8 + treeAvailableWidth}px` : undefined }}>
         {virtualizer.getVirtualItems().map((virtualRow) => {
           const node = flattenedNodes[virtualRow.index];
           const selectionData = nodeSelectionData.get(node.id)!;

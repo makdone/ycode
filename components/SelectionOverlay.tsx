@@ -59,9 +59,10 @@ export function SelectionOverlay({
   const hoveredContainerRef = useRef<HTMLDivElement>(null);
   const parentContainerRef = useRef<HTMLDivElement>(null);
   
-  // Track drag/animation state for scroll/mutation handlers
+  // Track drag/animation/resize state for scroll/mutation handlers
   const isDraggingRef = useRef(false);
   const isSliderAnimatingRef = useRef(false);
+  const isSidebarResizingRef = useRef(false);
 
   const hideAllOutlines = useCallback(() => {
     if (selectedContainerRef.current) selectedContainerRef.current.style.display = 'none';
@@ -158,7 +159,7 @@ export function SelectionOverlay({
 
   // Update all outlines
   const updateAllOutlines = useCallback((skipSolidBorders = false) => {
-    if (isSliderAnimatingRef.current) {
+    if (isSliderAnimatingRef.current || isSidebarResizingRef.current) {
       hideAllOutlines();
       return;
     }
@@ -325,6 +326,18 @@ export function SelectionOverlay({
       updateAllOutlines();
     }
   }, [isSliderAnimating, updateAllOutlines, hideAllOutlines]);
+
+  // Hide outlines during sidebar resize
+  const isSidebarResizing = useEditorStore((state) => state.isSidebarResizing);
+
+  useEffect(() => {
+    isSidebarResizingRef.current = isSidebarResizing;
+    if (isSidebarResizing) {
+      hideAllOutlines();
+    } else {
+      updateAllOutlines();
+    }
+  }, [isSidebarResizing, hideAllOutlines, updateAllOutlines]);
 
   return (
     <div

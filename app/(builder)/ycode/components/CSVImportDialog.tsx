@@ -274,7 +274,7 @@ export function CSVImportDialog({
   };
 
   const MAX_BODY_BYTES = 3_500_000;
-  const MAX_BATCH_SIZE = 20;
+  const MAX_BATCH_SIZE = 15;
 
   /** Strip columns mapped to __skip__ so we only send data the server needs. */
   const stripSkippedColumns = (row: Record<string, string>): Record<string, string> => {
@@ -287,7 +287,7 @@ export function CSVImportDialog({
     return stripped;
   };
 
-  /** Build the next batch of rows that fits within the body size limit. */
+  /** Build the next batch of stripped rows that fits within the body size limit. */
   const buildBatch = (startIndex: number): Record<string, string>[] => {
     const batch: Record<string, string>[] = [];
     let estimatedSize = 0;
@@ -371,30 +371,30 @@ export function CSVImportDialog({
           body: JSON.stringify(requestBody),
         });
 
-        const data = await response.json();
+        if (response.ok) {
+          const data = await response.json();
+          setImportStatus(data.data);
 
-        if (!response.ok) {
-          throw new Error(data.error || 'Failed to process import');
+          const serverProcessed = (data.data.processedRows ?? 0) + (data.data.failedRows ?? 0);
+          currentIndex = serverProcessed;
+
+          if (data.data.status === 'completed' || data.data.status === 'failed' || data.data.isComplete) {
+            setImporting(false);
+            setStep('complete');
+            onImportComplete?.();
+            return;
+          }
+        } else {
+          // Server returned an error (e.g. 500/OOM) — skip this batch and continue
+          console.error(`Process request failed with status ${response.status}`);
+          currentIndex += batch.length || 1;
         }
-
-        setImportStatus(data.data);
-
-        const serverProcessed = (data.data.processedRows ?? 0) + (data.data.failedRows ?? 0);
-        currentIndex = serverProcessed;
 
         await new Promise(resolve => setTimeout(resolve, 0));
-
-        if (data.data.status === 'completed' || data.data.status === 'failed' || data.data.isComplete) {
-          setImporting(false);
-          setStep('complete');
-          onImportComplete?.();
-          return;
-        }
       } catch (err) {
+        // Network error or server crash — skip batch and continue
         console.error('Process error:', err);
-        setImporting(false);
-        setStep('complete');
-        return;
+        currentIndex += batch.length || 1;
       }
     }
 

@@ -47,6 +47,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Slider } from '@/components/ui/slider';
 import { Separator } from '@/components/ui/separator';
 
+// 4. Internal components
+import ColorPicker from './ColorPicker';
+
 // 3. Utils
 import { cn, generateId } from '@/lib/utils';
 import { getLayerName, getLayerIcon, findLayerById } from '@/lib/layer-utils';
@@ -68,12 +71,14 @@ import {
   updateTweenById,
   parseAnimationValue,
   formatAnimationValue,
+  setColorVariableResolver,
 } from '@/lib/animation-utils';
 import type { TriggerType, PropertyType, ParsedAnimationValue } from '@/lib/animation-utils';
 
 // 4. Types
 import type { Layer, LayerInteraction, InteractionTimeline, InteractionTween, TweenProperties, Breakpoint } from '@/types';
 import { BREAKPOINTS, BREAKPOINT_VALUES } from '@/lib/breakpoint-utils';
+import { useColorVariablesStore } from '@/stores/useColorVariablesStore';
 import { Badge } from '@/components/ui/badge';
 
 interface InteractionsPanelProps {
@@ -215,12 +220,45 @@ export default function InteractionsPanel({
   const isChangingPropertyRef = React.useRef(false);
   const pendingClearRAFsRef = React.useRef<number[]>([]); // Track pending RAF IDs to cancel them
 
+  // Register a color variable resolver so backgroundColor tweens that reference
+  // saved color variables (e.g. "color:var(--id)") resolve to a concrete rgba
+  // value GSAP can interpolate during preview.
+  useEffect(() => {
+    setColorVariableResolver((id) => useColorVariablesStore.getState().getVariableById(id)?.value);
+    return () => setColorVariableResolver(null);
+  }, []);
+
   /** Get element from iframe by layer ID */
   const getIframeElement = useCallback((layerId: string): HTMLElement | null => {
     const iframe = document.querySelector('iframe') as HTMLIFrameElement;
     const iframeDoc = iframe?.contentDocument || iframe?.contentWindow?.document;
     if (!iframeDoc) return null;
     return iframeDoc.querySelector(`[data-layer-id="${layerId}"]`) as HTMLElement;
+  }, []);
+
+  /** Clear specific GSAP-managed inline styles from a live iframe element.
+   *  Used when a tween/property is removed so leftover preview styles
+   *  (e.g. backgroundColor, width) don't stick on the canvas. */
+  const clearLiveStyleForKeys = useCallback((layerId: string, keys: string[]) => {
+    if (!keys.length) return;
+    const iframe = document.querySelector('iframe') as HTMLIFrameElement;
+    const iframeDoc = iframe?.contentDocument || iframe?.contentWindow?.document;
+    const element = iframeDoc?.querySelector(`[data-layer-id="${layerId}"]`) as HTMLElement | null;
+    if (!element) return;
+
+    const iframeGsap = (iframe?.contentWindow as any)?.gsap as typeof gsap | undefined;
+    (iframeGsap || gsap).set(element, { clearProps: keys.join(',') });
+
+    // Sync tracked "originalStyle" so future clearPreviewStyles calls don't
+    // restore the values we just cleared.
+    const cleanedStyle = element.getAttribute('style') || '';
+    if (previewedElementRef.current?.layerId === layerId) {
+      previewedElementRef.current.originalStyle = cleanedStyle;
+    }
+    const tracked = previewedElementsRef.current.get(layerId);
+    if (tracked) {
+      previewedElementsRef.current.set(layerId, { ...tracked, originalStyle: cleanedStyle });
+    }
   }, []);
 
   /** Get iframe's GSAP SplitText instance */
@@ -845,6 +883,24 @@ export default function InteractionsPanel({
   // Remove interaction
   const handleRemoveInteraction = useCallback(
     (interactionId: string) => {
+      // Clear inline preview styles (e.g. backgroundColor) that were applied via
+      // gsap.set on every tween in this interaction, otherwise they persist on
+      // the canvas after the trigger is removed.
+      const removedInteraction = interactions.find((i) => i.id === interactionId);
+      if (removedInteraction) {
+        const keysByLayer = new Map<string, Set<string>>();
+        (removedInteraction.tweens || []).forEach((tween) => {
+          const set = keysByLayer.get(tween.layer_id) || new Set<string>();
+          Object.keys(tween.from || {}).forEach((k) => set.add(k));
+          Object.keys(tween.to || {}).forEach((k) => set.add(k));
+          keysByLayer.set(tween.layer_id, set);
+        });
+        keysByLayer.forEach((keys, layerId) => {
+          clearLiveStyleForKeys(layerId, Array.from(keys));
+        });
+      }
+      clearAllPreviewStyles();
+
       const updatedInteractions = interactions.filter((i) => i.id !== interactionId);
       onLayerUpdate(triggerLayer.id, { interactions: updatedInteractions });
 
@@ -857,7 +913,7 @@ export default function InteractionsPanel({
         onSelectLayer(triggerLayer.id);
       }
     },
-    [interactions, triggerLayer.id, onLayerUpdate, selectedInteractionId, onSelectLayer]
+    [interactions, triggerLayer.id, onLayerUpdate, selectedInteractionId, onSelectLayer, clearAllPreviewStyles, clearLiveStyleForKeys]
   );
 
   // Update Interaction settings (now at interaction level)
@@ -918,6 +974,19 @@ export default function InteractionsPanel({
     (tweenId: string) => {
       if (!selectedInteraction) return;
 
+      // Clear any inline preview styles (e.g. backgroundColor) that were applied
+      // via gsap.set during editing — otherwise they persist on the canvas after
+      // the tween is removed.
+      const removedTween = (selectedInteraction.tweens || []).find((t) => t.id === tweenId);
+      if (removedTween) {
+        const keys = Array.from(new Set([
+          ...Object.keys(removedTween.from || {}),
+          ...Object.keys(removedTween.to || {}),
+        ]));
+        clearLiveStyleForKeys(removedTween.layer_id, keys);
+      }
+      clearAllPreviewStyles();
+
       const updatedInteractions = updateInteractionById(
         interactions,
         selectedInteractionId!,
@@ -929,7 +998,7 @@ export default function InteractionsPanel({
         setSelectedTweenId(null);
       }
     },
-    [selectedInteraction, interactions, selectedInteractionId, triggerLayer.id, onLayerUpdate, selectedTweenId]
+    [selectedInteraction, interactions, selectedInteractionId, triggerLayer.id, onLayerUpdate, selectedTweenId, clearAllPreviewStyles, clearLiveStyleForKeys]
   );
 
   // Reorder tweens via drag and drop
@@ -1014,6 +1083,18 @@ export default function InteractionsPanel({
       const propertyOption = PROPERTY_OPTIONS.find((p) => p.type === propertyType);
       if (!propertyOption) return;
 
+      // Clear any inline preview styles (e.g. backgroundColor) that were applied
+      // via gsap.set during editing — otherwise they persist on the canvas after
+      // the property is removed.
+      const targetTween = (selectedInteraction.tweens || []).find((t) => t.id === tweenId);
+      if (targetTween) {
+        clearLiveStyleForKeys(
+          targetTween.layer_id,
+          propertyOption.properties.map((p) => p.key as string)
+        );
+      }
+      clearAllPreviewStyles();
+
       const updatedInteractions = updateInteractionById(
         interactions,
         selectedInteractionId!,
@@ -1022,18 +1103,20 @@ export default function InteractionsPanel({
           (tweens) => updateTweenById(tweens, tweenId, (tween) => {
             const newFrom = { ...tween.from };
             const newTo = { ...tween.to };
+            const newApplyStyles = { ...tween.apply_styles };
             propertyOption.properties.forEach((prop) => {
               delete newFrom[prop.key];
               delete newTo[prop.key];
+              delete newApplyStyles[prop.key];
             });
-            return { ...tween, from: newFrom, to: newTo };
+            return { ...tween, from: newFrom, to: newTo, apply_styles: newApplyStyles };
           })
         )
       );
 
       onLayerUpdate(triggerLayer.id, { interactions: updatedInteractions });
     },
-    [selectedInteraction, interactions, selectedInteractionId, triggerLayer.id, onLayerUpdate]
+    [selectedInteraction, interactions, selectedInteractionId, triggerLayer.id, onLayerUpdate, clearAllPreviewStyles, clearLiveStyleForKeys]
   );
 
   // Toggle breakpoint in timeline
@@ -2113,6 +2196,9 @@ export default function InteractionsPanel({
                             const element = getIframeElement(selectedTween.layer_id);
                             if (element && previewedElementRef.current?.layerId === selectedTween.layer_id) {
                               if (element !== previewedElementRef.current.element) {
+                                // React replaced the DOM node — revert any stale split-text
+                                // instance and re-snapshot originalStyle from the fresh node
+                                // (which doesn't carry our previous gsap-applied inline styles).
                                 const oldSplitInstance = splitTextInstancesRef.current.get(selectedTween.layer_id);
                                 if (oldSplitInstance) {
                                   try {
@@ -2122,12 +2208,16 @@ export default function InteractionsPanel({
                                   }
                                   splitTextInstancesRef.current.delete(selectedTween.layer_id);
                                 }
+                                previewedElementRef.current = {
+                                  ...previewedElementRef.current,
+                                  element,
+                                  originalStyle: element.getAttribute('style') || '',
+                                };
                               }
-                              previewedElementRef.current = {
-                                ...previewedElementRef.current,
-                                element,
-                                originalStyle: element.getAttribute('style') || '',
-                              };
+                              // Same DOM node: keep the truly-original style captured on first
+                              // preview. Re-snapshotting here would bake in the gsap-applied
+                              // inline styles (e.g. backgroundColor) and they'd persist on
+                              // canvas after the picker closes.
                             }
                             applyPreviewFn();
                             isChangingPropertyRef.current = false;
@@ -2226,6 +2316,18 @@ export default function InteractionsPanel({
                                   >
                                     Current
                                   </Button>
+                                ) : prop.key === 'backgroundColor' ? (
+                                  <div className="flex-1 flex justify-start *:w-full">
+                                    <ColorPicker
+                                      solidOnly
+                                      swatchOnly
+                                      value={(fromValue as string) ?? ''}
+                                      onChange={handleFromChange}
+                                      onImmediateChange={handleFromChange}
+                                      onOpenChange={(open) => open ? handlePreviewFrom() : clearPreviewStyles(true)}
+                                      placeholder="From"
+                                    />
+                                  </div>
                                 ) : prop.options ? (
                                   <Select
                                     value={fromValue as string}
@@ -2346,6 +2448,18 @@ export default function InteractionsPanel({
                               >
                                 Current
                               </Button>
+                            ) : prop.key === 'backgroundColor' ? (
+                              <div className="flex-1 flex justify-start *:w-full">
+                                <ColorPicker
+                                  solidOnly
+                                  swatchOnly
+                                  value={(toValue as string) ?? ''}
+                                  onChange={handleToChange}
+                                  onImmediateChange={handleToChange}
+                                  onOpenChange={(open) => open ? handlePreviewTo() : clearPreviewStyles(true)}
+                                  placeholder="To color"
+                                />
+                              </div>
                             ) : prop.options ? (
                               <Select
                                 value={toValue as string}

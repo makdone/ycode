@@ -11,7 +11,7 @@ import { useLocalisationStore } from '@/stores/useLocalisationStore';
 import type { Layer, Locale, ComponentVariable, FormSettings, LinkSettings, Breakpoint, CollectionItemWithValues, Component } from '@/types';
 import type { UseLiveLayerUpdatesReturn } from '@/hooks/use-live-layer-updates';
 import type { UseLiveComponentUpdatesReturn } from '@/hooks/use-live-component-updates';
-import { getLayerHtmlTag, getClassesString, getText, resolveFieldValue, isTextEditable, isTextContentLayer, isRichTextLayer, getCollectionVariable, evaluateVisibility, findAncestorByName, filterDisabledSliderLayers, getLayerCmsFieldBinding } from '@/lib/layer-utils';
+import { getLayerHtmlTag, getClassesString, getText, resolveFieldValue, isTextEditable, isTextContentLayer, isRichTextLayer, getCollectionVariable, evaluateVisibility, findAncestorByName, filterDisabledSliderLayers, getLayerCmsFieldBinding, findLayerById } from '@/lib/layer-utils';
 import { getMapIframeProps, DEFAULT_MAP_SETTINGS, resolveMarkerColor } from '@/lib/map-utils';
 import { SWIPER_CLASS_MAP, SWIPER_DATA_ATTR_MAP } from '@/lib/templates/utilities';
 import { useCanvasSlider } from '@/hooks/use-canvas-slider';
@@ -1301,6 +1301,33 @@ const LayerItem: React.FC<{
   }, [collectionId, allCollectionItems, sourceFieldId, sourceFieldType, sourceFieldSource, collectionLayerData, pageCollectionItemData, collectionLayerItemId, pageCollectionItemId, getAsset, collectionVariable?.filters, isEditMode]);
 
   const optionsSourceSort = layer.settings?.optionsSource;
+
+  // Subscribe to the linked sort-by/sort-order input layers' default `value`
+  // attribute so the canvas re-fetches when the user changes the default in the
+  // SelectOptionsSettings panel. On the canvas there is no live `<select>`
+  // value, so the layer attribute drives the effective sort.
+  const sortByInputDefaultValue = usePagesStore((state) => {
+    const inputLayerId = collectionVariable?.sort_by_inputLayerId;
+    if (!inputLayerId) return undefined;
+    for (const draft of Object.values(state.draftsByPageId)) {
+      if (!draft) continue;
+      const found = findLayerById(draft.layers, inputLayerId);
+      if (found) return found.attributes?.value;
+    }
+    return undefined;
+  });
+
+  const sortOrderInputDefaultValue = usePagesStore((state) => {
+    const inputLayerId = collectionVariable?.sort_order_inputLayerId;
+    if (!inputLayerId) return undefined;
+    for (const draft of Object.values(state.draftsByPageId)) {
+      if (!draft) continue;
+      const found = findLayerById(draft.layers, inputLayerId);
+      if (found) return found.attributes?.value;
+    }
+    return undefined;
+  });
+
   useEffect(() => {
     if (!isEditMode) return;
     if (!collectionVariable?.id) return;
@@ -1310,8 +1337,20 @@ const LayerItem: React.FC<{
     if (isLoadingLayerData) return;
 
     // Checkbox wrappers store sort config in settings.optionsSource, not in the collection variable
-    const sortBy = optionsSourceSort?.sortFieldId || collectionVariable.sort_by;
-    const sortOrder = optionsSourceSort?.sortOrder || collectionVariable.sort_order;
+    let sortBy = optionsSourceSort?.sortFieldId || collectionVariable.sort_by;
+    let sortOrder = optionsSourceSort?.sortOrder || collectionVariable.sort_order;
+
+    // Mirror runtime behavior on the canvas: when the sort is bound to an
+    // input layer, use that layer's default `value` as the effective sort.
+    if (collectionVariable.sort_by_inputLayerId && typeof sortByInputDefaultValue === 'string' && sortByInputDefaultValue.trim() && sortByInputDefaultValue.trim().toLowerCase() !== 'none') {
+      sortBy = sortByInputDefaultValue.trim();
+    }
+    if (collectionVariable.sort_order_inputLayerId) {
+      const normalized = (sortOrderInputDefaultValue || '').toString().trim().toLowerCase();
+      if (normalized === 'asc' || normalized === 'desc') {
+        sortOrder = normalized;
+      }
+    }
 
     fetchLayerData(
       layer.id,
@@ -1327,10 +1366,14 @@ const LayerItem: React.FC<{
     collectionVariable?.source_field_type,
     collectionVariable?.sort_by,
     collectionVariable?.sort_order,
+    collectionVariable?.sort_by_inputLayerId,
+    collectionVariable?.sort_order_inputLayerId,
     collectionVariable?.limit,
     collectionVariable?.offset,
     optionsSourceSort?.sortFieldId,
     optionsSourceSort?.sortOrder,
+    sortByInputDefaultValue,
+    sortOrderInputDefaultValue,
     isLoadingLayerData,
     fetchLayerData,
     layer.id,
@@ -2150,11 +2193,17 @@ const LayerItem: React.FC<{
         elementProps.name = layer.settings?.id || layer.id;
       }
 
-      // Keep select uncontrolled while still supporting default selection
-      // from layer attributes (e.g. collection-sourced default option).
+      // In edit mode, keep value controlled (canvas selects aren't interactive)
+      // so the rendered selection reflects default changes in real time.
+      // In preview/published, convert to defaultValue so the field is uncontrolled
+      // and users can pick a different option.
       if ('value' in elementProps) {
-        elementProps.defaultValue = elementProps.value;
-        delete elementProps.value;
+        if (isEditMode) {
+          elementProps.onChange = () => {};
+        } else {
+          elementProps.defaultValue = elementProps.value;
+          delete elementProps.value;
+        }
       }
 
       if (isEditMode && layer.settings?.optionsSource?.collectionId) {
