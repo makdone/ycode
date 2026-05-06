@@ -502,6 +502,17 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
             setStyles(response.data.styles);
             setSettings(response.data.settings);
             setLocales(response.data.locales || []);
+
+            // Eager-load translations if the persisted selected locale is non-default
+            // so the canvas reflects the locale on first paint instead of source content.
+            const localisationState = useLocalisationStore.getState();
+            const persistedLocaleId = localisationState.selectedLocaleId;
+            if (persistedLocaleId) {
+              const persistedLocale = localisationState.locales.find(l => l.id === persistedLocaleId);
+              if (persistedLocale && !persistedLocale.is_default) {
+                localisationState.loadTranslations(persistedLocaleId);
+              }
+            }
             setAssets(response.data.assets || []);
             setAssetFolders(response.data.assetFolders || []);
             setFonts(response.data.fonts || []);

@@ -1,5 +1,9 @@
-import type { Layer, Page, Translation, Locale, LocaleOption } from '@/types';
+import type { Layer, Page, Translation, Locale, LocaleOption, CollectionField } from '@/types';
 import { getLayerIcon, getLayerName } from '@/lib/layer-utils';
+import { createDynamicTextVariable, createDynamicRichTextVariable, createAssetVariable } from '@/lib/variable-utils';
+import { castValue } from '@/lib/collection-utils';
+import { tiptapDocHasFormatting, tiptapDocToCanonicalString, hasVariableNode, hasAnyTextOrVariable } from '@/lib/tiptap-utils';
+import { looksLikeFormattedHtml } from '@/lib/translation-classification';
 import type { IconProps } from '@/components/ui/icon';
 
 /**
@@ -248,55 +252,17 @@ export function isLocaleRtl(locale: LocaleOption): boolean {
  */
 export interface TranslatableItem {
   key: string; // Unique identifier for the item (same key for all locales)
-  source_type: 'page' | 'folder' | 'component' | 'cms'; // Source type (page, foler, component, cms)
+  source_type: 'page' | 'folder' | 'component' | 'cms'; // Source type (page, folder, component, cms)
   source_id: string; // Source ID (e.g., page ID, folder ID, component ID, collection item ID)
   content_key: string; // Source key (e.g., 'layer:{layerId}:text', 'seo:title', 'slug')
   content_type: 'text' | 'richtext' | 'asset_id'; // Content type (text, richtext, asset)
   content_value: string; // Current text value (may contain inline variables)
+  open_in_sheet?: boolean; // If true, editing opens in a right-side sheet panel (for block-level rich text)
   info: {
     icon: IconProps['name']; // Icon name for the item
     label: string; // Item label (e.g., "SEO Title", "Heading")
     description?: string; // Optional item description
   }
-}
-
-/**
- * Extract text from a layer (includes text with inline variables)
- * Supports both DynamicTextVariable (plain text) and DynamicRichTextVariable (formatted text)
- */
-export function extractLayerText(layer: Layer): string | null {
-  if (!layer.variables?.text) {
-    return null;
-  }
-
-  const textVariable = layer.variables.text;
-
-  // Handle DynamicTextVariable (plain text)
-  if (textVariable.type === 'dynamic_text') {
-    const text = textVariable.data.content;
-
-    if (!text || !text.trim()) {
-      return null;
-    }
-
-    return text.trim();
-  }
-
-  // Handle DynamicRichTextVariable (Tiptap JSON with formatting)
-  if (textVariable.type === 'dynamic_rich_text') {
-    // Store Tiptap JSON as JSON string to preserve all formatting (bold, italic, custom styles, etc.)
-    const jsonContent = textVariable.data.content;
-
-    // Check if content is empty
-    if (!jsonContent || typeof jsonContent !== 'object') {
-      return null;
-    }
-
-    // Convert to JSON string for storage in translation database
-    return JSON.stringify(jsonContent);
-  }
-
-  return null;
 }
 
 /**
@@ -320,6 +286,139 @@ export function extractImageAltText(layer: Layer): string | null {
 }
 
 /**
+ * Decide how a layer's text content should be surfaced in the localization UI.
+ *
+ * Classification follows the *current* content, not the source layer type:
+ * - A `richText` layer whose content currently has formatting (bold, lists,
+ *   headings, etc.) gets the full sheet editor.
+ * - A `richText` layer whose content is currently flat plain text falls back
+ *   to a simple inline input — there's nothing to format anyway.
+ * - All other layers (heading, paragraph, span, etc.) are always flattened
+ *   to plain text. Their on-canvas widget doesn't expose formatting
+ *   controls, so offering them in translation would be misleading.
+ *
+ * The returned `value` always uses the canonical inline-variable string
+ * format for `text` content, and the JSON-stringified Tiptap doc for
+ * `richtext` content, so downstream rendering is unambiguous.
+ */
+function classifyLayerTextForTranslation(
+  layer: Layer
+): { contentType: 'text' | 'richtext'; value: string; openInSheet: boolean } | null {
+  const textVariable = layer.variables?.text;
+  if (!textVariable) return null;
+
+  if (textVariable.type === 'dynamic_text') {
+    const text = textVariable.data.content;
+    if (!text || typeof text !== 'string' || !text.trim()) return null;
+    if (looksLikeFormattedHtml(text) || text.includes('<ycode-inline-variable>')) {
+      return { contentType: 'richtext', value: text.trim(), openInSheet: true };
+    }
+    return { contentType: 'text', value: text.trim(), openInSheet: false };
+  }
+
+  if (textVariable.type === 'dynamic_rich_text') {
+    const doc = textVariable.data.content;
+    if (!doc || typeof doc !== 'object') return null;
+
+    if (tiptapDocHasFormatting(doc) || hasVariableNode(doc)) {
+      const json = JSON.stringify(doc);
+      if (!hasAnyTextOrVariable(doc)) return null;
+      return { contentType: 'richtext', value: json, openInSheet: true };
+    }
+
+    const canonical = tiptapDocToCanonicalString(doc).trim();
+    if (!canonical) return null;
+    return { contentType: 'text', value: canonical, openInSheet: false };
+  }
+
+  return null;
+}
+
+/**
+ * Extract translatable media items (image src/alt, video src/poster, audio src)
+ * from a single layer. Shared by both the recursive and shallow extractors.
+ */
+function extractMediaTranslatableItems(
+  layer: Layer,
+  sourceType: 'page' | 'component',
+  sourceId: string,
+  items: TranslatableItem[]
+): void {
+  const layerName = getLayerName(layer);
+
+  if (layer.name === 'image' && layer.variables?.image) {
+    const imageSrc = layer.variables.image.src;
+    if (imageSrc && imageSrc.type === 'asset' && imageSrc.data?.asset_id) {
+      items.push({
+        key: `${sourceType}:${sourceId}:layer:${layer.id}:image_src`,
+        source_type: sourceType,
+        source_id: sourceId,
+        content_key: `layer:${layer.id}:image_src`,
+        content_type: 'asset_id',
+        content_value: imageSrc.data.asset_id,
+        info: { icon: 'image', label: `${layerName} (source)` },
+      });
+    }
+
+    const imageAlt = extractImageAltText(layer);
+    if (imageAlt) {
+      items.push({
+        key: `${sourceType}:${sourceId}:layer:${layer.id}:image_alt`,
+        source_type: sourceType,
+        source_id: sourceId,
+        content_key: `layer:${layer.id}:image_alt`,
+        content_type: 'text',
+        content_value: imageAlt,
+        info: { icon: 'image', label: `${layerName} (alt text)` },
+      });
+    }
+  }
+
+  if (layer.name === 'video' && layer.variables?.video) {
+    const videoSrc = layer.variables.video.src;
+    if (videoSrc && videoSrc.type === 'asset' && videoSrc.data?.asset_id) {
+      items.push({
+        key: `${sourceType}:${sourceId}:layer:${layer.id}:video_src`,
+        source_type: sourceType,
+        source_id: sourceId,
+        content_key: `layer:${layer.id}:video_src`,
+        content_type: 'asset_id',
+        content_value: videoSrc.data.asset_id,
+        info: { icon: 'video', label: `${layerName} (source)` },
+      });
+    }
+
+    const videoPoster = layer.variables.video.poster;
+    if (videoPoster && videoPoster.type === 'asset' && videoPoster.data?.asset_id) {
+      items.push({
+        key: `${sourceType}:${sourceId}:layer:${layer.id}:video_poster`,
+        source_type: sourceType,
+        source_id: sourceId,
+        content_key: `layer:${layer.id}:video_poster`,
+        content_type: 'asset_id',
+        content_value: videoPoster.data.asset_id,
+        info: { icon: 'image', label: `${layerName} (poster)` },
+      });
+    }
+  }
+
+  if (layer.name === 'audio' && layer.variables?.audio?.src) {
+    const audioSrc = layer.variables.audio.src;
+    if (audioSrc.type === 'asset' && audioSrc.data?.asset_id) {
+      items.push({
+        key: `${sourceType}:${sourceId}:layer:${layer.id}:audio_src`,
+        source_type: sourceType,
+        source_id: sourceId,
+        content_key: `layer:${layer.id}:audio_src`,
+        content_type: 'asset_id',
+        content_value: audioSrc.data.asset_id,
+        info: { icon: 'audio', label: `${layerName} (source)` },
+      });
+    }
+  }
+}
+
+/**
  * Recursively extract all translatable text items from layers
  */
 function extractLayerTranslatableItems(
@@ -329,24 +428,19 @@ function extractLayerTranslatableItems(
   items: TranslatableItem[]
 ): void {
   for (const layer of layers) {
-    // Skip locale selector label as it is dynamically generated based on locale
     if (layer.key === 'localeSelectorLabel') continue;
 
-    // Extract text from this layer (including inline variables)
-    const text = extractLayerText(layer);
+    const classification = classifyLayerTextForTranslation(layer);
 
-    if (text) {
-      // Determine content type based on the variable type
-      // If the layer uses DynamicRichTextVariable, mark it as 'richtext'
-      const contentType = layer.variables?.text?.type === 'dynamic_rich_text' ? 'richtext' : 'text';
-
+    if (classification) {
       items.push({
         key: `${sourceType}:${sourceId}:layer:${layer.id}:text`,
         source_type: sourceType,
         source_id: sourceId,
         content_key: `layer:${layer.id}:text`,
-        content_type: contentType,
-        content_value: text,
+        content_type: classification.contentType,
+        content_value: classification.value,
+        open_in_sheet: classification.openInSheet,
         info: {
           icon: getLayerIcon(layer),
           label: getLayerName(layer),
@@ -354,118 +448,8 @@ function extractLayerTranslatableItems(
       });
     }
 
-    // Extract asset IDs from media layers
-    // Image layer - extract src asset and alt text
-    if (layer.name === 'image' && layer.variables?.image) {
-      // Extract image src asset
-      const imageSrc = layer.variables.image.src;
-      if (imageSrc && imageSrc.type === 'asset' && imageSrc.data?.asset_id) {
-        items.push({
-          key: `${sourceType}:${sourceId}:layer:${layer.id}:image_src`,
-          source_type: sourceType,
-          source_id: sourceId,
-          content_key: `layer:${layer.id}:image_src`,
-          content_type: 'asset_id',
-          content_value: imageSrc.data.asset_id,
-          info: {
-            icon: 'image',
-            label: `${getLayerName(layer)} (source)`,
-          },
-        });
-      }
+    extractMediaTranslatableItems(layer, sourceType, sourceId, items);
 
-      // Extract image alt text
-      const imageAlt = extractImageAltText(layer);
-      if (imageAlt) {
-        items.push({
-          key: `${sourceType}:${sourceId}:layer:${layer.id}:image_alt`,
-          source_type: sourceType,
-          source_id: sourceId,
-          content_key: `layer:${layer.id}:image_alt`,
-          content_type: 'text',
-          content_value: imageAlt,
-          info: {
-            icon: 'image',
-            label: `${getLayerName(layer)} (alt text)`,
-          },
-        });
-      }
-    }
-
-    // Video layer - extract src and poster assets
-    if (layer.name === 'video' && layer.variables?.video) {
-      const videoSrc = layer.variables.video.src;
-      if (videoSrc && videoSrc.type === 'asset' && videoSrc.data?.asset_id) {
-        items.push({
-          key: `${sourceType}:${sourceId}:layer:${layer.id}:video_src`,
-          source_type: sourceType,
-          source_id: sourceId,
-          content_key: `layer:${layer.id}:video_src`,
-          content_type: 'asset_id',
-          content_value: videoSrc.data.asset_id,
-          info: {
-            icon: 'video',
-            label: `${getLayerName(layer)} (source)`,
-          },
-        });
-      }
-
-      const videoPoster = layer.variables.video.poster;
-      if (videoPoster && videoPoster.type === 'asset' && videoPoster.data?.asset_id) {
-        items.push({
-          key: `${sourceType}:${sourceId}:layer:${layer.id}:video_poster`,
-          source_type: sourceType,
-          source_id: sourceId,
-          content_key: `layer:${layer.id}:video_poster`,
-          content_type: 'asset_id',
-          content_value: videoPoster.data.asset_id,
-          info: {
-            icon: 'image',
-            label: `${getLayerName(layer)} (poster)`,
-          },
-        });
-      }
-    }
-
-    // Audio layer - extract src asset
-    if (layer.name === 'audio' && layer.variables?.audio?.src) {
-      const audioSrc = layer.variables.audio.src;
-      if (audioSrc.type === 'asset' && audioSrc.data?.asset_id) {
-        items.push({
-          key: `${sourceType}:${sourceId}:layer:${layer.id}:audio_src`,
-          source_type: sourceType,
-          source_id: sourceId,
-          content_key: `layer:${layer.id}:audio_src`,
-          content_type: 'asset_id',
-          content_value: audioSrc.data.asset_id,
-          info: {
-            icon: 'audio',
-            label: `${getLayerName(layer)} (source)`,
-          },
-        });
-      }
-    }
-
-    // Icon layer - extract src asset
-    if (layer.name === 'icon' && layer.variables?.icon?.src) {
-      const iconSrc = layer.variables.icon.src;
-      if (iconSrc.type === 'asset' && iconSrc.data?.asset_id) {
-        items.push({
-          key: `${sourceType}:${sourceId}:layer:${layer.id}:icon_src`,
-          source_type: sourceType,
-          source_id: sourceId,
-          content_key: `layer:${layer.id}:icon_src`,
-          content_type: 'asset_id',
-          content_value: iconSrc.data.asset_id,
-          info: {
-            icon: 'icon',
-            label: `${getLayerName(layer)} (source)`,
-          },
-        });
-      }
-    }
-
-    // Recursively process children
     if (layer.children && Array.isArray(layer.children) && layer.children.length > 0) {
       extractLayerTranslatableItems(layer.children, sourceType, sourceId, items);
     }
@@ -475,6 +459,13 @@ function extractLayerTranslatableItems(
 /**
  * Extract SEO translatable items from page settings
  */
+function classifySeoValue(value: string): { contentType: 'text' | 'richtext'; openInSheet: boolean } {
+  if (looksLikeFormattedHtml(value) || value.includes('<ycode-inline-variable>')) {
+    return { contentType: 'richtext', openInSheet: true };
+  }
+  return { contentType: 'text', openInSheet: false };
+}
+
 function extractSeoItems(
   pageId: string,
   seo: { title?: string; description?: string } | undefined,
@@ -483,13 +474,15 @@ function extractSeoItems(
   if (!seo) return;
 
   if (seo.title && typeof seo.title === 'string' && seo.title.trim()) {
+    const classification = classifySeoValue(seo.title);
     items.push({
       key: `page:${pageId}:seo:title`,
       source_type: 'page',
       source_id: pageId,
       content_key: 'seo:title',
-      content_type: 'text',
+      content_type: classification.contentType,
       content_value: seo.title.trim(),
+      open_in_sheet: classification.openInSheet,
       info: {
         icon: 'search',
         label: 'SEO Title',
@@ -498,13 +491,15 @@ function extractSeoItems(
   }
 
   if (seo.description && typeof seo.description === 'string' && seo.description.trim()) {
+    const classification = classifySeoValue(seo.description);
     items.push({
       key: `page:${pageId}:seo:description`,
       source_type: 'page',
       source_id: pageId,
       content_key: 'seo:description',
-      content_type: 'text',
+      content_type: classification.contentType,
       content_value: seo.description.trim(),
+      open_in_sheet: classification.openInSheet,
       info: {
         icon: 'search',
         label: 'SEO Description',
@@ -642,15 +637,17 @@ export function extractCmsTranslatableItems(
       ? `field:key:${field.key}`
       : `field:id:${field.id}`;
 
+    const isRichText = field.type === 'rich_text';
     items.push({
       key: `cms:${collectionItem.id}:${contentKey}`,
       source_type: 'cms',
       source_id: collectionItem.id,
       content_key: contentKey,
-      content_type: field.type === 'rich_text' ? 'richtext' : 'text',
+      content_type: isRichText ? 'richtext' : 'text',
       content_value: contentValue,
+      open_in_sheet: isRichText,
       info: {
-        icon: field.type === 'rich_text' ? 'type' : 'text',
+        icon: isRichText ? 'type' : 'text',
         label: field.name,
         description: isSlugField ? `Affects ${localeName} URLs generated by dynamic pages using this CMS item` : undefined,
       },
@@ -728,11 +725,24 @@ export function hasValidTranslationValue(translation: Translation | undefined): 
 /**
  * Get translation value if valid, otherwise return undefined
  * @param translation - Translation object or undefined
+ * @param options - { includeIncomplete } when true, skip the `is_completed` gate
+ *   so any non-empty saved value is returned. Used by the builder canvas where
+ *   the editor wants to see whatever they have saved; production rendering
+ *   (page-fetcher / published site) keeps the default behaviour and only
+ *   surfaces completed translations.
  * @returns Content value if valid, undefined otherwise
  */
-export function getTranslationValue(translation: Translation | undefined): string | undefined {
+export function getTranslationValue(
+  translation: Translation | undefined,
+  options?: { includeIncomplete?: boolean }
+): string | undefined {
+  if (!translation) return undefined;
+  if (options?.includeIncomplete) {
+    const value = translation.content_value;
+    return value && value.trim() !== '' ? value : undefined;
+  }
   if (hasValidTranslationValue(translation)) {
-    return translation!.content_value;
+    return translation.content_value;
   }
   return undefined;
 }
@@ -818,4 +828,200 @@ export function getTranslatedText(
   }
 
   return originalText;
+}
+
+/**
+ * Inject translated text and assets into layers recursively.
+ * Replaces layer text content and asset sources with translations when available.
+ * Handles both page-level and component-level translations via _masterComponentId.
+ *
+ * Shared between the server-side page fetcher (preview / published) and the
+ * builder canvas so both paths produce identical output.
+ */
+export function injectTranslatedText(
+  layers: Layer[],
+  pageId: string,
+  translations: Record<string, Translation>,
+  options?: { includeIncomplete?: boolean }
+): Layer[] {
+  const valueOptions = options?.includeIncomplete ? { includeIncomplete: true } : undefined;
+  return layers.map(layer => {
+    const updates: Partial<Layer> = {};
+    const variableUpdates: Partial<Layer['variables']> = {};
+
+    // Use original layer ID for translation lookups — after resolveComponents,
+    // child layer IDs are transformed to instance-specific IDs (e.g., "instanceId-childId")
+    // but translations are stored with the original component layer IDs.
+    const translationLayerId = (layer as any)._originalLayerId || layer.id;
+    const masterComponentId = (layer as any)._masterComponentId as string | undefined;
+
+    // 1. Inject text translation
+    const textTranslationKey = buildLayerTranslationKey(pageId, `layer:${translationLayerId}:text`, masterComponentId);
+    const textTranslation = getTranslationByKey(translations, textTranslationKey);
+
+    const textValue = getTranslationValue(textTranslation, valueOptions);
+    if (textValue) {
+      // Preserve the original variable type (dynamic_text or dynamic_rich_text)
+      if (layer.variables?.text?.type === 'dynamic_rich_text') {
+        (variableUpdates as any).text = createDynamicRichTextVariable(textValue);
+      } else {
+        (variableUpdates as any).text = createDynamicTextVariable(textValue);
+      }
+    }
+
+    // 2. Inject asset translations for media layers
+    if (layer.name === 'image') {
+      const imageSrcKey = buildLayerTranslationKey(pageId, `layer:${translationLayerId}:image_src`, masterComponentId);
+      const imageSrcTranslation = getTranslationByKey(translations, imageSrcKey);
+      const imageAltKey = buildLayerTranslationKey(pageId, `layer:${translationLayerId}:image_alt`, masterComponentId);
+      const imageAltTranslation = getTranslationByKey(translations, imageAltKey);
+
+      if (imageSrcTranslation || imageAltTranslation) {
+        const imageUpdates: any = { ...(layer.variables?.image as any) };
+
+        if (imageSrcTranslation && imageSrcTranslation.content_value) {
+          imageUpdates.src = createAssetVariable(imageSrcTranslation.content_value);
+        }
+
+        const imageAltValue = getTranslationValue(imageAltTranslation, valueOptions);
+        if (imageAltValue) {
+          imageUpdates.alt = createDynamicTextVariable(imageAltValue);
+        } else {
+          // Preserve original alt if no translation
+          imageUpdates.alt = layer.variables?.image?.alt || createDynamicTextVariable('');
+        }
+
+        (variableUpdates as any).image = imageUpdates;
+      }
+    }
+
+    if (layer.name === 'video') {
+      const videoSrcKey = buildLayerTranslationKey(pageId, `layer:${translationLayerId}:video_src`, masterComponentId);
+      const videoSrcTranslation = getTranslationByKey(translations, videoSrcKey);
+      const videoPosterKey = buildLayerTranslationKey(pageId, `layer:${translationLayerId}:video_poster`, masterComponentId);
+      const videoPosterTranslation = getTranslationByKey(translations, videoPosterKey);
+
+      if (videoSrcTranslation || videoPosterTranslation) {
+        const videoUpdates: any = { ...(layer.variables?.video as any) };
+
+        if (videoSrcTranslation && videoSrcTranslation.content_value) {
+          videoUpdates.src = createAssetVariable(videoSrcTranslation.content_value);
+        }
+
+        if (videoPosterTranslation && videoPosterTranslation.content_value) {
+          videoUpdates.poster = createAssetVariable(videoPosterTranslation.content_value);
+        }
+
+        (variableUpdates as any).video = videoUpdates;
+      }
+    }
+
+    if (layer.name === 'audio') {
+      const audioSrcKey = buildLayerTranslationKey(pageId, `layer:${translationLayerId}:audio_src`, masterComponentId);
+      const audioSrcTranslation = getTranslationByKey(translations, audioSrcKey);
+
+      if (audioSrcTranslation && audioSrcTranslation.content_value) {
+        (variableUpdates as any).audio = {
+          src: createAssetVariable(audioSrcTranslation.content_value),
+        };
+      }
+    }
+
+    if (Object.keys(variableUpdates).length > 0) {
+      updates.variables = {
+        ...layer.variables,
+        ...variableUpdates,
+      } as Layer['variables'];
+    }
+
+    if (layer.children && layer.children.length > 0) {
+      updates.children = injectTranslatedText(layer.children, pageId, translations, options);
+    }
+
+    return {
+      ...layer,
+      ...updates,
+    };
+  });
+}
+
+/**
+ * Apply CMS translations to a collection item's values map (field_id -> value).
+ * Returns a new map with translated values where available; rich-text strings are
+ * cast back into Tiptap document objects via castValue so they match the shape
+ * downstream renderers expect.
+ */
+export function applyCmsTranslations(
+  itemId: string,
+  itemValues: Record<string, any>,
+  collectionFields: CollectionField[],
+  translations?: Record<string, Translation> | null,
+  options?: { includeIncomplete?: boolean }
+): Record<string, any> {
+  if (!translations || Object.keys(translations).length === 0) {
+    return itemValues;
+  }
+
+  const valueOptions = options?.includeIncomplete ? { includeIncomplete: true } : undefined;
+  const translatedValues: Record<string, any> = { ...itemValues };
+
+  const fieldIdToKey = new Map<string, string | null>();
+  const fieldIdToType = new Map<string, string>();
+  for (const field of collectionFields) {
+    fieldIdToKey.set(field.id, field.key);
+    fieldIdToType.set(field.id, field.type);
+  }
+
+  for (const fieldId of Object.keys(itemValues)) {
+    const fieldKey = fieldIdToKey.get(fieldId);
+
+    const contentKey = fieldKey ? `field:key:${fieldKey}` : `field:id:${fieldId}`;
+    const translationKey = `cms:${itemId}:${contentKey}`;
+    const translation = translations[translationKey];
+
+    const translatedValue = getTranslationValue(translation, valueOptions);
+    if (translatedValue) {
+      const fieldType = fieldIdToType.get(fieldId);
+      translatedValues[fieldId] = fieldType
+        ? castValue(translatedValue, fieldType as any)
+        : translatedValue;
+    }
+  }
+
+  return translatedValues;
+}
+
+/**
+ * Extract the translatable items for a single layer (without recursing into children).
+ * Used by the right sidebar to build the per-layer translation editor.
+ */
+export function extractLayerTranslatableItemsShallow(
+  layer: Layer,
+  sourceType: 'page' | 'component',
+  sourceId: string
+): TranslatableItem[] {
+  const items: TranslatableItem[] = [];
+
+  if (layer.key === 'localeSelectorLabel') return items;
+
+  const classification = classifyLayerTextForTranslation(layer);
+  if (classification) {
+    items.push({
+      key: `${sourceType}:${sourceId}:layer:${layer.id}:text`,
+      source_type: sourceType,
+      source_id: sourceId,
+      content_key: `layer:${layer.id}:text`,
+      content_type: classification.contentType,
+      content_value: classification.value,
+      open_in_sheet: classification.openInSheet,
+      info: {
+        icon: getLayerIcon(layer),
+        label: getLayerName(layer),
+      },
+    });
+  }
+
+  extractMediaTranslatableItems(layer, sourceType, sourceId, items);
+
+  return items;
 }

@@ -29,7 +29,7 @@ import { getLinkSettingsFromMark } from '@/lib/tiptap-extensions/rich-text-link'
 import { SWIPER_CLASS_MAP, SWIPER_DATA_ATTR_MAP } from '@/lib/templates/utilities';
 import { resolveInlineVariables, resolveInlineVariablesFromData } from '@/lib/inline-variables';
 import { formatFieldValue } from '@/lib/cms-variables-utils';
-import { buildLayerTranslationKey, getTranslationByKey, hasValidTranslationValue, getTranslationValue } from '@/lib/localisation-utils';
+import { buildLayerTranslationKey, getTranslationByKey, hasValidTranslationValue, getTranslationValue, injectTranslatedText, applyCmsTranslations } from '@/lib/localisation-utils';
 import { formatDateFieldsInItemValues } from '@/lib/date-format-utils';
 import { getSettingByKey } from '@/lib/repositories/settingsRepository';
 import { parseMultiAssetFieldValue, buildAssetVirtualValues } from '@/lib/multi-asset-utils';
@@ -405,7 +405,7 @@ async function fetchPageByPathInternal(
         // Apply translations for the detected locale
         let processedLayers = homepageData.pageLayers.layers || [];
         if (translations && Object.keys(translations).length > 0) {
-          processedLayers = injectTranslatedText(processedLayers, homepageData.page.id, translations);
+          processedLayers = injectTranslatedText(processedLayers, homepageData.page.id, translations, { includeIncomplete: !isPublished });
         }
 
         // Resolve all AssetVariables to URLs server-side (prevents client-side API calls)
@@ -501,7 +501,7 @@ async function fetchPageByPathInternal(
                 collectionFields,
                 isPublished
               );
-              enhancedItemValues = applyCmsTranslations(collectionItem.id, enhancedItemValues, collectionFields, translations);
+              enhancedItemValues = applyCmsTranslations(collectionItem.id, enhancedItemValues, collectionFields, translations, { includeIncomplete: !isPublished });
               enhancedItemValues = formatDateFieldsInItemValues(enhancedItemValues, collectionFields, timezone);
 
               const enhancedCollectionItem = {
@@ -546,7 +546,7 @@ async function fetchPageByPathInternal(
             );
 
             // Apply CMS translations to the item values
-            enhancedItemValues = applyCmsTranslations(collectionItem.id, enhancedItemValues, collectionFields, translations);
+            enhancedItemValues = applyCmsTranslations(collectionItem.id, enhancedItemValues, collectionFields, translations, { includeIncomplete: !isPublished });
 
             const rawItemValues = { ...enhancedItemValues };
             enhancedItemValues = formatDateFieldsInItemValues(enhancedItemValues, collectionFields, timezone);
@@ -581,7 +581,7 @@ async function fetchPageByPathInternal(
 
             // Apply translations (components already resolved above)
             if (detectedLocale && translations && Object.keys(translations).length > 0) {
-              resolvedLayers = injectTranslatedText(resolvedLayers, matchingPage.id, translations);
+              resolvedLayers = injectTranslatedText(resolvedLayers, matchingPage.id, translations, { includeIncomplete: !isPublished });
             }
 
             // Resolve all AssetVariables to URLs server-side (prevents client-side API calls)
@@ -684,7 +684,7 @@ async function fetchPageByPathInternal(
 
     // Apply translations (components already resolved above)
     if (detectedLocale && translations && Object.keys(translations).length > 0) {
-      resolvedLayers = injectTranslatedText(resolvedLayers, matchingPage.id, translations);
+      resolvedLayers = injectTranslatedText(resolvedLayers, matchingPage.id, translations, { includeIncomplete: !isPublished });
     }
 
     const resolved = await resolveAllAssets(resolvedLayers, isPublished, components);
@@ -898,136 +898,6 @@ export const fetchHomepage = cache(async function fetchHomepage(
 });
 
 /**
- * Inject translated text and assets into layers recursively
- * Replaces layer text content and asset sources with translations when available
- * Handles both page-level and component-level translations
- * @param layers - Layer tree to translate
- * @param pageId - Page ID for building translation keys
- * @param translations - Translations map
- * @returns Layers with translated text and assets
- */
-function injectTranslatedText(
-  layers: Layer[],
-  pageId: string,
-  translations: Record<string, Translation>
-): Layer[] {
-  return layers.map(layer => {
-    const updates: Partial<Layer> = {};
-    const variableUpdates: Partial<Layer['variables']> = {};
-
-    // Use original layer ID for translation lookups — after resolveComponents,
-    // child layer IDs are transformed to instance-specific IDs (e.g., "instanceId-childId")
-    // but translations are stored with the original component layer IDs
-    const translationLayerId = layer._originalLayerId || layer.id;
-
-    // 1. Inject text translation
-    const textTranslationKey = buildLayerTranslationKey(pageId, `layer:${translationLayerId}:text`, layer._masterComponentId);
-    const textTranslation = getTranslationByKey(translations, textTranslationKey);
-
-    const textValue = getTranslationValue(textTranslation);
-    if (textValue) {
-      // Preserve the original variable type (dynamic_text or dynamic_rich_text)
-      if (layer.variables?.text?.type === 'dynamic_rich_text') {
-        variableUpdates.text = createDynamicRichTextVariable(textValue);
-      } else {
-        variableUpdates.text = createDynamicTextVariable(textValue);
-      }
-    }
-
-    // 2. Inject asset translations for media layers
-    // Image layer - translate src and alt text
-    if (layer.name === 'image') {
-      const imageSrcKey = buildLayerTranslationKey(pageId, `layer:${translationLayerId}:image_src`, layer._masterComponentId);
-      const imageSrcTranslation = getTranslationByKey(translations, imageSrcKey);
-      const imageAltKey = buildLayerTranslationKey(pageId, `layer:${translationLayerId}:image_alt`, layer._masterComponentId);
-      const imageAltTranslation = getTranslationByKey(translations, imageAltKey);
-
-      if (imageSrcTranslation || imageAltTranslation) {
-        const imageUpdates: any = { ...layer.variables?.image };
-
-        if (imageSrcTranslation && imageSrcTranslation.content_value) {
-          imageUpdates.src = createAssetVariable(imageSrcTranslation.content_value);
-        }
-
-        const imageAltValue = getTranslationValue(imageAltTranslation);
-        if (imageAltValue) {
-          imageUpdates.alt = createDynamicTextVariable(imageAltValue);
-        } else {
-          // Preserve original alt if no translation
-          imageUpdates.alt = layer.variables?.image?.alt || createDynamicTextVariable('');
-        }
-
-        variableUpdates.image = imageUpdates;
-      }
-    }
-
-    // Video layer - translate src and poster
-    if (layer.name === 'video') {
-      const videoSrcKey = buildLayerTranslationKey(pageId, `layer:${translationLayerId}:video_src`, layer._masterComponentId);
-      const videoSrcTranslation = getTranslationByKey(translations, videoSrcKey);
-      const videoPosterKey = buildLayerTranslationKey(pageId, `layer:${translationLayerId}:video_poster`, layer._masterComponentId);
-      const videoPosterTranslation = getTranslationByKey(translations, videoPosterKey);
-
-      if (videoSrcTranslation || videoPosterTranslation) {
-        const videoUpdates: any = { ...layer.variables?.video };
-
-        if (videoSrcTranslation && videoSrcTranslation.content_value) {
-          videoUpdates.src = createAssetVariable(videoSrcTranslation.content_value);
-        }
-
-        if (videoPosterTranslation && videoPosterTranslation.content_value) {
-          videoUpdates.poster = createAssetVariable(videoPosterTranslation.content_value);
-        }
-
-        variableUpdates.video = videoUpdates;
-      }
-    }
-
-    // Audio layer - translate src
-    if (layer.name === 'audio') {
-      const audioSrcKey = buildLayerTranslationKey(pageId, `layer:${translationLayerId}:audio_src`, layer._masterComponentId);
-      const audioSrcTranslation = getTranslationByKey(translations, audioSrcKey);
-
-      if (audioSrcTranslation && audioSrcTranslation.content_value) {
-        variableUpdates.audio = {
-          src: createAssetVariable(audioSrcTranslation.content_value),
-        };
-      }
-    }
-
-    // Icon layer - translate src
-    if (layer.name === 'icon') {
-      const iconSrcKey = buildLayerTranslationKey(pageId, `layer:${translationLayerId}:icon_src`, layer._masterComponentId);
-      const iconSrcTranslation = getTranslationByKey(translations, iconSrcKey);
-
-      if (iconSrcTranslation && iconSrcTranslation.content_value) {
-        variableUpdates.icon = {
-          src: createAssetVariable(iconSrcTranslation.content_value),
-        };
-      }
-    }
-
-    // Apply variable updates if any
-    if (Object.keys(variableUpdates).length > 0) {
-      updates.variables = {
-        ...layer.variables,
-        ...variableUpdates,
-      };
-    }
-
-    // Recursively process children
-    if (layer.children && layer.children.length > 0) {
-      updates.children = injectTranslatedText(layer.children, pageId, translations);
-    }
-
-    return {
-      ...layer,
-      ...updates,
-    };
-  });
-}
-
-/**
  * Fetch all components from the database
  * @param supabase - Supabase client
  * @param isPublished - Whether to fetch published or draft components (defaults to false for draft)
@@ -1040,57 +910,6 @@ async function fetchComponents(supabase: any, isPublished: boolean = false): Pro
     .eq('is_published', isPublished)
     .is('deleted_at', null);
   return components || [];
-}
-
-/**
- * Apply CMS translations to collection item values
- * @param itemId - Collection item ID
- * @param itemValues - Original item values (field_id -> value)
- * @param collectionFields - Collection fields to determine field keys
- * @param translations - Translations map
- * @returns Item values with translations applied
- */
-function applyCmsTranslations(
-  itemId: string,
-  itemValues: Record<string, string>,
-  collectionFields: CollectionField[],
-  translations?: Record<string, Translation>
-): Record<string, string> {
-  if (!translations || Object.keys(translations).length === 0) {
-    return itemValues;
-  }
-
-  const translatedValues = { ...itemValues };
-
-  // Create maps for field key and field type lookup
-  const fieldIdToKey = new Map<string, string | null>();
-  const fieldIdToType = new Map<string, string>();
-  for (const field of collectionFields) {
-    fieldIdToKey.set(field.id, field.key);
-    fieldIdToType.set(field.id, field.type);
-  }
-
-  // Apply translations for each field
-  for (const fieldId of Object.keys(itemValues)) {
-    const fieldKey = fieldIdToKey.get(fieldId);
-
-    // Build translation key: field:key:{key} or field:id:{id} when key is null
-    const contentKey = fieldKey ? `field:key:${fieldKey}` : `field:id:${fieldId}`;
-    const translationKey = `cms:${itemId}:${contentKey}`;
-    const translation = translations[translationKey];
-
-    const translatedValue = getTranslationValue(translation);
-    if (translatedValue) {
-      // Cast the translated string using the field type so rich_text values
-      // are parsed back into Tiptap document objects (matching castValue behavior)
-      const fieldType = fieldIdToType.get(fieldId);
-      translatedValues[fieldId] = fieldType
-        ? castValue(translatedValue, fieldType as any)
-        : translatedValue;
-    }
-  }
-
-  return translatedValues;
 }
 
 /**
@@ -2522,7 +2341,7 @@ export async function resolveCollectionLayers(
 
           // Pre-process all items: translations + date formatting (pure computation)
           const preprocessed = sortedItems.map(item => {
-            let translatedValues = applyCmsTranslations(item.id, item.values, collectionFields, translations);
+            let translatedValues = applyCmsTranslations(item.id, item.values, collectionFields, translations, { includeIncomplete: !isPublished });
             const rawTranslatedValues = { ...translatedValues };
             translatedValues = formatDateFieldsInItemValues(translatedValues, collectionFields, timezone);
             return { item, translatedValues, rawTranslatedValues };

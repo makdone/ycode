@@ -7,7 +7,6 @@ import LayerLockIndicator from '@/components/collaboration/LayerLockIndicator';
 import EditingIndicator from '@/components/collaboration/EditingIndicator';
 import { useCollaborationPresenceStore, getResourceLockKey, RESOURCE_TYPES } from '@/stores/useCollaborationPresenceStore';
 import { useAuthStore } from '@/stores/useAuthStore';
-import { useLocalisationStore } from '@/stores/useLocalisationStore';
 import type { Layer, Locale, ComponentVariable, FormSettings, LinkSettings, Breakpoint, CollectionItemWithValues, Component } from '@/types';
 import type { UseLiveLayerUpdatesReturn } from '@/hooks/use-live-layer-updates';
 import type { UseLiveComponentUpdatesReturn } from '@/hooks/use-live-component-updates';
@@ -17,7 +16,7 @@ import { SWIPER_CLASS_MAP, SWIPER_DATA_ATTR_MAP } from '@/lib/templates/utilitie
 import { useCanvasSlider } from '@/hooks/use-canvas-slider';
 import { resolveFieldFromSources } from '@/lib/cms-variables-utils';
 import { getDynamicTextContent, getImageUrlFromVariable, getVideoUrlFromVariable, getIframeUrlFromVariable, isFieldVariable, isAssetVariable, isStaticTextVariable, isDynamicTextVariable, getAssetId, getStaticTextContent, createAssetVariable, createDynamicTextVariable, resolveDesignStyles } from '@/lib/variable-utils';
-import { getTranslatedAssetId, getTranslatedText } from '@/lib/localisation-utils';
+import { getTranslatedAssetId, getTranslatedText, applyCmsTranslations } from '@/lib/localisation-utils';
 import { isValidLinkSettings } from '@/lib/link-utils';
 import { DEFAULT_ASSETS, ASSET_CATEGORIES, isAssetOfType } from '@/lib/asset-utils';
 import { parseMultiAssetFieldValue, buildAssetVirtualValues } from '@/lib/multi-asset-utils';
@@ -500,8 +499,6 @@ const LayerItem: React.FC<{
     return getAssetFromStore(id);
   }, [resolvedAssets, getAssetFromStore]);
   const openFileManager = useEditorStore((state) => state.openFileManager);
-  const allTranslations = useLocalisationStore((state) => state.translations);
-  const editModeTranslations = isEditMode && currentLocale ? allTranslations[currentLocale.id] : null;
   const storeComponents = useComponentsStore((state) => state.components);
   const allComponents = storeComponents.length > 0 ? storeComponents : (componentsProp ?? []);
 
@@ -917,8 +914,11 @@ const LayerItem: React.FC<{
 
   // Resolve text and image URLs with field binding support
   const textContent = (() => {
-    // Special handling for locale selector label
-    if (layer.key === 'localeSelectorLabel' && !isEditMode) {
+    // Special handling for locale selector label.
+    // Runs in both edit and runtime modes so the builder canvas reflects the
+    // active locale chosen via the header dropdown — otherwise the label
+    // would show stale placeholder text while the rest of the canvas updates.
+    if (layer.key === 'localeSelectorLabel') {
       // Get default locale if no locale is detected
       const defaultLocale = availableLocales?.find(l => l.is_default) || availableLocales?.[0];
       const displayLocale = currentLocale || defaultLocale;
@@ -1443,7 +1443,7 @@ const LayerItem: React.FC<{
     transition,
   } = useSortable({
     id: layer.id,
-    disabled: !enableDragDrop || isEditing || isLockedByOther,
+    disabled: !enableDragDrop || isEditing || isLockedByOther || !!(currentLocale && !currentLocale.is_default),
     data: {
       layer,
     },
@@ -1453,9 +1453,14 @@ const LayerItem: React.FC<{
   const sliderRef = useRef<HTMLElement | null>(null);
   useCanvasSlider(sliderRef, layer, isEditMode);
 
+  // Block inline canvas editing while in a non-default locale: source layer
+  // text must only be edited via the default locale. Translations are saved
+  // through the right-sidebar Translate panel instead.
+  const isLocalizingLayer = !!(currentLocale && !currentLocale.is_default);
+
   const startEditing = (clickX?: number, clickY?: number) => {
     // Enable inline editing for text layers (both rich text and plain text)
-    if (textEditable && isEditMode && !isLockedByOther) {
+    if (textEditable && isEditMode && !isLockedByOther && !isLocalizingLayer) {
       setEditingLayerId(layer.id);
       // Clear sublayer selection when entering edit mode
       useEditorStore.getState().setActiveSublayerIndex(null);
@@ -2765,7 +2770,7 @@ const LayerItem: React.FC<{
               editorBreakpoint={editorBreakpoint}
               currentLocale={currentLocale}
               availableLocales={availableLocales}
-              localeSelectorFormat={localeSelectorFormat}
+              localeSelectorFormat={layer.name === 'localeSelector' ? (layer.settings?.locale?.format || 'locale') : localeSelectorFormat}
               liveLayerUpdates={liveLayerUpdates}
               isInsideForm={isInsideForm}
               isInsideLink={isInsideLink}
@@ -2868,15 +2873,24 @@ const LayerItem: React.FC<{
             // Get collection fields for reference resolution
             const collectionFields = collectionId ? fieldsByCollectionId[collectionId] || [] : [];
 
+            // Apply CMS translations to this item's values when localizing so
+            // repeater children render translated text/rich-text values. Mirrors
+            // what the server-side page fetcher does on /preview and published
+            // routes via applyCmsTranslations.
+            const baseItemValues = item.values || {};
+            const translatedItemValues = (currentLocale && !currentLocale.is_default && translations)
+              ? applyCmsTranslations(item.id, baseItemValues, collectionFields, translations, isEditMode ? { includeIncomplete: true } : undefined)
+              : baseItemValues;
+
             // Resolve reference fields to add relationship paths (e.g., "refFieldId.targetFieldId")
             const enhancedItemValues = collectionFields.length > 0
               ? resolveReferenceFieldsSync(
-                item.values || {},
+                translatedItemValues,
                 collectionFields,
                 itemsByCollectionId,
                 fieldsByCollectionId
               )
-              : (item.values || {});
+              : translatedItemValues;
 
             // Merge parent collection data with enhanced item values
             // Parent data provides access to fields from outer collection layers

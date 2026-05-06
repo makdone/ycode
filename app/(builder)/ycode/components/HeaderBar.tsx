@@ -85,7 +85,7 @@ export default function HeaderBar({
   const { currentPageCollectionItemId, currentPageId: storeCurrentPageId, isPreviewMode, setPreviewMode, openFileManager, setKeyboardShortcutsOpen, setActiveSidebarTab, lastDesignUrl, setLastDesignUrl, previewReturnUrl, previewReturnTab, setPreviewReturn } = useEditorStore();
   const { folders, pages: storePages } = usePagesStore();
   const { items, fields, collections, selectedCollectionId: storeSelectedCollectionId, setSelectedCollectionId } = useCollectionsStore();
-  const { locales, selectedLocaleId, setSelectedLocaleId, translations } = useLocalisationStore();
+  const { locales, selectedLocaleId, setSelectedLocaleId, translations, loadTranslations } = useLocalisationStore();
   const { navigateToLayers, navigateToCollection, navigateToCollections, updateQueryParams, routeType } = useEditorUrl();
 
   // Optimistic nav button state - set immediately on click, cleared when URL catches up
@@ -502,7 +502,13 @@ export default function HeaderBar({
           <DropdownMenuContent align="end">
             <DropdownMenuRadioGroup
               value={selectedLocaleId || ''}
-              onValueChange={(value) => setSelectedLocaleId(value)}
+              onValueChange={(value) => {
+                setSelectedLocaleId(value);
+                // Eager-load translations so the canvas reflects the new locale
+                // without waiting for component-level effects to run. The store
+                // short-circuits for the default locale and for cached locales.
+                loadTranslations(value);
+              }}
             >
               {locales.map((locale) => (
                 <DropdownMenuRadioItem key={locale.id} value={locale.id}>
