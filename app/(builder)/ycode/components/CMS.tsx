@@ -573,13 +573,18 @@ const CMS = React.memo(function CMS() {
         // Only load items if:
         // 1. No items in store, OR
         // 2. We're on page > 1 (need different page), OR
-        // 3. We have fewer items than total AND fewer than what we're requesting
+        // 3. We have fewer items than total AND fewer than what we're requesting, OR
+        // 4. The collection has computed `count` fields — they read from another
+        //    collection's references and aren't invalidated when the source items
+        //    change, so we always re-fetch on switch to keep counts fresh.
         const initialPage = urlState.page || 1;
         const initialPageSize = urlState.pageSize || 25;
+        const hasCountField = (existingFields || []).some(f => f.type === 'count');
         const needsLoad = !existingItems ||
           existingItems.length === 0 ||
           initialPage > 1 ||
-          (existingItems.length < totalCount && existingItems.length < initialPageSize);
+          (existingItems.length < totalCount && existingItems.length < initialPageSize) ||
+          hasCountField;
 
         if (needsLoad) {
           loadItems(selectedCollectionId, initialPage, initialPageSize, currentSortBy, currentSortOrder);
@@ -1247,6 +1252,14 @@ const CMS = React.memo(function CMS() {
         const hasOptionRemoval =
           isOptionField && previousOptions.some(prev => !nextIds.has(prev.id));
 
+        const previousCountCfg = editingField.data?.count;
+        const nextCountCfg = data.data?.count;
+        const countConfigChanged =
+          editingField.type === 'count' &&
+          (!!previousCountCfg !== !!nextCountCfg ||
+            previousCountCfg?.collectionId !== nextCountCfg?.collectionId ||
+            previousCountCfg?.fieldId !== nextCountCfg?.fieldId);
+
         await updateField(selectedCollectionId, editingField.id, {
           name: data.name,
           default: data.default || null,
@@ -1254,7 +1267,7 @@ const CMS = React.memo(function CMS() {
           data: mergedData,
         });
 
-        if (hasOptionRename || hasOptionRemoval) {
+        if (hasOptionRename || hasOptionRemoval || countConfigChanged) {
           await reloadCurrentItems();
         }
       } else {
@@ -1270,6 +1283,12 @@ const CMS = React.memo(function CMS() {
           reference_collection_id: data.reference_collection_id || null,
           data: data.data,
         });
+
+        // Count fields are computed at fetch time. Reload so the column shows
+        // real values immediately instead of the default 0 placeholder.
+        if (data.type === 'count') {
+          await reloadCurrentItems();
+        }
       }
 
       // Close dialog and reset
@@ -1819,32 +1838,37 @@ const CMS = React.memo(function CMS() {
                       // Link fields - format for display
                       if (field.type === 'link') {
                         let displayValue = '-';
+                        let isAssetLink = false;
                         if (value) {
                           try {
                             const linkValue = typeof value === 'string' ? parseCollectionLinkValue(value) : value;
                             if (linkValue) {
-                              // Build collectionItemSlugs map for dynamic page resolution
-                              const collectionItemSlugs: Record<string, string> = {};
-                              collectionItems.forEach(item => {
-                                const slugField = collectionFields.find(f => f.key === 'slug');
-                                if (slugField && item.values[slugField.id]) {
-                                  collectionItemSlugs[item.id] = item.values[slugField.id];
-                                }
-                              });
+                              if (linkValue.type === 'asset' && linkValue.asset?.id) {
+                                const asset = getAsset(linkValue.asset.id);
+                                displayValue = asset?.filename || linkValue.asset.id;
+                                isAssetLink = true;
+                              } else {
+                                // Build collectionItemSlugs map for dynamic page resolution
+                                const collectionItemSlugs: Record<string, string> = {};
+                                collectionItems.forEach(item => {
+                                  const slugField = collectionFields.find(f => f.key === 'slug');
+                                  if (slugField && item.values[slugField.id]) {
+                                    collectionItemSlugs[item.id] = item.values[slugField.id];
+                                  }
+                                });
 
-                              // Resolve the link to get the actual URL
-                              const resolvedUrl = resolveCollectionLinkValue(linkValue, {
-                                pages,
-                                folders,
-                                collectionItemSlugs,
-                                isPreview: false,
-                                locale: undefined,
-                              });
+                                const resolvedUrl = resolveCollectionLinkValue(linkValue, {
+                                  pages,
+                                  folders,
+                                  collectionItemSlugs,
+                                  isPreview: false,
+                                  locale: undefined,
+                                });
 
-                              displayValue = resolvedUrl || '-';
+                                displayValue = resolvedUrl || '-';
+                              }
                             }
                           } catch {
-                            // Invalid JSON, show as-is
                             displayValue = String(value);
                           }
                         }
@@ -1854,8 +1878,14 @@ const CMS = React.memo(function CMS() {
                             className="px-4 py-5 text-muted-foreground max-w-50"
                             onClick={() => handleEditItem(item)}
                           >
-                            <span className="block truncate">
-                              {displayValue}
+                            <span className="flex items-center gap-1.5 truncate">
+                              {isAssetLink && (
+                                <Icon
+                                  name="paperclip"
+                                  className="size-3 shrink-0"
+                                />
+                              )}
+                              <span className="truncate">{displayValue}</span>
                             </span>
                           </td>
                         );
@@ -1910,11 +1940,25 @@ const CMS = React.memo(function CMS() {
                           >
                             {value ? (
                               <Badge variant="secondary" className="font-normal">
-                                <span className="line-clamp-1 truncate max-w-[200px]">{value}</span>
+                                <span className="line-clamp-1 truncate max-w-50">{value}</span>
                               </Badge>
                             ) : (
                               <span className="text-muted-foreground">-</span>
                             )}
+                          </td>
+                        );
+                      }
+
+                      // Count fields - computed numeric value, defaults to 0
+                      if (field.type === 'count') {
+                        const numeric = value != null && value !== '' ? value : '0';
+                        return (
+                          <td
+                            key={field.id}
+                            className="px-4 py-5 text-muted-foreground tabular-nums"
+                            onClick={() => handleEditItem(item)}
+                          >
+                            <span className="line-clamp-1 truncate">{numeric}</span>
                           </td>
                         );
                       }

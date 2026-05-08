@@ -1,3 +1,4 @@
+import { redirect, permanentRedirect } from 'next/navigation';
 import { unstable_cache } from 'next/cache';
 import Link from 'next/link';
 import { fetchHomepage, fetchErrorPage, splitPageData, reassemblePageData, slimPageData } from '@/lib/page-fetcher';
@@ -5,8 +6,11 @@ import type { PageData } from '@/lib/page-fetcher';
 import PageRenderer from '@/components/PageRenderer';
 import PasswordForm from '@/components/PasswordForm';
 import { generatePageMetadata, fetchGlobalPageSettings } from '@/lib/generate-page-metadata';
+import { getSettingByKey } from '@/lib/repositories/settingsRepository';
+import { matchRedirect } from '@/lib/redirect-utils';
 import { parseAuthCookie, getPasswordProtection, fetchFoldersForAuth } from '@/lib/page-auth';
 import { getSiteBaseUrl } from '@/lib/url-utils';
+import type { Redirect as RedirectType } from '@/types';
 import type { Metadata } from 'next';
 
 // Static by default for performance, dynamic only when pagination is requested
@@ -68,6 +72,18 @@ async function fetchCachedGlobalSettings() {
   }
 }
 
+async function fetchCachedRedirects(): Promise<RedirectType[] | null> {
+  try {
+    return await unstable_cache(
+      async () => getSettingByKey('redirects') as Promise<RedirectType[] | null>,
+      ['data-for-redirects'],
+      { tags: ['all-pages'], revalidate: false }
+    )();
+  } catch {
+    return null;
+  }
+}
+
 async function fetchCachedFoldersForAuth() {
   try {
     return await unstable_cache(
@@ -92,6 +108,19 @@ async function fetchCachedErrorPage(errorCode: 401) {
 }
 
 export default async function Home() {
+  // Check for redirects targeting the homepage
+  const redirects = await fetchCachedRedirects();
+  if (redirects && Array.isArray(redirects)) {
+    const matched = matchRedirect('/', redirects);
+    if (matched) {
+      if (matched.type === '302') {
+        redirect(matched.newUrl);
+      } else {
+        permanentRedirect(matched.newUrl);
+      }
+    }
+  }
+
   // Cache-first homepage path; pagination is served through internal dynamic routes.
   const data = await fetchPublishedHomepage();
 
@@ -140,6 +169,7 @@ export default async function Home() {
             layers={errorPageLayers.layers || []}
             components={errorComponents}
             generatedCss={globalSettings.publishedCss || undefined}
+            colorVariablesCss={globalSettings.colorVariablesCss || undefined}
             globalCustomCodeHead={globalSettings.globalCustomCodeHead}
             globalCustomCodeBody={globalSettings.globalCustomCodeBody}
             passwordProtection={{

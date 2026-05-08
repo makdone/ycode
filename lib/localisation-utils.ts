@@ -1,10 +1,29 @@
 import type { Layer, Page, Translation, Locale, LocaleOption, CollectionField } from '@/types';
-import { getLayerIcon, getLayerName } from '@/lib/layer-utils';
-import { createDynamicTextVariable, createDynamicRichTextVariable, createAssetVariable } from '@/lib/variable-utils';
+import { getLayerIcon, getLayerName } from '@/lib/layer-display-utils';
+import {
+  buildLayerTranslationKey,
+  getTranslationByKey,
+  hasValidTranslationValue,
+  getTranslationValue,
+} from '@/lib/locale-runtime';
+import { createDynamicTextVariable, createDynamicRichTextVariable, createDynamicRichTextVariableFromPlainText, createAssetVariable } from '@/lib/variable-utils';
 import { castValue } from '@/lib/collection-utils';
 import { tiptapDocHasFormatting, tiptapDocToCanonicalString, hasVariableNode, hasAnyTextOrVariable } from '@/lib/tiptap-utils';
 import { looksLikeFormattedHtml } from '@/lib/translation-classification';
 import type { IconProps } from '@/components/ui/icon';
+
+// Re-exports for back-compat — runtime translation helpers now live in
+// `lib/locale-runtime.ts` (template-free) so the public renderer can import
+// them without dragging in the builder-only translatable-item extractors.
+export {
+  getTranslatableKey,
+  buildLayerTranslationKey,
+  getTranslationByKey,
+  hasValidTranslationValue,
+  getTranslationValue,
+  getTranslatedAssetId,
+  getTranslatedText,
+} from '@/lib/locale-runtime';
 
 /**
  * Supported locales with their metadata (ISO 639-1 codes)
@@ -670,82 +689,10 @@ export function extractCmsTranslatableItems(
  * @param translation - Translation object or object with source_type, source_id, and content_key
  * @returns Translatable key string
  */
-export function getTranslatableKey(
-  translation: Translation | { source_type: string; source_id: string; content_key: string }
-): string {
-  return `${translation.source_type}:${translation.source_id}:${translation.content_key}`;
-}
-
-/**
- * Build translation key for a layer
- * Format: {sourcePrefix}:{contentKey}
- * @param pageId - Page ID
- * @param contentKey - Content key (e.g., 'layer:layer-id:image_src')
- * @param masterComponentId - Optional component ID if layer is from a component
- * @returns Translation key string
- */
-export function buildLayerTranslationKey(
-  pageId: string,
-  contentKey: string,
-  masterComponentId?: string | undefined
-): string {
-  const sourcePrefix = masterComponentId
-    ? `component:${masterComponentId}`
-    : `page:${pageId}`;
-  return `${sourcePrefix}:${contentKey}`;
-}
-
-/**
- * Get translation from translations map by key
- * @param translations - Translations map (keyed by translatable key)
- * @param translationKey - Full translation key to lookup
- * @returns Translation object or undefined if not found
- */
-export function getTranslationByKey(
-  translations: Record<string, Translation> | null | undefined,
-  translationKey: string
-): Translation | undefined {
-  if (!translations) return undefined;
-  return translations[translationKey];
-}
-
-/**
- * Check if a translation has a valid non-empty text value
- * Only returns true if translation is completed and has non-empty content
- * @param translation - Translation object or undefined
- * @returns True if translation exists, is completed, and has non-empty content_value
- */
-export function hasValidTranslationValue(translation: Translation | undefined): boolean {
-  if (!translation || !translation.is_completed) {
-    return false;
-  }
-  return !!(translation.content_value && translation.content_value.trim() !== '');
-}
-
-/**
- * Get translation value if valid, otherwise return undefined
- * @param translation - Translation object or undefined
- * @param options - { includeIncomplete } when true, skip the `is_completed` gate
- *   so any non-empty saved value is returned. Used by the builder canvas where
- *   the editor wants to see whatever they have saved; production rendering
- *   (page-fetcher / published site) keeps the default behaviour and only
- *   surfaces completed translations.
- * @returns Content value if valid, undefined otherwise
- */
-export function getTranslationValue(
-  translation: Translation | undefined,
-  options?: { includeIncomplete?: boolean }
-): string | undefined {
-  if (!translation) return undefined;
-  if (options?.includeIncomplete) {
-    const value = translation.content_value;
-    return value && value.trim() !== '' ? value : undefined;
-  }
-  if (hasValidTranslationValue(translation)) {
-    return translation.content_value;
-  }
-  return undefined;
-}
+// `getTranslatableKey` and the runtime translation helpers were moved to
+// `lib/locale-runtime.ts` (template-free) so leaf modules like
+// `lib/page-utils.ts` and the public renderer can import them without
+// transitively pulling in the builder-only extractors and the template tree.
 
 /**
  * Extract all layer content as a key-value map
@@ -772,63 +719,8 @@ export function extractLayerContentMap(
   return contentMap;
 }
 
-/**
- * Get translated asset ID if a translation exists
- * @param originalAssetId - Original asset ID from layer variables
- * @param contentKey - Content key for translation lookup (e.g., 'layer:layer-id:image_src')
- * @param translations - Translations map for the current locale (keyed by translatable key)
- * @param pageId - Page ID for building translation keys
- * @param masterComponentId - Optional component ID if layer is from a component
- * @returns Translated asset ID or original if no translation exists
- */
-export function getTranslatedAssetId(
-  originalAssetId: string | undefined,
-  contentKey: string,
-  translations: Record<string, Translation> | null | undefined,
-  pageId: string | undefined,
-  masterComponentId?: string | undefined
-): string | undefined {
-  if (!originalAssetId || !translations || !pageId) return originalAssetId;
-
-  const translationKey = buildLayerTranslationKey(pageId, contentKey, masterComponentId);
-  const translation = getTranslationByKey(translations, translationKey);
-
-  const translatedValue = getTranslationValue(translation);
-  if (translatedValue) {
-    return translatedValue;
-  }
-
-  return originalAssetId;
-}
-
-/**
- * Get translated text if a translation exists
- * @param originalText - Original text value
- * @param contentKey - Content key for translation lookup (e.g., 'layer:layer-id:image_alt')
- * @param translations - Translations map for the current locale (keyed by translatable key)
- * @param pageId - Page ID for building translation keys
- * @param masterComponentId - Optional component ID if layer is from a component
- * @returns Translated text or original if no translation exists
- */
-export function getTranslatedText(
-  originalText: string | undefined,
-  contentKey: string,
-  translations: Record<string, Translation> | null | undefined,
-  pageId: string | undefined,
-  masterComponentId?: string | undefined
-): string | undefined {
-  if (!originalText || !translations || !pageId) return originalText;
-
-  const translationKey = buildLayerTranslationKey(pageId, contentKey, masterComponentId);
-  const translation = getTranslationByKey(translations, translationKey);
-
-  const translatedValue = getTranslationValue(translation);
-  if (translatedValue) {
-    return translatedValue;
-  }
-
-  return originalText;
-}
+// `getTranslatedAssetId` / `getTranslatedText` moved to `lib/locale-runtime.ts`
+// (see note above).
 
 /**
  * Inject translated text and assets into layers recursively.
@@ -837,12 +729,18 @@ export function getTranslatedText(
  *
  * Shared between the server-side page fetcher (preview / published) and the
  * builder canvas so both paths produce identical output.
+ *
+ * @param defaultMasterComponentId - When provided, any layer that doesn't carry
+ *   `_masterComponentId` is treated as belonging to this component. Used by the
+ *   builder canvas while editing a component definition (where the rendered
+ *   layers are the component's raw layers, not a resolved instance), so
+ *   translations stored under `component:{componentId}:...` apply.
  */
 export function injectTranslatedText(
   layers: Layer[],
   pageId: string,
   translations: Record<string, Translation>,
-  options?: { includeIncomplete?: boolean }
+  options?: { includeIncomplete?: boolean; defaultMasterComponentId?: string }
 ): Layer[] {
   const valueOptions = options?.includeIncomplete ? { includeIncomplete: true } : undefined;
   return layers.map(layer => {
@@ -853,7 +751,8 @@ export function injectTranslatedText(
     // child layer IDs are transformed to instance-specific IDs (e.g., "instanceId-childId")
     // but translations are stored with the original component layer IDs.
     const translationLayerId = (layer as any)._originalLayerId || layer.id;
-    const masterComponentId = (layer as any)._masterComponentId as string | undefined;
+    const masterComponentId =
+      ((layer as any)._masterComponentId as string | undefined) ?? options?.defaultMasterComponentId;
 
     // 1. Inject text translation
     const textTranslationKey = buildLayerTranslationKey(pageId, `layer:${translationLayerId}:text`, masterComponentId);
@@ -861,9 +760,17 @@ export function injectTranslatedText(
 
     const textValue = getTranslationValue(textTranslation, valueOptions);
     if (textValue) {
-      // Preserve the original variable type (dynamic_text or dynamic_rich_text)
+      // Preserve the original variable type (dynamic_text or dynamic_rich_text).
+      // Use the translation's stored content_type to decide whether the value is
+      // a JSON-serialized Tiptap doc or plain text — when a rich-text source has
+      // no formatting, it's stored as plain text (see classifyLayerTextForTranslation),
+      // so blindly JSON.parse-ing it would log noisy errors on every render.
       if (layer.variables?.text?.type === 'dynamic_rich_text') {
-        (variableUpdates as any).text = createDynamicRichTextVariable(textValue);
+        if (textTranslation?.content_type === 'richtext') {
+          (variableUpdates as any).text = createDynamicRichTextVariable(textValue);
+        } else {
+          (variableUpdates as any).text = createDynamicRichTextVariableFromPlainText(textValue);
+        }
       } else {
         (variableUpdates as any).text = createDynamicTextVariable(textValue);
       }

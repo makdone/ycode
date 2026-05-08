@@ -520,7 +520,7 @@ export interface DesignColorVariable {
 export type LinkType = 'url' | 'email' | 'phone' | 'asset' | 'page' | 'field';
 
 // Collection link field types (simplified for CMS fields)
-export type CollectionLinkType = 'url' | 'page';
+export type CollectionLinkType = 'url' | 'page' | 'asset';
 
 // Collection Link Field Value (stored as JSON in collection item values)
 // Note: Link behavior (target, rel) is set on the layer, not in the CMS value
@@ -535,6 +535,11 @@ export interface CollectionLinkValue {
     id: string; // Page ID
     collection_item_id?: string | null; // Static collection item ID (no current-page/current-collection)
     anchor_layer_id?: string | null; // Optional layer ID for anchor links
+  };
+
+  // Asset link - link to a downloadable asset
+  asset?: {
+    id: string | null;
   };
 }
 
@@ -966,7 +971,7 @@ export interface ActivityNotification {
 }
 
 // Collection Types (EAV Architecture)
-export type CollectionFieldType = 'text' | 'number' | 'boolean' | 'date' | 'date_only' | 'color' | 'reference' | 'multi_reference' | 'rich_text' | 'image' | 'audio' | 'video' | 'document' | 'link' | 'email' | 'phone' | 'option' | 'status';
+export type CollectionFieldType = 'text' | 'number' | 'boolean' | 'date' | 'date_only' | 'color' | 'reference' | 'multi_reference' | 'rich_text' | 'image' | 'audio' | 'video' | 'document' | 'link' | 'email' | 'phone' | 'option' | 'count' | 'status';
 export type CollectionSortDirection = 'asc' | 'desc' | 'manual';
 
 export interface CollectionSorting {
@@ -1005,6 +1010,8 @@ export interface UpdateCollectionData {
 export interface CollectionFieldData {
   multiple?: boolean; // For asset fields - allow multiple files
   options?: { id: string; name: string }[]; // For option fields - selectable values
+  // For count fields: which child collection / reference field to count back from
+  count?: { collectionId: string; fieldId: string };
 }
 
 export interface CreateCollectionFieldData {
@@ -1136,6 +1143,8 @@ export interface FieldVariable extends VariableType {
     source?: 'page' | 'collection';
     /** ID of the collection layer this field belongs to (for nested collections) */
     collection_layer_id?: string;
+    /** Pre-resolved raw value from injectCollectionData (survives stripSSROnlyData) */
+    _resolvedValue?: string;
   };
 }
 

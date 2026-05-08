@@ -21,7 +21,8 @@ import { useEditorStore } from '@/stores/useEditorStore';
 import { usePagesStore } from '@/stores/usePagesStore';
 import { useClipboardStore } from '@/stores/useClipboardStore';
 import { useComponentsStore } from '@/stores/useComponentsStore';
-import { canHaveChildren, findLayerById, getClassesString, getLayerIcon, getLayerName, regenerateInteractionIds, canCopyLayer, canDeleteLayer, regenerateIdsWithInteractionRemapping, removeLayerById, findParentAndIndex, insertLayerAfter, updateLayerProps, canConvertToCollection, isExcludedFromCollection, getCollectionVariable, resetBindingsOnCollectionSourceChange } from '@/lib/layer-utils';
+import { canHaveChildren, canPasteIntoParent, LINK_NESTING_ERROR, findLayerById, getClassesString, regenerateInteractionIds, canCopyLayer, canDeleteLayer, regenerateIdsWithInteractionRemapping, removeLayerById, findParentAndIndex, insertLayerAfter, updateLayerProps, canConvertToCollection, isExcludedFromCollection, getCollectionVariable, resetBindingsOnCollectionSourceChange } from '@/lib/layer-utils';
+import { getLayerIcon, getLayerName } from '@/lib/layer-display-utils';
 import { cloneDeep } from 'lodash';
 import { toast } from 'sonner';
 import { Icon } from '@/components/ui/icon';
@@ -140,12 +141,22 @@ export default function LayerContextMenu({
     ? getComponentById(layer.componentId)?.name
     : null;
 
-  // Check if the current layer can have children
+  // Check if the current layer can have children and link nesting is valid
   const canPasteInside = useMemo(() => {
     const targetLayer = findLayerById(layers, layerId);
     if (!targetLayer) return false;
-    return canHaveChildren(targetLayer);
-  }, [layers, layerId]);
+    if (!canHaveChildren(targetLayer)) return false;
+    if (clipboardLayer && !canPasteIntoParent(layers, layerId, clipboardLayer)) return false;
+    return true;
+  }, [layers, layerId, clipboardLayer]);
+
+  // Check if paste-after would violate link nesting (parent of target has a link)
+  const canPasteAfterTarget = useMemo(() => {
+    if (!clipboardLayer) return true;
+    const result = findParentAndIndex(layers, layerId);
+    if (!result || !result.parent) return true;
+    return canPasteIntoParent(layers, result.parent.id, clipboardLayer);
+  }, [layers, layerId, clipboardLayer]);
 
   const isBody = layerId === 'body';
 
@@ -234,15 +245,22 @@ export default function LayerContextMenu({
       }
 
       const componentLayers = getComponentLayers();
-      const newLayer = regenerateIdsWithInteractionRemapping(cloneDeep(clipboardLayer));
       const result = findParentAndIndex(componentLayers, layerId);
       if (!result) return;
 
+      if (result.parent && !canPasteIntoParent(componentLayers, result.parent.id, clipboardLayer)) {
+        toast.error(LINK_NESTING_ERROR.title, { description: LINK_NESTING_ERROR.description });
+        return;
+      }
+
+      const newLayer = regenerateIdsWithInteractionRemapping(cloneDeep(clipboardLayer));
       updateComponentAndBroadcast(insertLayerAfter(componentLayers, result.parent, result.index, newLayer));
     } else {
       const pastedLayer = pasteAfter(pageId, layerId, clipboardLayer);
       if (liveLayerUpdates && pastedLayer) {
         liveLayerUpdates.broadcastLayerAdd(pageId, null, 'paste', pastedLayer);
+      } else if (!pastedLayer) {
+        toast.error(LINK_NESTING_ERROR.title, { description: LINK_NESTING_ERROR.description });
       }
     }
   };
@@ -258,6 +276,11 @@ export default function LayerContextMenu({
       }
 
       const componentLayers = getComponentLayers();
+      if (!canPasteIntoParent(componentLayers, layerId, clipboardLayer)) {
+        toast.error(LINK_NESTING_ERROR.title, { description: LINK_NESTING_ERROR.description });
+        return;
+      }
+
       const newLayer = regenerateIdsWithInteractionRemapping(cloneDeep(clipboardLayer));
       updateComponentAndBroadcast(
         updateLayerProps(componentLayers, layerId, { children: [...(findLayerById(componentLayers, layerId)?.children || []), newLayer] })
@@ -266,6 +289,8 @@ export default function LayerContextMenu({
       const pastedLayer = pasteInside(pageId, layerId, clipboardLayer);
       if (liveLayerUpdates && pastedLayer) {
         liveLayerUpdates.broadcastLayerAdd(pageId, layerId, 'paste', pastedLayer);
+      } else if (!pastedLayer) {
+        toast.error(LINK_NESTING_ERROR.title, { description: LINK_NESTING_ERROR.description });
       }
     }
   };
@@ -745,7 +770,7 @@ export default function LayerContextMenu({
             container={canvasPortalContainer}
             style={canvasPortalContainer ? { zoom: 100 / canvasZoom } : undefined}
           >
-            <ContextMenuItem onClick={handlePasteAfter} disabled={!hasClipboard || isBody}>
+            <ContextMenuItem onClick={handlePasteAfter} disabled={!hasClipboard || isBody || !canPasteAfterTarget}>
               Paste after
               <ContextMenuShortcut>⌘V</ContextMenuShortcut>
             </ContextMenuItem>

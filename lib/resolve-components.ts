@@ -613,12 +613,16 @@ export function resolveComponents(
 
         // Merge component content with instance layer, keeping instance ID
         // IMPORTANT: Keep componentId so LayerRenderer knows this is a component instance
+        // _originalLayerId is the component's root template ID — translations on the
+        // component's root wrapper (text/media) are stored under this ID, while the
+        // runtime ID becomes the page-instance ID.
         return {
           ...layer,
           ...overriddenRoot,
           id: layer.id,
           componentId: layer.componentId, // Keep the original componentId
           _masterComponentId: component.id,
+          _originalLayerId: componentContent.id,
           children: resolvedChildren,
           interactions: resolvedInteractions,
         };

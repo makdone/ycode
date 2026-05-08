@@ -342,15 +342,27 @@ export default function Canvas({
   // AFTER serializeLayers so component instance child IDs are already resolved
   // (injectTranslatedText reads _originalLayerId / _masterComponentId to look
   // up component-scoped translations).
+  //
+  // When the user is editing a component definition (editingComponentId set),
+  // the rendered layers are the component's raw layers (not a resolved
+  // instance), so they carry no _masterComponentId. Pass editingComponentId
+  // as the default so translations stored under `component:{id}:...` apply.
   const localizedLayers = useMemo(() => {
-    if (!currentLocale || currentLocale.is_default || !translations || !pageId) {
+    if (!currentLocale || currentLocale.is_default || !translations) {
       return resolvedLayers;
     }
+    // pageId may be empty when editing a component without a page selected.
+    // injectTranslatedText still needs a non-empty value to perform lookups.
+    const lookupPageId = pageId || (editingComponentId ?? '');
+    if (!lookupPageId) return resolvedLayers;
     // Builder canvas mirrors what the editor has saved, including in-progress
     // translations that are not yet marked complete. Production rendering
     // (page-fetcher) keeps the default behaviour and only ships completed ones.
-    return injectTranslatedText(resolvedLayers, pageId, translations, { includeIncomplete: true });
-  }, [resolvedLayers, currentLocale, translations, pageId]);
+    return injectTranslatedText(resolvedLayers, lookupPageId, translations, {
+      includeIncomplete: true,
+      defaultMasterComponentId: editingComponentId ?? undefined,
+    });
+  }, [resolvedLayers, currentLocale, translations, pageId, editingComponentId]);
 
   // Enrich page collection item data with reference field dotted keys
   // so variables like "refFieldId.targetFieldId" resolve on canvas

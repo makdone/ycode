@@ -52,7 +52,8 @@ import ColorPicker from './ColorPicker';
 
 // 3. Utils
 import { cn, generateId } from '@/lib/utils';
-import { getLayerName, getLayerIcon, findLayerById } from '@/lib/layer-utils';
+import { findLayerById } from '@/lib/layer-utils';
+import { getLayerName, getLayerIcon } from '@/lib/layer-display-utils';
 import {
   PROPERTY_OPTIONS,
   TRIGGER_LABELS,

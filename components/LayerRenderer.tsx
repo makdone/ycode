@@ -12,11 +12,11 @@ import type { UseLiveLayerUpdatesReturn } from '@/hooks/use-live-layer-updates';
 import type { UseLiveComponentUpdatesReturn } from '@/hooks/use-live-component-updates';
 import { getLayerHtmlTag, getClassesString, getText, resolveFieldValue, isTextEditable, isTextContentLayer, isRichTextLayer, getCollectionVariable, evaluateVisibility, findAncestorByName, filterDisabledSliderLayers, getLayerCmsFieldBinding, findLayerById } from '@/lib/layer-utils';
 import { getMapIframeProps, DEFAULT_MAP_SETTINGS, resolveMarkerColor } from '@/lib/map-utils';
-import { SWIPER_CLASS_MAP, SWIPER_DATA_ATTR_MAP } from '@/lib/templates/utilities';
+import { SWIPER_CLASS_MAP, SWIPER_DATA_ATTR_MAP } from '@/lib/slider-constants';
 import { useCanvasSlider } from '@/hooks/use-canvas-slider';
 import { resolveFieldFromSources } from '@/lib/cms-variables-utils';
 import { getDynamicTextContent, getImageUrlFromVariable, getVideoUrlFromVariable, getIframeUrlFromVariable, isFieldVariable, isAssetVariable, isStaticTextVariable, isDynamicTextVariable, getAssetId, getStaticTextContent, createAssetVariable, createDynamicTextVariable, resolveDesignStyles } from '@/lib/variable-utils';
-import { getTranslatedAssetId, getTranslatedText, applyCmsTranslations } from '@/lib/localisation-utils';
+import { getTranslatedAssetId, getTranslatedText, applyCmsTranslations, injectTranslatedText } from '@/lib/localisation-utils';
 import { isValidLinkSettings } from '@/lib/link-utils';
 import { DEFAULT_ASSETS, ASSET_CATEGORIES, isAssetOfType } from '@/lib/asset-utils';
 import { parseMultiAssetFieldValue, buildAssetVirtualValues } from '@/lib/multi-asset-utils';
@@ -131,6 +131,13 @@ interface LayerRendererProps {
   componentRootContextMenu?: boolean;
   /** Called when a component instance is double-clicked on the canvas (edit mode only). */
   onComponentEdit?: (componentId: string, instanceLayerId: string) => void;
+  /**
+   * Layer id of the LCP candidate image. When this image renders it gets
+   * `loading="eager"` + `fetchpriority="high"` regardless of any
+   * `attributes.loading` value, so the browser prioritizes the hero image
+   * over the rest of the page. Computed server-side by PageRenderer.
+   */
+  lcpCandidateLayerId?: string | null;
 }
 
 const LayerRenderer: React.FC<LayerRendererProps> = ({
@@ -181,6 +188,7 @@ const LayerRenderer: React.FC<LayerRendererProps> = ({
   serverSettings,
   componentRootContextMenu,
   onComponentEdit,
+  lcpCandidateLayerId,
 }) => {
   const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState<string>('');
@@ -328,6 +336,7 @@ const LayerRenderer: React.FC<LayerRendererProps> = ({
         serverSettings={serverSettings}
         componentRootContextMenu={componentRootContextMenu}
         onComponentEdit={onComponentEdit}
+        lcpCandidateLayerId={lcpCandidateLayerId}
       />
     );
   };
@@ -395,6 +404,7 @@ const LayerItem: React.FC<{
   serverSettings?: Record<string, unknown>;
   componentRootContextMenu?: boolean;
   onComponentEdit?: (componentId: string, instanceLayerId: string) => void;
+  lcpCandidateLayerId?: string | null;
 }> = ({
   layer,
   isEditMode,
@@ -449,6 +459,7 @@ const LayerItem: React.FC<{
   isSlideChild,
   serverSettings,
   componentRootContextMenu,
+  lcpCandidateLayerId,
 }) => {
   // Subscribe to selection state from the store for reactive updates without
   // forcing the entire LayerRenderer tree to re-render when selection changes
@@ -541,10 +552,11 @@ const LayerItem: React.FC<{
     components: componentsProp,
     serverSettings,
     onComponentEdit,
+    lcpCandidateLayerId,
   // selectedLayerId and hoveredLayerId kept in the object for SSR/published mode
   // but excluded from deps so changes don't cascade re-renders in edit mode.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [isEditMode, isPublished, onLayerClick, onLayerUpdate, onLayerHover, pageId, collectionLayerData, collectionLayerItemId, effectiveLayerDataMap, pageCollectionItemId, pageCollectionItemData, pageCollectionSortedItemIds, hiddenLayerInfo, editorHiddenLayerIds, editorBreakpoint, currentLocale, availableLocales, localeSelectorFormat, liveLayerUpdates, liveComponentUpdates, isInsideForm, isInsideLink, parentFormSettings, pages, folders, collectionItemSlugs, isPreview, translations, anchorMap, resolvedAssets, componentsProp, serverSettings, onComponentEdit]);
+  }), [isEditMode, isPublished, onLayerClick, onLayerUpdate, onLayerHover, pageId, collectionLayerData, collectionLayerItemId, effectiveLayerDataMap, pageCollectionItemId, pageCollectionItemData, pageCollectionSortedItemIds, hiddenLayerInfo, editorHiddenLayerIds, editorBreakpoint, currentLocale, availableLocales, localeSelectorFormat, liveLayerUpdates, liveComponentUpdates, isInsideForm, isInsideLink, parentFormSettings, pages, folders, collectionItemSlugs, isPreview, translations, anchorMap, resolvedAssets, componentsProp, serverSettings, onComponentEdit, lcpCandidateLayerId]);
 
   // Callback for rendering embedded components inside rich-text content
   // Clicks on the embedded component's internal layers should select the text layer
@@ -1156,13 +1168,24 @@ const LayerItem: React.FC<{
   const component = (isEditMode && layer.componentId) ? getComponentById(layer.componentId) : null;
 
   // Transform component layers for this instance to ensure unique IDs per instance
-  // This enables animations to target the correct elements when multiple instances exist
+  // This enables animations to target the correct elements when multiple instances exist.
+  //
+  // Also inject translations for the active locale: in edit mode the component
+  // is re-resolved here from the store, bypassing the canvas-level
+  // injectTranslatedText pass on the serialized page layers. Without injecting
+  // here, component content would always render in the default language even
+  // when the user previews a non-default locale on a page.
   const transformedComponentLayers = useMemo(() => {
-    if (isEditMode && component && component.layers && component.layers.length > 0) {
-      return transformLayerIdsForInstance(component.layers, layer.id);
+    if (!isEditMode || !component?.layers?.length) return null;
+    const transformed = transformLayerIdsForInstance(component.layers, layer.id);
+    if (!currentLocale || currentLocale.is_default || !translations) {
+      return transformed;
     }
-    return null;
-  }, [isEditMode, component, layer.id]);
+    return injectTranslatedText(transformed, pageId || component.id, translations, {
+      includeIncomplete: true,
+      defaultMasterComponentId: component.id,
+    });
+  }, [isEditMode, component, layer.id, currentLocale, translations, pageId]);
 
   // Collect hidden layer IDs from the component's transformed layers
   // Needed because Canvas computes editorHiddenLayerIds from serializeLayers (different ID transform)
@@ -2117,21 +2140,38 @@ const LayerItem: React.FC<{
         }
       }
 
-      const imgLoading = layer.attributes?.loading as string | undefined;
+      const isLcpCandidate = !!lcpCandidateLayerId && layer.id === lcpCandidateLayerId;
+      const imgLoadingAttr = layer.attributes?.loading as string | undefined;
+      // LCP candidate always loads eagerly with high fetchpriority — overrides
+      // the image template's default `loading="lazy"`. Other images keep
+      // whatever the user/template set (defaults to lazy).
+      const effectiveLoading = isLcpCandidate ? 'eager' : imgLoadingAttr;
 
       const optimizedSrc = getOptimizedImageUrl(finalImageUrl, 1920, 85);
       const srcset = generateImageSrcset(finalImageUrl);
-      const sizes = getImageSizes();
+
+      // Prefer an explicit `sizes` attribute. Otherwise, if we have an
+      // intrinsic pixel width, emit a media-aware sizes string so browsers
+      // download a more appropriately sized variant on desktop. Falls back
+      // to `100vw` when width is unknown.
+      const explicitSizes = (layer.attributes?.sizes as string | undefined)?.trim();
+      const widthForSizes = imgWidth && /^\d+(\.\d+)?(px)?$/i.test(imgWidth)
+        ? imgWidth.replace(/px$/i, '')
+        : null;
+      const sizes = explicitSizes
+        || (widthForSizes ? `(max-width: 768px) 100vw, ${widthForSizes}px` : getImageSizes());
 
       const imageProps: Record<string, any> = {
         ...elementProps,
         alt: imageAlt,
         src: optimizedSrc,
+        decoding: 'async',
       };
 
       if (imgWidth) imageProps.width = imgWidth;
       if (imgHeight) imageProps.height = imgHeight;
-      if (imgLoading) imageProps.loading = imgLoading;
+      if (effectiveLoading) imageProps.loading = effectiveLoading;
+      if (isLcpCandidate) imageProps.fetchPriority = 'high';
 
       if (srcset) {
         imageProps.srcSet = srcset;
@@ -2779,6 +2819,7 @@ const LayerItem: React.FC<{
               ancestorComponentIds={effectiveAncestorIds}
               isSlideChild={layer.name === 'slides'}
               serverSettings={serverSettings}
+              lcpCandidateLayerId={lcpCandidateLayerId}
             />
           )}
         </Tag>
@@ -3010,6 +3051,7 @@ const LayerItem: React.FC<{
                     isSlideChild={layer.name === 'slides'}
                     serverSettings={serverSettings}
                     onComponentEdit={onComponentEdit}
+                    lcpCandidateLayerId={lcpCandidateLayerId}
                   />
                 )}
               </Tag>
@@ -3080,6 +3122,7 @@ const LayerItem: React.FC<{
               ancestorComponentIds={effectiveAncestorIds}
               serverSettings={serverSettings}
               onComponentEdit={onComponentEdit}
+              lcpCandidateLayerId={lcpCandidateLayerId}
             />
           )}
 
@@ -3156,6 +3199,7 @@ const LayerItem: React.FC<{
             isSlideChild={layer.name === 'slides'}
             serverSettings={serverSettings}
             onComponentEdit={onComponentEdit}
+            lcpCandidateLayerId={lcpCandidateLayerId}
           />
         )}
       </Tag>

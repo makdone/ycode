@@ -35,7 +35,8 @@ import { useAssetsStore } from '@/stores/useAssetsStore';
 import { useEditorStore } from '@/stores/useEditorStore';
 import { getAssetIcon } from '@/lib/asset-utils';
 import { collectionsApi } from '@/lib/api';
-import { getLayerIcon, getLayerName, getCollectionVariable } from '@/lib/layer-utils';
+import { getCollectionVariable, findLayersWithAnchorId } from '@/lib/layer-utils';
+import { getLayerIcon, getLayerName } from '@/lib/layer-display-utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import PageSelector from './PageSelector';
 import { filterFieldGroupsByType, flattenFieldGroups, LINK_FIELD_TYPES, buildReferenceItemOptions, type FieldGroup } from '@/lib/collection-field-utils';
@@ -131,26 +132,6 @@ export default function RichTextLinkSettings({
     return pages.find((p) => p.id === pageId) || null;
   }, [pageId, pages]);
 
-  // Flatten layers and find all layers with attributes.id
-  const findLayersWithId = useCallback((layers: Layer[]): Array<{ layer: Layer; id: string }> => {
-    const result: Array<{ layer: Layer; id: string }> = [];
-    const stack: Layer[] = [...layers];
-
-    while (stack.length > 0) {
-      const currLayer = stack.pop()!;
-
-      if (currLayer.attributes?.id) {
-        result.push({ layer: currLayer, id: currLayer.attributes.id });
-      }
-
-      if (currLayer.children) {
-        stack.push(...currLayer.children);
-      }
-    }
-
-    return result;
-  }, []);
-
   // Get layers for anchor selection based on link type
   const anchorLayers = useMemo(() => {
     let targetPageId: string | null = null;
@@ -161,17 +142,13 @@ export default function RichTextLinkSettings({
       targetPageId = currentPageId;
     }
 
-    if (!targetPageId) {
-      return [];
-    }
+    if (!targetPageId) return [];
 
     const draft = draftsByPageId[targetPageId];
-    if (!draft || !draft.layers) {
-      return [];
-    }
+    if (!draft || !draft.layers) return [];
 
-    return findLayersWithId(draft.layers);
-  }, [linkType, pageId, currentPageId, draftsByPageId, findLayersWithId]);
+    return findLayersWithAnchorId(draft.layers);
+  }, [linkType, pageId, currentPageId, draftsByPageId]);
 
   // Check if selected page is dynamic
   const isDynamicPage = selectedPage?.is_dynamic || false;

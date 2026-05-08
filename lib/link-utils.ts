@@ -279,7 +279,7 @@ export function parseCollectionLinkValue(value: string | CollectionLinkValue | u
 
   // If already an object, validate and return it
   if (typeof value === 'object' && 'type' in value) {
-    if (value.type === 'url' || value.type === 'page') {
+    if (value.type === 'url' || value.type === 'page' || value.type === 'asset') {
       return value as CollectionLinkValue;
     }
     return null;
@@ -292,7 +292,7 @@ export function parseCollectionLinkValue(value: string | CollectionLinkValue | u
       const parsed = JSON.parse(value);
       // Validate it has the expected structure
       if (parsed && typeof parsed === 'object' && 'type' in parsed) {
-        if (parsed.type === 'url' || parsed.type === 'page') {
+        if (parsed.type === 'url' || parsed.type === 'page' || parsed.type === 'asset') {
           return parsed as CollectionLinkValue;
         }
       }
@@ -387,10 +387,30 @@ export function resolveCollectionLinkValue(
   linkValue: CollectionLinkValue,
   context: LinkResolutionContext
 ): string | null {
-  const { pages, folders, collectionItemSlugs, isPreview, locale, translations } = context;
+  const { pages, folders, collectionItemSlugs, isPreview, locale, translations, getAsset, resolvedAssets } = context;
 
   if (linkValue.type === 'url') {
     return linkValue.url || null;
+  }
+
+  if (linkValue.type === 'asset') {
+    if (!linkValue.asset?.id) return null;
+
+    // SSR: use pre-resolved assets
+    if (resolvedAssets?.[linkValue.asset.id]) {
+      const resolved = resolvedAssets[linkValue.asset.id];
+      if (resolved.url.startsWith('<')) return '#no-svg-url';
+      return resolved.url;
+    }
+
+    // Client: use getAsset callback
+    if (getAsset) {
+      const asset = getAsset(linkValue.asset.id);
+      if (asset && !asset.public_url && asset.content) return '#no-svg-url';
+      return asset?.public_url || null;
+    }
+
+    return null;
   }
 
   if (linkValue.type === 'page') {
@@ -540,46 +560,50 @@ export function generateLinkHref(
       }
       break;
     case 'field': {
-      // For field-based links, use source to select correct data (page vs collection)
-      const source = linkSettings.field?.data?.source;
-      const collectionLayerId = linkSettings.field?.data?.collection_layer_id;
-      const { layerDataMap } = context;
+      const fieldId = linkSettings.field?.data?.field_id;
+      if (!fieldId) break;
 
-      let fieldData: Record<string, string> | undefined;
+      // Use pre-resolved value from injectCollectionData when available
+      // (published pages strip _collectionItemValues, but _resolvedValue survives)
+      let rawValue: string | undefined = linkSettings.field?.data?._resolvedValue;
 
-      // If collection_layer_id is specified, use layer-specific data from layerDataMap
-      if (collectionLayerId && layerDataMap?.[collectionLayerId]) {
-        fieldData = layerDataMap[collectionLayerId];
-      } else if (source === 'page') {
-        fieldData = pageCollectionItemData;
-      } else if (source === 'collection') {
-        fieldData = collectionItemData;
-      } else {
-        // No source specified - prefer collection layer data, fall back to page data (backwards compatibility)
-        fieldData = collectionItemData || pageCollectionItemData;
+      if (!rawValue) {
+        // Fall back to runtime field data lookup
+        const source = linkSettings.field?.data?.source;
+        const collectionLayerId = linkSettings.field?.data?.collection_layer_id;
+        const { layerDataMap } = context;
+
+        let fieldData: Record<string, string> | undefined;
+
+        if (collectionLayerId && layerDataMap?.[collectionLayerId]) {
+          fieldData = layerDataMap[collectionLayerId];
+        } else if (source === 'page') {
+          fieldData = pageCollectionItemData;
+        } else if (source === 'collection') {
+          fieldData = collectionItemData;
+        } else {
+          fieldData = collectionItemData || pageCollectionItemData;
+        }
+
+        if (fieldData) {
+          const relationships = linkSettings.field?.data?.relationships || [];
+          if (relationships.length > 0) {
+            const fullPath = [fieldId, ...relationships].join('.');
+            rawValue = fieldData[fullPath];
+          } else {
+            rawValue = fieldData[fieldId];
+          }
+        }
       }
 
-      if (linkSettings.field?.data?.field_id && fieldData) {
-        const fieldId = linkSettings.field.data.field_id;
-        const relationships = linkSettings.field.data.relationships || [];
-
-        let rawValue: string | undefined;
-        if (relationships.length > 0) {
-          const fullPath = [fieldId, ...relationships].join('.');
-          rawValue = fieldData[fullPath];
-        } else {
-          rawValue = fieldData[fieldId];
-        }
-
-        if (rawValue) {
-          const fieldType = linkSettings.field?.data?.field_type;
-          href = resolveFieldLinkValue({
-            fieldId,
-            rawValue,
-            fieldType,
-            context,
-          });
-        }
+      if (rawValue) {
+        const fieldType = linkSettings.field?.data?.field_type;
+        href = resolveFieldLinkValue({
+          fieldId,
+          rawValue,
+          fieldType,
+          context,
+        });
       }
       break;
     }

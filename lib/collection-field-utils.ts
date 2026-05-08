@@ -56,6 +56,7 @@ export const FIELD_TYPES = [
   { value: 'document', label: 'Document', icon: 'file-text', category: 'asset', hasDefault: true },
   { value: 'reference', label: 'Reference', icon: 'database', category: 'relation', hasDefault: false },
   { value: 'multi_reference', label: 'Multi-reference', icon: 'database', category: 'relation', hasDefault: false },
+  { value: 'count', label: 'Count', icon: 'hash', category: 'relation', hasDefault: false },
 ] as const satisfies readonly { value: string; label: string; icon: string; category: FieldTypeCategory; hasDefault: boolean }[];
 
 export type FieldType = (typeof FIELD_TYPES)[number]['value'];
@@ -179,6 +180,7 @@ export function getOperatorsForFieldType(
 ): OperatorOption[] {
   switch (fieldType) {
     case 'number':
+    case 'count':
       return NUMBER_OPERATORS;
     case 'date':
     case 'date_only':
@@ -555,7 +557,7 @@ export const VIDEO_FIELD_TYPES: CollectionFieldType[] = ['video'];
 export const VIDEO_ID_FIELD_TYPES: CollectionFieldType[] = ['text'];
 
 /** Field types that can be bound to simple text content (excludes rich_text and media/asset types) */
-export const SIMPLE_TEXT_FIELD_TYPES: CollectionFieldType[] = ['text', 'number', 'date', 'date_only', 'email', 'phone', 'option'];
+export const SIMPLE_TEXT_FIELD_TYPES: CollectionFieldType[] = ['text', 'number', 'date', 'date_only', 'email', 'phone', 'option', 'count'];
 
 /** Field types that can be bound to rich text content (excludes media/asset types) */
 export const RICH_TEXT_FIELD_TYPES: CollectionFieldType[] = [...SIMPLE_TEXT_FIELD_TYPES, 'rich_text'];

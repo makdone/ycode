@@ -79,7 +79,7 @@ import { useVersionsStore } from '@/stores/useVersionsStore';
 
 // 6. Utils/lib
 import { findHomepage } from '@/lib/page-utils';
-import { findLayerById, getClassesString, removeLayerById, canCopyLayer, canDeleteLayer, regenerateIdsWithInteractionRemapping, findParentAndIndex, insertLayerAfter, updateLayerProps, getLayerIndexes, removeRichTextSublayer } from '@/lib/layer-utils';
+import { findLayerById, getClassesString, removeLayerById, canCopyLayer, canDeleteLayer, regenerateIdsWithInteractionRemapping, findParentAndIndex, insertLayerAfter, updateLayerProps, getLayerIndexes, removeRichTextSublayer, canPasteIntoParent, LINK_NESTING_ERROR } from '@/lib/layer-utils';
 import { cloneDeep } from 'lodash';
 
 // 5. Types
@@ -1480,17 +1480,25 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
                 }
 
                 const layers = getCurrentLayers();
-                const newLayer = regenerateIdsWithInteractionRemapping(cloneDeep(clipboardLayer));
                 const result = findParentAndIndex(layers, selectedLayerId);
                 if (result) {
+                  if (result.parent && !canPasteIntoParent(layers, result.parent.id, clipboardLayer)) {
+                    toast.error(LINK_NESTING_ERROR.title, { description: LINK_NESTING_ERROR.description });
+                    return;
+                  }
+                  const newLayer = regenerateIdsWithInteractionRemapping(cloneDeep(clipboardLayer));
                   updateCurrentLayers(insertLayerAfter(layers, result.parent, result.index, newLayer));
                 }
               } else if (currentPageId) {
                 // If body is selected, paste inside body (not after it)
+                let pastedLayer: Layer | null;
                 if (selectedLayerId === 'body') {
-                  pasteInside(currentPageId, selectedLayerId, clipboardLayer);
+                  pastedLayer = pasteInside(currentPageId, selectedLayerId, clipboardLayer);
                 } else {
-                  pasteAfter(currentPageId, selectedLayerId, clipboardLayer);
+                  pastedLayer = pasteAfter(currentPageId, selectedLayerId, clipboardLayer);
+                }
+                if (!pastedLayer && clipboardLayer) {
+                  toast.error(LINK_NESTING_ERROR.title, { description: LINK_NESTING_ERROR.description });
                 }
               }
             }

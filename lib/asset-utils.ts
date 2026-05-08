@@ -325,17 +325,21 @@ export function getOptimizedImageUrl(
  * Generate responsive image srcset with multiple sizes
  * Creates optimized URLs for different viewport widths
  * @param url - Original image URL
- * @param sizes - Array of widths in pixels (default: [640, 960, 1280, 1920, 2560])
+ * @param sizes - Array of widths in pixels (default: [320, 640, 960, 1280, 1920])
  * @param quality - Image quality 0-100 (default: 85)
  * @returns Srcset string with multiple size options
  *
+ * The 320 entry covers small mobile viewports; 1920 is the cap because
+ * higher resolutions (e.g. 2560) get picked unnecessarily on retina mobile
+ * even though the rendered image is much smaller.
+ *
  * @example
  * generateImageSrcset('https://supabase.co/storage/v1/object/public/assets/image.jpg')
- * // Returns: 'https://.../image.jpg?width=400&quality=85 400w, https://.../image.jpg?width=800&quality=85 800w, ...'
+ * // Returns: 'https://.../image.jpg?width=320&quality=85 320w, https://.../image.jpg?width=640&quality=85 640w, ...'
  */
 export function generateImageSrcset(
   url: string,
-  sizes: number[] = [640, 960, 1280, 1920, 2560],
+  sizes: number[] = [320, 640, 960, 1280, 1920],
   quality: number = 85
 ): string {
   if (!isTransformableUrl(url)) return '';
@@ -365,6 +369,73 @@ export function generateImageSrcset(
 /** Returns the default responsive sizes attribute. */
 export function getImageSizes(): string {
   return '100vw';
+}
+
+/**
+ * Find the layer id that should be treated as the LCP (Largest Contentful Paint)
+ * candidate for a given page tree. Walks the tree in render order and returns the
+ * first `image`-named layer whose effective intrinsic width is unknown or at
+ * least `minWidth` pixels. The threshold filters out logos and icons that
+ * commonly appear in headers but are not the actual hero image.
+ *
+ * Width resolution order:
+ *   1. `layer.attributes.width` (parsed as int)
+ *   2. Asset record width via `resolvedAssets[assetId]`
+ *   3. Unknown — treat as candidate (best effort)
+ *
+ * Returns null if no qualifying image exists in the tree.
+ */
+export function findLcpCandidateLayerId(
+  layers: Layer[],
+  resolvedAssets?: Record<string, { width?: number | null }>,
+  minWidth: number = 200
+): string | null {
+  const parseWidth = (value: unknown): number | null => {
+    if (typeof value === 'number' && !isNaN(value)) return value;
+    if (typeof value !== 'string') return null;
+    const match = value.match(/^\s*(\d+(?:\.\d+)?)/);
+    if (!match) return null;
+    const n = parseFloat(match[1]);
+    return isNaN(n) ? null : n;
+  };
+
+  const visit = (layer: Layer): string | null => {
+    if (layer.name === 'image') {
+      // Try the explicit width attribute first
+      let width = parseWidth(layer.attributes?.width);
+
+      // Fall back to the resolved asset's intrinsic width
+      if (width === null && resolvedAssets) {
+        const assetId = isAssetVariable(layer.variables?.image?.src)
+          ? getAssetId(layer.variables.image.src)
+          : undefined;
+        if (assetId && resolvedAssets[assetId]?.width) {
+          width = resolvedAssets[assetId].width as number;
+        }
+      }
+
+      // Width unknown OR meets the threshold -> candidate
+      if (width === null || width >= minWidth) {
+        return layer.id;
+      }
+    }
+
+    if (layer.children) {
+      for (const child of layer.children) {
+        const found = visit(child);
+        if (found) return found;
+      }
+    }
+
+    return null;
+  };
+
+  for (const layer of layers) {
+    const found = visit(layer);
+    if (found) return found;
+  }
+
+  return null;
 }
 
 // ==========================================
@@ -561,8 +632,17 @@ export function collectLayerAssetIds(
     // Collection item values on resolved collection layers
     if (layer._collectionItemValues) {
       for (const value of Object.values(layer._collectionItemValues)) {
-        if (typeof value === 'string' && isValidUUID(value)) {
-          assetIds.add(value);
+        if (typeof value === 'string') {
+          if (isValidUUID(value)) {
+            assetIds.add(value);
+          } else if (value.startsWith('{')) {
+            try {
+              const parsed = JSON.parse(value);
+              if (parsed?.type === 'asset' && parsed?.asset?.id && isValidUUID(parsed.asset.id)) {
+                assetIds.add(parsed.asset.id);
+              }
+            } catch { /* not valid JSON, skip */ }
+          }
         }
         // Scan rich_text values (Tiptap JSON) for embedded image assets
         if (value && typeof value === 'object' && (value as any).type === 'doc') {

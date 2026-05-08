@@ -6,6 +6,7 @@ import { buildSlugPath, buildDynamicPageUrl, buildLocalizedSlugPath, buildLocali
 import { getItemWithValues, getItemsWithValues, getItemsWithValuesByIds, getItemIdsByFieldValue, getItemsByCollectionId } from '@/lib/repositories/collectionItemRepository';
 import { getValuesByItemIds } from '@/lib/repositories/collectionItemValueRepository';
 import { getFieldsByCollectionId } from '@/lib/repositories/collectionFieldRepository';
+import { enrichItemsWithCountValues } from '@/lib/repositories/collectionCountRepository';
 import type { Page, PageFolder, PageLayers, Component, ComponentVariable, CollectionItemWithValues, CollectionField, Layer, CollectionPaginationMeta, Translation, Locale } from '@/types';
 import { getCollectionVariable, resolveFieldValue, evaluateVisibility, getLayerHtmlTag, filterDisabledSliderLayers } from '@/lib/layer-utils';
 import { isFieldVariable, isAssetVariable, createDynamicTextVariable, createDynamicRichTextVariable, createAssetVariable, getDynamicTextContent, getVariableStringValue, getAssetId, resolveDesignStyles } from '@/lib/variable-utils';
@@ -23,10 +24,10 @@ export interface PaginationContext {
   defaultPage?: number;
 }
 
-import { resolveFieldLinkValue, resolveRefCollectionItemId, generateLinkHref, isLinkAtCollectionBoundary } from '@/lib/link-utils';
+import { resolveFieldLinkValue, resolveRefCollectionItemId, generateLinkHref, isLinkAtCollectionBoundary, parseCollectionLinkValue } from '@/lib/link-utils';
 import type { LinkResolutionContext } from '@/lib/link-utils';
 import { getLinkSettingsFromMark } from '@/lib/tiptap-extensions/rich-text-link';
-import { SWIPER_CLASS_MAP, SWIPER_DATA_ATTR_MAP } from '@/lib/templates/utilities';
+import { SWIPER_CLASS_MAP, SWIPER_DATA_ATTR_MAP } from '@/lib/slider-constants';
 import { resolveInlineVariables, resolveInlineVariablesFromData } from '@/lib/inline-variables';
 import { formatFieldValue } from '@/lib/cms-variables-utils';
 import { buildLayerTranslationKey, getTranslationByKey, hasValidTranslationValue, getTranslationValue, injectTranslatedText, applyCmsTranslations } from '@/lib/localisation-utils';
@@ -1223,6 +1224,24 @@ async function injectCollectionData(
     }
   }
 
+  // Link field binding — pre-resolve raw value so it survives stripSSROnlyData
+  const linkVar = layer.variables?.link;
+  if (linkVar?.type === 'field' && linkVar.field?.data?.field_id) {
+    const resolvedValue = resolveFieldValueWithRelationships(linkVar.field, enhancedValues, layerDataMap);
+    if (resolvedValue) {
+      resolvedVars.link = {
+        ...linkVar,
+        field: {
+          ...linkVar.field,
+          data: {
+            ...linkVar.field.data,
+            _resolvedValue: resolvedValue,
+          },
+        },
+      };
+    }
+  }
+
   // Design color field bindings → inline styles (supports solid + gradient)
   const designBindings = layer.variables?.design as Record<string, DesignColorVariable> | undefined;
   if (designBindings) {
@@ -1899,7 +1918,7 @@ async function buildCollectionCache(
   const ids = Array.from(collectionIds);
 
   // Phase 1: Fetch fields for all collections (needed to discover reference collections)
-  const { data: fieldsData } = await client
+  const { data: nonComputedFieldsData } = await client
     .from('collection_fields')
     .select('*')
     .in('collection_id', ids)
@@ -1908,6 +1927,20 @@ async function buildCollectionCache(
     .eq('is_computed', false)
     .order('order', { ascending: true })
     .limit(5000);
+
+  // Count fields are computed but their config is needed during render so layers
+  // bound to a count value can resolve correctly. Pull them in alongside the
+  // regular fields. Other computed types (e.g. status) are still excluded.
+  const { data: countFieldsData } = await client
+    .from('collection_fields')
+    .select('*')
+    .in('collection_id', ids)
+    .eq('is_published', isPublished)
+    .is('deleted_at', null)
+    .eq('type', 'count')
+    .limit(5000);
+
+  const fieldsData = [...(nonComputedFieldsData || []), ...(countFieldsData || [])];
 
   // Discover referenced collections so we can pre-fetch their data too.
   // When boundFieldIds is supplied, only follow reference fields that are bound.
@@ -2106,6 +2139,14 @@ export async function resolveCollectionLayers(
     mergedBoundFieldPaths.size > 0 ? mergedBoundFieldPaths : undefined,
     scannedCollectionIds.size > 0 ? scannedCollectionIds : undefined,
   );
+
+  // Inject computed count field values into the cached items so layers bound
+  // to a count field render the live number on SSR. Counts always reflect
+  // published child items, regardless of the surrounding `isPublished` mode.
+  for (const [collId, items] of cache.itemsByCollection) {
+    if (items.length === 0) continue;
+    await enrichItemsWithCountValues(items, collId, isPublished);
+  }
 
   const resolveLayer = async (
     layer: Layer,
@@ -3163,10 +3204,20 @@ export async function renderCollectionItemsToHtml(
         const scan = (layer: Layer) => {
           const fieldType = layer.variables?.link?.field?.data?.field_type;
           const fieldId = layer.variables?.link?.field?.data?.field_id;
-          if (fieldType && assetFieldTypes.includes(fieldType) && fieldId) {
-            const assetId = item.values[fieldId];
-            if (assetId && !assetMap[assetId]) {
-              assetIds.push(assetId);
+          if (fieldType && fieldId) {
+            if (assetFieldTypes.includes(fieldType)) {
+              const assetId = item.values[fieldId];
+              if (assetId && !assetMap[assetId]) {
+                assetIds.push(assetId);
+              }
+            } else if (fieldType === 'link') {
+              const rawValue = item.values[fieldId];
+              if (rawValue) {
+                const linkValue = parseCollectionLinkValue(rawValue);
+                if (linkValue?.type === 'asset' && linkValue.asset?.id && !assetMap[linkValue.asset.id]) {
+                  assetIds.push(linkValue.asset.id);
+                }
+              }
             }
           }
           layer.children?.forEach(scan);
@@ -4388,6 +4439,7 @@ function layerToHtml(
               locale,
               translations,
               isPreview: false,
+              getAsset: makeAssetMapResolver(assetMap),
             },
             assetMap,
           });
@@ -4614,6 +4666,7 @@ function layerToHtml(
               locale,
               translations,
               isPreview: false,
+              getAsset: makeAssetMapResolver(assetMap),
             },
             assetMap,
           });

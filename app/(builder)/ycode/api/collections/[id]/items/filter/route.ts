@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from '@/lib/supabase-server';
 import { getItemsByCollectionId } from '@/lib/repositories/collectionItemRepository';
 import { getValuesByItemIds } from '@/lib/repositories/collectionItemValueRepository';
 import { getFieldsByCollectionId } from '@/lib/repositories/collectionFieldRepository';
+import { enrichItemsWithCountValues } from '@/lib/repositories/collectionCountRepository';
 import { getAllPages } from '@/lib/repositories/pageRepository';
 import { getAllPageFolders } from '@/lib/repositories/pageFolderRepository';
 import { renderCollectionItemsToHtml, loadTranslationsForLocale } from '@/lib/page-fetcher';
@@ -597,6 +598,11 @@ export async function POST(
       ...item,
       values: valuesByItem[item.id] || {},
     }));
+
+    // Inject computed count field values so layers bound to a count field
+    // render the live number in the filtered HTML.
+    await enrichItemsWithCountValues(paginatedItems, collectionId, isPublished);
+
     const hasMore = pageOffset + paginatedItems.length < filteredTotal;
 
     const collectionFields = await getFieldsByCollectionId(collectionId, isPublished, { excludeComputed: true });
