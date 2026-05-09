@@ -14,6 +14,7 @@
  */
 
 import React, { useEffect, useCallback, useMemo, useRef, Suspense } from 'react';
+import dynamic from 'next/dynamic';
 import type { Layer, Locale, FormSettings, Component, DesignColorVariable } from '@/types';
 import { getLayerHtmlTag, getClassesString, getText, resolveFieldValue, isTextContentLayer, getCollectionVariable, filterDisabledSliderLayers } from '@/lib/layer-utils';
 import { getMapIframeProps, DEFAULT_MAP_SETTINGS, resolveMarkerColor } from '@/lib/map-utils';
@@ -26,14 +27,27 @@ import { resolveInlineVariablesFromData } from '@/lib/inline-variables';
 import { renderRichText, hasBlockElementsWithInlineVariables, getTextStyleClasses, flattenTiptapParagraphs, type RichTextLinkContext, type RenderComponentBlockFn } from '@/lib/text-format-utils';
 import { combineBgValues, mergeStaticBgVars } from '@/lib/tailwind-class-mapper';
 import { clsx } from 'clsx';
-import PaginatedCollection from '@/components/PaginatedCollection';
-import LoadMoreCollection from '@/components/LoadMoreCollection';
-import FilterableCollection from '@/components/FilterableCollection';
-import LocaleSelector from '@/components/layers/LocaleSelector';
-import { useFilterStore } from '@/stores/useFilterStore';
 import type { HiddenLayerInfo } from '@/lib/animation-utils';
-import AnimationInitializer from '@/components/AnimationInitializer';
 import { transformLayerIdsForInstance } from '@/lib/resolve-components';
+
+/**
+ * Per-layer-type code splitting.
+ *
+ * `LayerRendererPublic` is the single client component that hydrates every
+ * published & preview page, so anything we import statically here ships in
+ * the entry chunk for *every* visitor — even if the page never renders that
+ * layer type. The bindings below load on demand the first time the matching
+ * layer is encountered (~262 KiB of unused JS in PSI before this split).
+ *
+ * Keep `ssr: true` (the default): the wrapped components rely on SSR for
+ * SEO / hydration consistency, we only want to defer the *client* chunk.
+ */
+const PaginatedCollection = dynamic(() => import('@/components/PaginatedCollection'));
+const LoadMoreCollection = dynamic(() => import('@/components/LoadMoreCollection'));
+const FilterableCollection = dynamic(() => import('@/components/FilterableCollection'));
+const LocaleSelector = dynamic(() => import('@/components/layers/LocaleSelector'));
+const AnimationInitializer = dynamic(() => import('@/components/AnimationInitializer'));
+const FilterLayerBehavior = dynamic(() => import('@/components/FilterLayerBehavior'));
 
 /** True if any layer in the tree has at least one interaction configured. */
 function layerTreeHasInteractions(layers: Layer[]): boolean {
@@ -515,185 +529,12 @@ const LayerItem: React.FC<{
     };
   }, [htmlEmbedCode, layer.name]);
 
-  // Filter layer runtime behavior: attach event listeners to child inputs
+  // Filter layer runtime behavior is implemented in FilterLayerBehavior, which
+  // is dynamic-imported and mounted only when this layer is a filter. Keeping
+  // it out of the main bundle drops zustand + ~180 lines of DOM-scanning code
+  // from every page that doesn't use filtering.
   const isFilterLayer = layer.name === 'filter';
   const filterOnChange = layer.settings?.filterOnChange ?? false;
-
-  // Load filter values from URL on initial render and populate input elements
-  React.useEffect(() => {
-    if (!isFilterLayer || !filterLayerRef.current) return;
-
-    const container = filterLayerRef.current;
-    const store = useFilterStore.getState();
-
-    // Build the name map from DOM: inputLayerId → name attribute (or stripped ID)
-    const nameMap: Record<string, string> = {};
-    const reverseMap: Record<string, string> = {};
-    const checkboxGroupNames: Record<string, string> = {};
-    const inputs = container.querySelectorAll('input, select, textarea');
-    inputs.forEach(el => {
-      const inputEl = el as HTMLInputElement;
-      const inputLayerId = inputEl.closest('[data-layer-id]')?.getAttribute('data-layer-id');
-      if (!inputLayerId) return;
-      const nameAttr = inputEl.getAttribute('name');
-      const paramName = nameAttr || (inputLayerId.startsWith('lyr-') ? inputLayerId.slice(4) : inputLayerId);
-      nameMap[inputLayerId] = paramName;
-      reverseMap[paramName] = inputLayerId;
-      if (inputEl.type === 'checkbox' || inputEl.type === 'radio') {
-        const cbMatch = inputLayerId.match(/^(.+)-(?:cb|rb)-.+-input$/);
-        if (cbMatch) {
-          checkboxGroupNames[cbMatch[1]] = (nameAttr || '').replace(/\[\]$/, '') || cbMatch[1];
-        }
-      }
-    });
-    for (const [baseId, baseName] of Object.entries(checkboxGroupNames)) {
-      nameMap[baseId] = baseName;
-      reverseMap[baseName] = baseId;
-    }
-    const inputLayerIds = Object.keys(nameMap);
-    store.setNameMap(nameMap);
-
-    // Populate input elements with values from URL params
-    const url = new URL(window.location.href);
-    url.searchParams.forEach((value, key) => {
-      if (!value) return;
-      const inputLayerId = reverseMap[key]
-        || (key.startsWith('filter_') ? key.slice('filter_'.length) : null);
-      if (!inputLayerId) return;
-      // Find the input: it may be a descendant of a wrapper div OR the element itself
-      let inputEl = container.querySelector(`[data-layer-id="${inputLayerId}"] input, [data-layer-id="${inputLayerId}"] select, [data-layer-id="${inputLayerId}"] textarea`) as HTMLInputElement | null;
-      if (!inputEl) {
-        const directEl = container.querySelector(`input[data-layer-id="${inputLayerId}"], select[data-layer-id="${inputLayerId}"], textarea[data-layer-id="${inputLayerId}"]`) as HTMLInputElement | null;
-        inputEl = directEl;
-      }
-      if (!inputEl) {
-        const cbInputs = container.querySelectorAll(
-          `[data-layer-id^="${inputLayerId}-cb-"] input[type="checkbox"], [data-layer-id^="${inputLayerId}-rb-"] input[type="radio"]`
-        );
-        if (cbInputs.length > 0) {
-          const checkedSet = new Set(value.split(','));
-          cbInputs.forEach(cb => {
-            (cb as HTMLInputElement).checked = checkedSet.has((cb as HTMLInputElement).value);
-          });
-        }
-        return;
-      }
-      if (inputEl.type === 'checkbox') {
-        inputEl.checked = value === inputEl.value || value === 'true';
-      } else {
-        inputEl.value = value;
-      }
-    });
-
-    // Defer loadFromUrl to ensure FilterableCollection has mounted and subscribed
-    setTimeout(() => store.loadFromUrl(), 0);
-
-    return () => {
-      const state = useFilterStore.getState();
-      state.removeNameMapEntries(inputLayerIds);
-    };
-  }, [isFilterLayer]);
-
-  React.useEffect(() => {
-    if (!isFilterLayer || !filterLayerRef.current) return;
-
-    const container = filterLayerRef.current;
-    const filterLayerId = layer.id;
-    const { setFilterValues } = useFilterStore.getState();
-
-    const collectInputValues = () => {
-      const nameMap: Record<string, string> = {};
-      const inputValues: Record<string, string> = {};
-      const checkboxGroups: Record<string, string[]> = {};
-      const inputs = container.querySelectorAll('input, select, textarea');
-      inputs.forEach(el => {
-        const inputEl = el as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
-        const inputLayerId = inputEl.closest('[data-layer-id]')?.getAttribute('data-layer-id');
-        if (!inputLayerId) return;
-        const nameAttr = inputEl.getAttribute('name');
-        if (nameAttr) nameMap[inputLayerId] = nameAttr;
-        if (inputEl.type === 'checkbox' || inputEl.type === 'radio') {
-          const checked = (inputEl as HTMLInputElement).checked;
-          const val = checked ? ((inputEl as HTMLInputElement).value || 'true') : '';
-          inputValues[inputLayerId] = val;
-          const cbMatch = inputLayerId.match(/^(.+)-(?:cb|rb)-.+-input$/);
-          if (cbMatch) {
-            const baseId = cbMatch[1];
-            if (!checkboxGroups[baseId]) checkboxGroups[baseId] = [];
-            if (val) checkboxGroups[baseId].push(val);
-            if (nameAttr) nameMap[baseId] = nameAttr.replace(/\[\]$/, '');
-          }
-        } else {
-          inputValues[inputLayerId] = inputEl.value;
-        }
-      });
-      for (const [baseId, values] of Object.entries(checkboxGroups)) {
-        inputValues[baseId] = values.join(',');
-      }
-      setFilterValues(filterLayerId, inputValues);
-      if (Object.keys(nameMap).length > 0) {
-        useFilterStore.getState().setNameMap(nameMap);
-      }
-    };
-
-    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-    const debouncedCollect = () => {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(collectInputValues, 750);
-    };
-
-    // Button click handler - always triggers collection
-    const handleButtonClick = (e: Event) => {
-      const target = e.target as HTMLElement;
-      if (target.closest('button') || target.tagName === 'BUTTON') {
-        e.preventDefault();
-        collectInputValues();
-      }
-    };
-
-    // Enter key handler - triggers collection from any input
-    const handleKeyDown = (e: Event) => {
-      const ke = e as KeyboardEvent;
-      if (ke.key !== 'Enter') return;
-      const target = ke.target as HTMLElement;
-      if (target.tagName === 'INPUT' || target.tagName === 'SELECT') {
-        ke.preventDefault();
-        collectInputValues();
-      }
-    };
-
-    container.addEventListener('click', handleButtonClick);
-    container.addEventListener('keydown', handleKeyDown);
-
-    // If filterOnChange is enabled, listen for input changes
-    if (filterOnChange) {
-      const handleInputChange = () => debouncedCollect();
-      container.addEventListener('input', handleInputChange);
-      container.addEventListener('change', handleInputChange);
-
-      // Apply initial input values (including defaults) on mount.
-      collectInputValues();
-
-      return () => {
-        container.removeEventListener('click', handleButtonClick);
-        container.removeEventListener('keydown', handleKeyDown);
-        container.removeEventListener('input', handleInputChange);
-        container.removeEventListener('change', handleInputChange);
-        useFilterStore.getState().clearFilter(filterLayerId);
-        if (debounceTimer) clearTimeout(debounceTimer);
-      };
-    }
-
-    // Apply initial input values (including defaults) on mount.
-    collectInputValues();
-
-    return () => {
-      container.removeEventListener('click', handleButtonClick);
-      container.removeEventListener('keydown', handleKeyDown);
-      useFilterStore.getState().clearFilter(filterLayerId);
-      if (debounceTimer) clearTimeout(debounceTimer);
-    };
-  }, [isFilterLayer, filterOnChange, layer.id]);
 
   // Resolve text and image URLs with field binding support
   const textContent = (() => {
@@ -1093,8 +934,8 @@ const LayerItem: React.FC<{
       const finalImageUrl = imageUrl && imageUrl.trim() !== '' ? imageUrl : DEFAULT_ASSETS.IMAGE;
 
       // Resolve intrinsic dimensions: explicit attributes > asset record > URL reverse-lookup
-      let imgWidth = layer.attributes?.width as string | undefined;
-      let imgHeight = layer.attributes?.height as string | undefined;
+      let imgWidth = layer.attributes?.width != null ? String(layer.attributes.width) : undefined;
+      let imgHeight = layer.attributes?.height != null ? String(layer.attributes.height) : undefined;
 
       if (!imgWidth || !imgHeight) {
         const assetId = isAssetVariable(imageVariable) ? getAssetId(imageVariable) : undefined;
@@ -1793,6 +1634,22 @@ const LayerItem: React.FC<{
   };
 
   let content = renderContent();
+
+  // Mount filter behavior alongside the rendered filter container. The
+  // dynamic chunk attaches DOM listeners to `filterLayerRef.current` once
+  // hydrated; ref assignment runs before the dynamic effect, so timing is fine.
+  if (isFilterLayer) {
+    content = (
+      <>
+        {content}
+        <FilterLayerBehavior
+          containerRef={filterLayerRef}
+          filterLayerId={layer.id}
+          filterOnChange={filterOnChange}
+        />
+      </>
+    );
+  }
 
   // Wrap with link if layer has link settings
   // Skip for buttons/divs — they render as <a> directly (see isButtonWithLink, isDivWithLink)

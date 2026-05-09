@@ -11,8 +11,8 @@ import { unstable_cache } from 'next/cache';
 import { resolveCustomCodePlaceholders } from '@/lib/resolve-cms-variables';
 import { renderRootLayoutHeadCode } from '@/lib/parse-head-html';
 import { generateInitialAnimationCSS, type HiddenLayerInfo } from '@/lib/animation-utils';
-import { buildCustomFontsCss, buildFontClassesCss, getGoogleFontLinks } from '@/lib/font-utils';
-import { collectLayerAssetIds, getAssetProxyUrl, findLcpCandidateLayerId } from '@/lib/asset-utils';
+import { buildCustomFontsCss, buildFontClassesCss, fetchGoogleFontsCss, getGoogleFontLinks } from '@/lib/font-utils';
+import { collectLayerAssetIds, findLcpCandidate, generateImageSrcset, getAssetProxyUrl, getImageSizes, getOptimizedImageUrl } from '@/lib/asset-utils';
 import { getAllPages } from '@/lib/repositories/pageRepository';
 import { getAllPageFolders } from '@/lib/repositories/pageFolderRepository';
 import { getMapboxAccessToken, getGoogleMapsEmbedApiKey } from '@/lib/map-server';
@@ -66,6 +66,16 @@ function collectLayerPageLinks(layers: Layer[]): PageLinkRef[] {
     if (layer.variables?.link?.type === 'page') {
       const { collection_item_id, id: page_id } = layer.variables.link.page ?? {};
       if (collection_item_id && page_id) results.push({ collection_item_id, page_id });
+    }
+    // Field-bound links: extract page refs from pre-resolved link values
+    if (layer.variables?.link?.type === 'field') {
+      const resolvedValue = layer.variables.link.field?.data?._resolvedValue;
+      if (resolvedValue) {
+        const linkValue = parseCollectionLinkValue(resolvedValue);
+        if (linkValue?.type === 'page' && linkValue.page?.collection_item_id && linkValue.page?.id) {
+          results.push({ collection_item_id: linkValue.page.collection_item_id, page_id: linkValue.page.id });
+        }
+      }
     }
     const textVar = layer.variables?.text as any;
     if (textVar?.type === 'dynamic_rich_text' && textVar.data?.content) {
@@ -381,6 +391,7 @@ export default async function PageRenderer({
 
   // Load installed fonts and generate CSS + link URLs
   let fontsCss = '';
+  let googleFontsInlinedCss = '';
   let googleFontLinkUrls: string[] = [];
   try {
     const { getAllFonts: getAllDraftFonts } = await import('@/lib/repositories/fontRepository');
@@ -388,6 +399,17 @@ export default async function PageRenderer({
     const fonts = isPreview ? await getAllDraftFonts() : await getPublishedFonts();
     fontsCss = buildCustomFontsCss(fonts) + buildFontClassesCss(fonts);
     googleFontLinkUrls = getGoogleFontLinks(fonts);
+
+    // Inline the resolved @font-face CSS so the browser skips the blocking
+    // round-trip to fonts.googleapis.com and goes straight to gstatic for
+    // the woff2 binaries. Cached per font config across requests.
+    if (googleFontLinkUrls.length > 0) {
+      googleFontsInlinedCss = await unstable_cache(
+        async () => fetchGoogleFontsCss(googleFontLinkUrls),
+        [`google-fonts-css-${googleFontLinkUrls.join('|')}`],
+        { tags: ['all-pages'], revalidate: false },
+      )();
+    }
   } catch (error) {
     console.error('[PageRenderer] Error loading fonts:', error);
   }
@@ -434,12 +456,15 @@ export default async function PageRenderer({
 
   // Fetch all assets and build resolved map
   // Use draft assets (isPublished=false) for preview mode, published assets otherwise
-  let resolvedAssets: Record<string, { url: string; width?: number | null; height?: number | null }> | undefined;
+  // `mimeType` is tracked locally so the LCP heuristic can skip SVG logos;
+  // it is stripped before passing the map across the client boundary.
+  type ResolvedAssetEntry = { url: string; width?: number | null; height?: number | null; mimeType?: string };
+  let resolvedAssetsWithMime: Record<string, ResolvedAssetEntry> | undefined;
   if (layerAssetIds.size > 0) {
     try {
       const { getAssetsByIds } = await import('@/lib/repositories/assetRepository');
       const assetMap = await getAssetsByIds(Array.from(layerAssetIds), !isPreview);
-      resolvedAssets = {};
+      resolvedAssetsWithMime = {};
       for (const [id, asset] of Object.entries(assetMap)) {
         let url: string | undefined;
         const proxyUrl = getAssetProxyUrl(asset);
@@ -451,7 +476,7 @@ export default async function PageRenderer({
           url = asset.content;
         }
         if (url) {
-          resolvedAssets[id] = { url, width: asset.width, height: asset.height };
+          resolvedAssetsWithMime[id] = { url, width: asset.width, height: asset.height, mimeType: asset.mime_type };
         }
       }
     } catch (error) {
@@ -460,9 +485,38 @@ export default async function PageRenderer({
   }
 
   // Identify the LCP candidate so the renderer can flip its loading=lazy
-  // template default to eager + fetchpriority=high. Skips images smaller than
-  // ~200px to avoid prioritizing logos/icons.
-  const lcpCandidateLayerId = findLcpCandidateLayerId(childLayers, resolvedAssets);
+  // template default to eager + fetchpriority=high. Skips logos/icons by
+  // ignoring images inside header/footer/nav and SVG-backed assets.
+  const lcpCandidate = findLcpCandidate(childLayers, resolvedAssetsWithMime);
+  const lcpCandidateLayerId = lcpCandidate?.layerId ?? null;
+
+  // Resolve the candidate's URL so we can emit <link rel="preload" as="image">
+  // in <head>. The browser starts fetching the hero image as soon as it parses
+  // the preload — well before it reaches the <img> tag deeper in the document.
+  // Only handles asset-variable images; CMS field-bound images on dynamic
+  // pages would need item-aware resolution.
+  let lcpPreloadSrc: string | null = null;
+  let lcpPreloadSrcset: string | null = null;
+  let lcpPreloadSizes: string | null = null;
+  if (lcpCandidate?.assetId && resolvedAssetsWithMime) {
+    const candidateAsset = resolvedAssetsWithMime[lcpCandidate.assetId];
+    if (candidateAsset?.url) {
+      lcpPreloadSrc = getOptimizedImageUrl(candidateAsset.url, 1920, 85);
+      lcpPreloadSrcset = generateImageSrcset(candidateAsset.url) || null;
+      lcpPreloadSizes = candidateAsset.width
+        ? `(max-width: 768px) 100vw, ${candidateAsset.width}px`
+        : getImageSizes();
+    }
+  }
+
+  // Strip mimeType before crossing the client component boundary — only
+  // url/width/height are part of the shared `resolvedAssets` contract.
+  const resolvedAssets: Record<string, { url: string; width?: number | null; height?: number | null }> | undefined =
+    resolvedAssetsWithMime
+      ? Object.fromEntries(
+        Object.entries(resolvedAssetsWithMime).map(([id, { url, width, height }]) => [id, { url, width, height }])
+      )
+      : undefined;
 
   return (
     <>
@@ -473,6 +527,30 @@ export default async function PageRenderer({
 
       {/* Page-specific custom head code — React 19 hoists meta/link/style/title to <head> */}
       {pageCustomCodeHead && renderRootLayoutHeadCode(pageCustomCodeHead, 'page-head')}
+
+      {/* Preload the LCP image so the browser starts the fetch from <head>
+          rather than waiting until the parser reaches the <img> tag. Pairs
+          with the eager + fetchpriority=high props the renderer sets on the
+          same layer below. */}
+      {lcpPreloadSrc && (
+        lcpPreloadSrcset ? (
+          <link
+            rel="preload"
+            as="image"
+            href={lcpPreloadSrc}
+            imageSrcSet={lcpPreloadSrcset}
+            imageSizes={lcpPreloadSizes || undefined}
+            fetchPriority="high"
+          />
+        ) : (
+          <link
+            rel="preload"
+            as="image"
+            href={lcpPreloadSrc}
+            fetchPriority="high"
+          />
+        )
+      )}
 
       {/* Strip native browser appearance from form elements so Tailwind classes apply */}
       <style
@@ -496,14 +574,39 @@ export default async function PageRenderer({
         />
       )}
 
-      {/* Load Google Fonts via <link> elements */}
-      {googleFontLinkUrls.map((url, i) => (
-        <link
-          key={`gfont-${i}`}
-          rel="stylesheet"
-          href={url}
+      {/* Warm up the Google Fonts origins. When CSS is inlined below we only
+          need gstatic (the binary origin); when we fall back to <link
+          rel=stylesheet> we also need googleapis. `crossOrigin` on gstatic
+          is required because font files are fetched in CORS mode. */}
+      {googleFontLinkUrls.length > 0 && (
+        <>
+          {!googleFontsInlinedCss && (
+            <link rel="preconnect" href="https://fonts.googleapis.com" />
+          )}
+          <link
+            rel="preconnect" href="https://fonts.gstatic.com"
+            crossOrigin="anonymous"
+          />
+        </>
+      )}
+
+      {/* Inline resolved @font-face rules when available — skips the blocking
+          CSS request to fonts.googleapis.com. Falls back to <link
+          rel=stylesheet> if the publish-time fetch failed. */}
+      {googleFontsInlinedCss ? (
+        <style
+          id="ycode-google-fonts"
+          dangerouslySetInnerHTML={{ __html: googleFontsInlinedCss }}
         />
-      ))}
+      ) : (
+        googleFontLinkUrls.map((url, i) => (
+          <link
+            key={`gfont-${i}`}
+            rel="stylesheet"
+            href={url}
+          />
+        ))
+      )}
 
       {/* Inject custom font @font-face rules and font class CSS */}
       {fontsCss && (

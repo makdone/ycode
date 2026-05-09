@@ -318,6 +318,32 @@ export interface ResolveFieldLinkOptions {
 }
 
 /**
+ * Extract collection_item_ids referenced by link field values that point to
+ * dynamic pages. Used to pre-fetch slugs for cross-collection link resolution.
+ */
+export function extractCrossCollectionItemIds(
+  items: { values: Record<string, string> }[],
+  linkFieldIds: string[],
+  existingSlugs?: Record<string, string>,
+): string[] {
+  const itemIds = new Set<string>();
+  for (const item of items) {
+    for (const fieldId of linkFieldIds) {
+      const rawValue = item.values[fieldId];
+      if (!rawValue) continue;
+      const linkValue = parseCollectionLinkValue(rawValue);
+      if (linkValue?.type === 'page' && linkValue.page?.collection_item_id) {
+        const refItemId = linkValue.page.collection_item_id;
+        if (!existingSlugs?.[refItemId]) {
+          itemIds.add(refItemId);
+        }
+      }
+    }
+  }
+  return Array.from(itemIds);
+}
+
+/**
  * Resolve a raw field value to a link href.
  * Handles CollectionLinkValue JSON, email, phone, virtual asset fields, and regular asset fields.
  */

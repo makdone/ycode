@@ -17,7 +17,8 @@ import React, { useMemo, useState, useCallback, useEffect, useRef, useLayoutEffe
 import { useVirtualizer } from '@tanstack/react-virtual';
 
 // 2. External libraries
-import { DndContext, DragOverlay, DragStartEvent, DragEndEvent, DragOverEvent, PointerSensor, useSensor, useSensors, closestCenter, useDraggable, useDroppable } from '@dnd-kit/core';
+import { DndContext, DragOverlay, DragStartEvent, DragEndEvent, DragOverEvent, DragMoveEvent, PointerSensor, useSensor, useSensors, pointerWithin, closestCenter, useDraggable, useDroppable } from '@dnd-kit/core';
+import type { CollisionDetection } from '@dnd-kit/core';
 import { Layers as LayersIcon, Component as ComponentIcon } from 'lucide-react';
 
 // 4. Internal components
@@ -46,13 +47,41 @@ import { getBreakpointPrefix } from '@/lib/breakpoint-utils';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { CollaboratorBadge } from '@/components/collaboration/CollaboratorBadge';
-import { DropLineIndicator, DropContainerIndicator } from '@/components/DropIndicators';
+import { DropLineIndicator } from '@/components/DropIndicators';
 
 // 7. Types
 import type { Layer, Breakpoint } from '@/types';
 import type { UseLiveLayerUpdatesReturn } from '@/hooks/use-live-layer-updates';
 import type { UseLiveComponentUpdatesReturn } from '@/hooks/use-live-component-updates';
 import Icon from '@/components/ui/icon';
+
+/**
+ * Pointer-first collision detection for vertical tree rows.
+ * Uses pointerWithin to accurately detect which row the cursor is over,
+ * falling back to closestCenter when the pointer is between rows or in gaps.
+ */
+const pointerFirstCollision: CollisionDetection = (args) => {
+  const pointerCollisions = pointerWithin(args);
+  if (pointerCollisions.length > 0) {
+    return pointerCollisions;
+  }
+  return closestCenter(args);
+};
+
+/** Calculate drop position (above/below/inside) based on cursor Y within a row. */
+function calcDropPosition(
+  relativeY: number,
+  isContainer: boolean,
+  hasVisibleChildren: boolean,
+): 'above' | 'below' | 'inside' {
+  if (isContainer) {
+    const edge = hasVisibleChildren ? 0.15 : 0.10;
+    if (relativeY < edge) return 'above';
+    if (relativeY > 1 - edge) return 'below';
+    return 'inside';
+  }
+  return relativeY < 0.5 ? 'above' : 'below';
+}
 
 /**
  * Get display label for a layer - returns text content for text layers, otherwise layer name.
@@ -470,6 +499,16 @@ const LayerRow = React.memo(function LayerRow({
           />
         </div>
 
+        {/* Drop inside indicator - same sizing as background layer */}
+        {isOver && dropPosition === 'inside' && (
+          <div className="absolute inset-0 pointer-events-none z-40">
+            <div
+              className="sticky left-0 h-full rounded-lg border-[1.5px] border-primary animate-in fade-in duration-100"
+              style={{ width: 'var(--tree-available-width)' }}
+            />
+          </div>
+        )}
+
         {/* Content layer - scrolls horizontally */}
         <div className="relative flex w-full min-w-full flex-1">
           {/* Vertical connector lines */}
@@ -498,14 +537,14 @@ const LayerRow = React.memo(function LayerRow({
 
           {/* Drop Indicators */}
           {isOver && dropPosition === 'above' && (
-            <DropLineIndicator position="above" offsetLeft={node.depth * 14 + 8} />
+            <DropLineIndicator position="above" offsetLeft={node.depth > 0 ? (node.depth - 1) * 14 + 17.5 : 4} />
           )}
-          {isOver && dropPosition === 'below' && (
-            <DropLineIndicator position="below" offsetLeft={node.depth * 14 + 8} />
-          )}
-          {isOver && dropPosition === 'inside' && (
-            <DropContainerIndicator />
-          )}
+          {isOver && dropPosition === 'below' && (() => {
+            const effectiveDepth = (hasVisibleChildren && !node.collapsed) ? node.depth + 1 : node.depth;
+            return (
+              <DropLineIndicator position="below" offsetLeft={effectiveDepth > 0 ? (effectiveDepth - 1) * 14 + 17.5 : 4} />
+            );
+          })()}
 
           {/* Main Row */}
           <div
@@ -843,9 +882,24 @@ export default function LayersTree({
   const [overId, setOverId] = useState<string | null>(null);
   const [dropPosition, setDropPosition] = useState<'above' | 'below' | 'inside' | null>(null);
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => collectCollapsedIds(layers));
-  const [cursorOffsetY, setCursorOffsetY] = useState<number>(0);
+  const pointerYRef = useRef<number>(0);
+  const ghostRef = useRef<HTMLDivElement>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [shouldScrollToSelected, setShouldScrollToSelected] = useState(false);
+
+  // Track actual cursor position via native pointer events during drag.
+  // Updates pointerYRef (for drop-position calc) and ghost element position directly via DOM.
+  useEffect(() => {
+    if (!activeId) return;
+    const handlePointerMove = (e: PointerEvent) => {
+      pointerYRef.current = e.clientY;
+      if (ghostRef.current) {
+        ghostRef.current.style.transform = `translate(${e.clientX + 12}px, ${e.clientY}px)`;
+      }
+    };
+    window.addEventListener('pointermove', handlePointerMove);
+    return () => window.removeEventListener('pointermove', handlePointerMove);
+  }, [activeId]);
 
   // Pull multi-select state and breakpoint from editor store
   const { selectedLayerIds: storeSelectedLayerIds, lastSelectedLayerId, toggleSelection, selectRange, editingComponentId, activeBreakpoint, activeSublayerIndex: storeActiveSublayerIndex, activeTextStyleKey: storeActiveTextStyleKey, activeListItemIndex: storeActiveListItemIndex, leftSidebarWidth } = useEditorStore();
@@ -1360,20 +1414,27 @@ export default function LayersTree({
     // Clear hover state when dragging starts
     setHoveredLayerIdFromStore(null);
 
-    // Calculate where user clicked within the element
-    const activeRect = event.active.rect.current.initial;
-    if (activeRect && event.activatorEvent) {
-      const clickY = (event.activatorEvent as PointerEvent).clientY;
-      const elementTop = activeRect.top;
-      const offsetWithinElement = clickY - elementTop;
-      setCursorOffsetY(offsetWithinElement);
-    } else if (activeRect) {
-      setCursorOffsetY(activeRect.height / 2); // Fallback to middle
-    }
-
     setActiveId(draggedId);
     onLayerSelect(draggedId);
   }, [flattenedNodes, onLayerSelect, isProcessing, setHoveredLayerIdFromStore]);
+
+  // Compute drop position for a given node + pointer Y.
+  // Shared by handleDragOver (on target change) and handleDragMove (on every pointer move).
+  const computeDropPosition = useCallback((
+    overRect: { top: number; height: number },
+    overNode: FlattenedItem,
+    activeNodeLayer?: { name: string } | null,
+  ): 'above' | 'below' | 'inside' => {
+    const offsetY = pointerYRef.current - overRect.top;
+    const relativeY = Math.max(0, Math.min(1, offsetY / overRect.height));
+
+    const isDraggingSection = activeNodeLayer?.name === 'section';
+    const isOverBody = overNode.id === 'body' || overNode.layer.name === 'body';
+    const isContainerType = overNode.canHaveChildren && !(isDraggingSection && !isOverBody);
+    const hasVisibleChildren = !!(overNode.layer.children?.length) && !collapsedIds.has(overNode.id);
+
+    return calcDropPosition(relativeY, isContainerType, hasVisibleChildren);
+  }, [collapsedIds]);
 
   // Handle drag over - standard 25/50/25 drop zone detection
   const handleDragOver = useCallback((event: DragOverEvent) => {
@@ -1412,82 +1473,8 @@ export default function LayersTree({
       return;
     }
 
-    // Calculate pointer position relative to the hovered element
-    // Use the current drag event's active position for accurate detection
-    const activeRect = event.active.rect.current;
-    if (!activeRect.initial) {
-      setOverId(overId);
-      setDropPosition(null);
-      return;
-    }
-
-    const pointerY = activeRect.translated?.top ?? activeRect.initial.top;
-    const { top, height } = event.over.rect;
-
-    // Use the ACTUAL cursor offset captured on drag start
-    const actualPointerY = pointerY + cursorOffsetY;
-
-    const offsetY = actualPointerY - top;
-    const relativeY = offsetY / height;
-
-    // Use pre-calculated canHaveChildren from the node
-    const nodeCanHaveChildren = overNode.canHaveChildren;
-
-    // Special case: When dragging Section, disable "inside" drop for all containers except Body
-    // Sections can only be at Body level, never nested inside other containers
+    const position = computeDropPosition(event.over.rect, overNode, activeNode?.layer);
     const isDraggingSection = activeNode && activeNode.layer.name === 'section';
-    const isOverBody = overNode.id === 'body' || overNode.layer.name === 'body';
-    const shouldDisableInsideDrop = isDraggingSection && !isOverBody;
-
-    // Layers that can have children strongly prefer "inside" drops
-    const isContainerType = nodeCanHaveChildren && !shouldDisableInsideDrop;
-
-    // Determine drop position based on pointer position
-    let position: 'above' | 'below' | 'inside';
-
-    // Check if node has visible children
-    const hasVisibleChildren = overNode.layer.children &&
-                                overNode.layer.children.length > 0 &&
-                                !collapsedIds.has(overNode.id);
-
-    // Clearer, more predictable drop zones
-    if (nodeCanHaveChildren && !shouldDisableInsideDrop) {
-      // Elements that can have children use generous inside zone
-      if (isContainerType) {
-        // Containers (Block, Section, Container, Form)
-        if (hasVisibleChildren) {
-          // With visible children: 15% top/bottom, 70% inside
-          if (relativeY < 0.15) {
-            position = 'above';
-          } else if (relativeY > 0.85) {
-            position = 'below';
-          } else {
-            position = 'inside';
-          }
-        } else {
-          // Empty/collapsed containers: 10% top/bottom, 80% inside
-          if (relativeY < 0.10) {
-            position = 'above';
-          } else if (relativeY > 0.90) {
-            position = 'below';
-          } else {
-            position = 'inside';
-          }
-        }
-      } else {
-        // Other elements that can have children (e.g., links with nested content)
-        if (relativeY < 0.20) {
-          position = 'above';
-        } else if (relativeY > 0.80) {
-          position = 'below';
-        } else {
-          position = 'inside';
-        }
-      }
-    } else {
-      // Leaf nodes: simple 50/50 split
-      position = relativeY < 0.5 ? 'above' : 'below';
-    }
 
     // CRITICAL: When dragging a Section, prevent it from being dropped inside ANY container except Body
     // Check if the target node's parent is NOT Body (Section can only be at Body level)
@@ -1515,13 +1502,11 @@ export default function LayersTree({
       const targetParentId = overNode.parentId;
       const currentParentId = activeNode.parentId;
 
-      // Check if hovering over a container that IS the current parent
-      // This would place element outside its own container
+      // Hovering over the container that IS the current parent with above/below
+      // would escape to the grandparent level — force "inside" instead
       if (overNode.id === currentParentId && canHaveChildren(overNode.layer)) {
-        // Dragging over the container that contains the dragged element
-        // "above" or "below" would escape to the grandparent level
-        setOverId(null);
-        setDropPosition(null);
+        setOverId(overId);
+        setDropPosition('inside');
         return;
       }
 
@@ -1585,7 +1570,29 @@ export default function LayersTree({
 
     setOverId(overId);
     setDropPosition(position);
-  }, [flattenedNodes, collapsedIds, activeId, cursorOffsetY, layers]);
+  }, [flattenedNodes, activeId, layers, computeDropPosition]);
+
+  // Recalculate drop position on every pointer movement.
+  // onDragOver only fires when the target element changes, so without this
+  // the position would be locked to wherever the cursor entered the row.
+  const handleDragMove = useCallback((event: DragMoveEvent) => {
+    const currentOverId = event.over?.id as string | null;
+    if (!currentOverId || !event.over?.rect || currentOverId === 'end-drop-zone' || currentOverId === 'body') return;
+
+    const overNode = flattenedNodes.find((n) => n.id === currentOverId);
+    if (!overNode) return;
+
+    const activeNode = activeId ? flattenedNodes.find((n) => n.id === activeId) : null;
+    let position = computeDropPosition(event.over.rect, overNode, activeNode?.layer);
+
+    // When dragging over own parent, force "inside" to prevent escaping
+    if (activeNode && (position === 'above' || position === 'below') &&
+        overNode.id === activeNode.parentId && canHaveChildren(overNode.layer)) {
+      position = 'inside';
+    }
+
+    setDropPosition(position);
+  }, [flattenedNodes, activeId, computeDropPosition]);
 
   // Handle drag end - perform the actual reorder
   const handleDragEnd = useCallback(
@@ -1596,7 +1603,6 @@ export default function LayersTree({
         setActiveId(null);
         setOverId(null);
         setDropPosition(null);
-        setCursorOffsetY(0);
         return;
       }
 
@@ -1611,7 +1617,6 @@ export default function LayersTree({
           setActiveId(null);
           setOverId(null);
           setDropPosition(null);
-          setCursorOffsetY(0);
           setIsProcessing(false);
           return;
         }
@@ -1640,7 +1645,7 @@ export default function LayersTree({
         setActiveId(null);
         setOverId(null);
         setDropPosition(null);
-        setCursorOffsetY(0);
+
         setTimeout(() => setIsProcessing(false), 0);
         return;
       }
@@ -1651,7 +1656,7 @@ export default function LayersTree({
         setActiveId(null);
         setOverId(null);
         setDropPosition(null);
-        setCursorOffsetY(0);
+
         setIsProcessing(false);
         return;
       }
@@ -1661,7 +1666,7 @@ export default function LayersTree({
         setActiveId(null);
         setOverId(null);
         setDropPosition(null);
-        setCursorOffsetY(0);
+
         setIsProcessing(false);
         return;
       }
@@ -1680,7 +1685,7 @@ export default function LayersTree({
         setActiveId(null);
         setOverId(null);
         setDropPosition(null);
-        setCursorOffsetY(0);
+
         setIsProcessing(false);
         return;
       }
@@ -1700,7 +1705,7 @@ export default function LayersTree({
           setActiveId(null);
           setOverId(null);
           setDropPosition(null);
-          setCursorOffsetY(0);
+  
           setIsProcessing(false);
           return;
         }
@@ -1715,7 +1720,7 @@ export default function LayersTree({
             setActiveId(null);
             setOverId(null);
             setDropPosition(null);
-            setCursorOffsetY(0);
+    
             setIsProcessing(false);
             return;
           }
@@ -1727,7 +1732,7 @@ export default function LayersTree({
           setActiveId(null);
           setOverId(null);
           setDropPosition(null);
-          setCursorOffsetY(0);
+  
           setIsProcessing(false);
           return;
         }
@@ -1737,7 +1742,7 @@ export default function LayersTree({
           setActiveId(null);
           setOverId(null);
           setDropPosition(null);
-          setCursorOffsetY(0);
+  
           setIsProcessing(false);
           return;
         }
@@ -1747,7 +1752,7 @@ export default function LayersTree({
           setActiveId(null);
           setOverId(null);
           setDropPosition(null);
-          setCursorOffsetY(0);
+  
           setIsProcessing(false);
           return;
         }
@@ -1771,7 +1776,7 @@ export default function LayersTree({
           setActiveId(null);
           setOverId(null);
           setDropPosition(null);
-          setCursorOffsetY(0);
+  
           setIsProcessing(false);
           return;
         }
@@ -1786,7 +1791,7 @@ export default function LayersTree({
             setActiveId(null);
             setOverId(null);
             setDropPosition(null);
-            setCursorOffsetY(0);
+    
             setIsProcessing(false);
             return;
           }
@@ -1821,7 +1826,6 @@ export default function LayersTree({
       setActiveId(null);
       setOverId(null);
       setDropPosition(null);
-      setCursorOffsetY(0);
 
       // Use setTimeout to reset processing flag after state updates complete
       setTimeout(() => setIsProcessing(false), 0);
@@ -1834,7 +1838,6 @@ export default function LayersTree({
     setActiveId(null);
     setOverId(null);
     setDropPosition(null);
-    setCursorOffsetY(0);
   }, []);
 
   // Handle expand/collapse toggle
@@ -1993,9 +1996,10 @@ export default function LayersTree({
   return (
     <DndContext
       sensors={sensors}
-      collisionDetection={closestCenter}
+      collisionDetection={pointerFirstCollision}
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
+      onDragMove={handleDragMove}
       onDragEnd={handleDragEnd}
       onDragCancel={handleDragCancel}
     >
@@ -2055,46 +2059,48 @@ export default function LayersTree({
         </div>
       </div>
 
-      {/* Drag Overlay - custom ghost element with 40px offset */}
-      <DragOverlay dropAnimation={null}>
-        {activeNode ? (
-          <div
-            className="flex items-center text-white text-xs h-8 rounded-lg"
-            style={{ transform: 'translateX(40px)' }}
-          >
-            {(() => {
-              const draggedComponent = activeNode.layer.componentId ? getComponentById(activeNode.layer.componentId) : null;
-              const layerIcon = getLayerIcon(activeNode.layer, 'box', activeBreakpoint);
-              const isActiveNodeSelected = selectedLayerIds.includes(activeNode.id) || selectedLayerId === activeNode.id;
+      {/* Empty DragOverlay to suppress dnd-kit default ghost */}
+      <DragOverlay dropAnimation={null}>{null}</DragOverlay>
 
-              return (
-                <>
-                  {draggedComponent ? (
-                    <ComponentIcon className="w-3 h-3 shrink-0 mx-1.5 opacity-75" />
-                  ) : layerIcon ? (
-                    <Icon
-                      name={layerIcon}
-                      className={cn(
-                        'size-3 mx-1.5 opacity-50 shrink-0',
-                        isActiveNodeSelected && 'opacity-100',
-                      )}
-                    />
-                  ) : (
-                    <div className="size-3 bg-white/10 rounded mx-1.5 shrink-0" />
-                  )}
-                </>
-              );
-            })()}
-            <span className="pointer-events-none">
-              {getLayerDisplayLabel(activeNode.layer, {
-                component_name: activeNode.layer.componentId ? getComponentById(activeNode.layer.componentId)?.name : null,
-                collection_name: activeNodeCollectionContext.collection_name,
-                source_field_name: activeNodeCollectionContext.source_field_name,
-              }, activeBreakpoint)}
-            </span>
-          </div>
-        ) : null}
-      </DragOverlay>
+      {/* Custom drag ghost positioned at actual cursor via DOM ref */}
+      {activeNode && (
+        <div
+          ref={ghostRef}
+          className="fixed top-0 left-0 z-50 flex items-center text-white text-xs h-8 rounded-lg pointer-events-none"
+          style={{ transform: 'translate(-9999px, -9999px)' }}
+        >
+          {(() => {
+            const draggedComponent = activeNode.layer.componentId ? getComponentById(activeNode.layer.componentId) : null;
+            const layerIcon = getLayerIcon(activeNode.layer, 'box', activeBreakpoint);
+            const isActiveNodeSelected = selectedLayerIds.includes(activeNode.id) || selectedLayerId === activeNode.id;
+
+            return (
+              <>
+                {draggedComponent ? (
+                  <ComponentIcon className="w-3 h-3 shrink-0 mx-1.5 opacity-75" />
+                ) : layerIcon ? (
+                  <Icon
+                    name={layerIcon}
+                    className={cn(
+                      'size-3 mx-1.5 opacity-50 shrink-0',
+                      isActiveNodeSelected && 'opacity-100',
+                    )}
+                  />
+                ) : (
+                  <div className="size-3 bg-white/10 rounded mx-1.5 shrink-0" />
+                )}
+              </>
+            );
+          })()}
+          <span>
+            {getLayerDisplayLabel(activeNode.layer, {
+              component_name: activeNode.layer.componentId ? getComponentById(activeNode.layer.componentId)?.name : null,
+              collection_name: activeNodeCollectionContext.collection_name,
+              source_field_name: activeNodeCollectionContext.source_field_name,
+            }, activeBreakpoint)}
+          </span>
+        </div>
+      )}
       <div className="min-h-10" />
     </DndContext>
   );

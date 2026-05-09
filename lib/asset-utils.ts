@@ -325,21 +325,34 @@ export function getOptimizedImageUrl(
  * Generate responsive image srcset with multiple sizes
  * Creates optimized URLs for different viewport widths
  * @param url - Original image URL
- * @param sizes - Array of widths in pixels (default: [320, 640, 960, 1280, 1920])
+ * @param sizes - Array of widths in pixels (default: see below)
  * @param quality - Image quality 0-100 (default: 85)
  * @returns Srcset string with multiple size options
  *
- * The 320 entry covers small mobile viewports; 1920 is the cap because
- * higher resolutions (e.g. 2560) get picked unnecessarily on retina mobile
- * even though the rendered image is much smaller.
+ * Default ladder: 320, 480, 640, 750, 828, 1080, 1280, 1536, 1920.
+ * Picked to land within ~10% of the natural rendered size for every common
+ * viewport × DPR combination — coarser ladders (e.g. 640 → 960 → 1280) made
+ * mid-range phones download the next-bigger variant and wasted 20–30% of
+ * the byte budget on hero images.
+ *
+ *   320 — tiny viewports / small thumbnails
+ *   480 — older phones at 1x
+ *   640 — medium phones, tablet portrait at 1x
+ *   750 — iPhone SE/8 at 2x DPR (375 × 2)
+ *   828 — iPhone XR/11 at 2x DPR (414 × 2)
+ *  1080 — Pixel / Galaxy at 3x DPR (360 × 3)
+ *  1280 — iPhone 12–15 at ~3x DPR (390–430 × 3)
+ *  1536 — tablets at 2x DPR
+ *  1920 — full-width desktop hero (cap — bigger variants get picked on
+ *         retina laptops even when the rendered size is much smaller).
  *
  * @example
  * generateImageSrcset('https://supabase.co/storage/v1/object/public/assets/image.jpg')
- * // Returns: 'https://.../image.jpg?width=320&quality=85 320w, https://.../image.jpg?width=640&quality=85 640w, ...'
+ * // Returns: 'https://.../image.jpg?width=320&quality=85 320w, https://.../image.jpg?width=480&quality=85 480w, ...'
  */
 export function generateImageSrcset(
   url: string,
-  sizes: number[] = [320, 640, 960, 1280, 1920],
+  sizes: number[] = [320, 480, 640, 750, 828, 1080, 1280, 1536, 1920],
   quality: number = 85
 ): string {
   if (!isTransformableUrl(url)) return '';
@@ -371,12 +384,60 @@ export function getImageSizes(): string {
   return '100vw';
 }
 
+// Semantic layer names whose descendant images are almost never the LCP
+// (logos, menus, footer marks). Tracked via ancestor walk in
+// `findLcpCandidateLayerId` so we don't accidentally prioritize a header
+// logo over the actual hero image.
+const NON_LCP_ANCESTOR_NAMES = new Set(['header', 'footer', 'nav']);
+
 /**
- * Find the layer id that should be treated as the LCP (Largest Contentful Paint)
- * candidate for a given page tree. Walks the tree in render order and returns the
- * first `image`-named layer whose effective intrinsic width is unknown or at
- * least `minWidth` pixels. The threshold filters out logos and icons that
- * commonly appear in headers but are not the actual hero image.
+ * Heuristic: is this resolved asset a vector graphic (SVG)?
+ * SVGs are used overwhelmingly for logos / icons and should never be picked
+ * as the LCP candidate. We trust `mimeType` when present and fall back to a
+ * URL extension sniff for older callers that only pass `{ url, width }`.
+ */
+function isSvgAsset(asset: { mimeType?: string | null; url?: string | null } | undefined): boolean {
+  if (!asset) return false;
+  if (asset.mimeType && asset.mimeType.toLowerCase().includes('svg')) return true;
+  if (asset.url) return isSvgUrl(asset.url);
+  return false;
+}
+
+/** Cheap extension sniff: does the URL path end in `.svg`? */
+function isSvgUrl(url: string): boolean {
+  const path = url.split('?')[0].split('#')[0].toLowerCase();
+  return path.endsWith('.svg');
+}
+
+/**
+ * Best-effort URL extraction from an image layer's `src` variable when the
+ * variable is a raw URL string (`dynamic_text` / `static_text`) rather than
+ * an `AssetVariable`. Lets the LCP heuristic skip SVG logos that the user
+ * pasted as a URL instead of selecting from the asset library.
+ *
+ * Returns undefined for variable shapes we can't resolve cheaply (e.g. CMS
+ * field bindings) — those fall through to the existing checks.
+ */
+function getInlineImageUrl(srcVar: unknown): string | undefined {
+  if (!srcVar || typeof srcVar !== 'object') return undefined;
+  const v = srcVar as { type?: string; data?: { content?: unknown } };
+  if (v.type !== 'dynamic_text' && v.type !== 'static_text') return undefined;
+  const content = v.data?.content;
+  return typeof content === 'string' ? content : undefined;
+}
+
+export interface LcpCandidate {
+  layerId: string;
+  /** Asset id of the candidate image, when backed by a static asset variable. */
+  assetId?: string;
+}
+
+/**
+ * Find the LCP (Largest Contentful Paint) candidate for a given page tree.
+ * Walks the tree in render order and returns the first `image`-named layer that:
+ *   - is NOT a descendant of a `header`, `footer`, or `nav` layer (logos),
+ *   - is NOT backed by an SVG asset (vector logos / icons), and
+ *   - has an effective intrinsic width unknown or at least `minWidth` pixels.
  *
  * Width resolution order:
  *   1. `layer.attributes.width` (parsed as int)
@@ -385,11 +446,11 @@ export function getImageSizes(): string {
  *
  * Returns null if no qualifying image exists in the tree.
  */
-export function findLcpCandidateLayerId(
+export function findLcpCandidate(
   layers: Layer[],
-  resolvedAssets?: Record<string, { width?: number | null }>,
+  resolvedAssets?: Record<string, { width?: number | null; mimeType?: string | null; url?: string | null }>,
   minWidth: number = 200
-): string | null {
+): LcpCandidate | null {
   const parseWidth = (value: unknown): number | null => {
     if (typeof value === 'number' && !isNaN(value)) return value;
     if (typeof value !== 'string') return null;
@@ -399,30 +460,38 @@ export function findLcpCandidateLayerId(
     return isNaN(n) ? null : n;
   };
 
-  const visit = (layer: Layer): string | null => {
-    if (layer.name === 'image') {
-      // Try the explicit width attribute first
-      let width = parseWidth(layer.attributes?.width);
+  const visit = (layer: Layer, inNonLcpAncestor: boolean): LcpCandidate | null => {
+    const inNonLcp = inNonLcpAncestor || NON_LCP_ANCESTOR_NAMES.has(layer.name);
 
-      // Fall back to the resolved asset's intrinsic width
-      if (width === null && resolvedAssets) {
-        const assetId = isAssetVariable(layer.variables?.image?.src)
-          ? getAssetId(layer.variables.image.src)
-          : undefined;
-        if (assetId && resolvedAssets[assetId]?.width) {
-          width = resolvedAssets[assetId].width as number;
+    if (layer.name === 'image' && !inNonLcp) {
+      const srcVar = layer.variables?.image?.src;
+      const assetId = isAssetVariable(srcVar) ? getAssetId(srcVar) : undefined;
+      const asset = assetId ? resolvedAssets?.[assetId] : undefined;
+
+      // Some pages store the image URL directly as a `dynamic_text` /
+      // `static_text` variable (e.g. pasted logo URL) rather than an
+      // `AssetVariable`. Sniff the inline URL so SVG logos in that shape
+      // are still skipped.
+      const inlineUrl = !assetId ? getInlineImageUrl(srcVar) : undefined;
+
+      // SVGs are vector logos / icons in practice — never the hero image.
+      const isSvg = isSvgAsset(asset) || (inlineUrl ? isSvgUrl(inlineUrl) : false);
+
+      if (!isSvg) {
+        let width = parseWidth(layer.attributes?.width);
+        if (width === null && asset?.width) {
+          width = asset.width as number;
         }
-      }
 
-      // Width unknown OR meets the threshold -> candidate
-      if (width === null || width >= minWidth) {
-        return layer.id;
+        if (width === null || width >= minWidth) {
+          return { layerId: layer.id, assetId: assetId || undefined };
+        }
       }
     }
 
     if (layer.children) {
       for (const child of layer.children) {
-        const found = visit(child);
+        const found = visit(child, inNonLcp);
         if (found) return found;
       }
     }
@@ -431,11 +500,20 @@ export function findLcpCandidateLayerId(
   };
 
   for (const layer of layers) {
-    const found = visit(layer);
+    const found = visit(layer, false);
     if (found) return found;
   }
 
   return null;
+}
+
+/** @deprecated Use {@link findLcpCandidate}. Kept for callers that only need the id. */
+export function findLcpCandidateLayerId(
+  layers: Layer[],
+  resolvedAssets?: Record<string, { width?: number | null; mimeType?: string | null; url?: string | null }>,
+  minWidth: number = 200
+): string | null {
+  return findLcpCandidate(layers, resolvedAssets, minWidth)?.layerId ?? null;
 }
 
 // ==========================================

@@ -2119,8 +2119,8 @@ const LayerItem: React.FC<{
       const finalImageUrl = imageUrl && imageUrl.trim() !== '' ? imageUrl : DEFAULT_ASSETS.IMAGE;
 
       // Resolve intrinsic dimensions: explicit attributes > asset record > URL reverse-lookup
-      let imgWidth = layer.attributes?.width as string | undefined;
-      let imgHeight = layer.attributes?.height as string | undefined;
+      let imgWidth = layer.attributes?.width != null ? String(layer.attributes.width) : undefined;
+      let imgHeight = layer.attributes?.height != null ? String(layer.attributes.height) : undefined;
 
       if (!imgWidth || !imgHeight) {
         const assetId = isAssetVariable(imageVariable) ? getAssetId(imageVariable) : undefined;

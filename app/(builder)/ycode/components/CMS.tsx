@@ -462,6 +462,23 @@ const CMS = React.memo(function CMS() {
   );
   const totalItems = selectedCollectionId ? (itemsTotalCount[selectedCollectionId] || 0) : 0;
 
+  // Build slug map across ALL loaded collections for cross-collection link resolution
+  const allCollectionItemSlugs = useMemo(() => {
+    const slugs: Record<string, string> = {};
+    for (const collectionId of Object.keys(items)) {
+      const colFields = fields[collectionId] || [];
+      const slugField = colFields.find(f => f.key === 'slug');
+      if (!slugField) continue;
+      for (const item of items[collectionId]) {
+        const slugValue = item.values[slugField.id];
+        if (slugValue) {
+          slugs[item.id] = slugValue;
+        }
+      }
+    }
+    return slugs;
+  }, [items, fields]);
+
   // Drag and drop sensors
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -1848,19 +1865,10 @@ const CMS = React.memo(function CMS() {
                                 displayValue = asset?.filename || linkValue.asset.id;
                                 isAssetLink = true;
                               } else {
-                                // Build collectionItemSlugs map for dynamic page resolution
-                                const collectionItemSlugs: Record<string, string> = {};
-                                collectionItems.forEach(item => {
-                                  const slugField = collectionFields.find(f => f.key === 'slug');
-                                  if (slugField && item.values[slugField.id]) {
-                                    collectionItemSlugs[item.id] = item.values[slugField.id];
-                                  }
-                                });
-
                                 const resolvedUrl = resolveCollectionLinkValue(linkValue, {
                                   pages,
                                   folders,
-                                  collectionItemSlugs,
+                                  collectionItemSlugs: allCollectionItemSlugs,
                                   isPreview: false,
                                   locale: undefined,
                                 });

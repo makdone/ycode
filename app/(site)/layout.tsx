@@ -1,4 +1,4 @@
-import '@/app/globals.css';
+import '@/app/site.css';
 import type { Metadata } from 'next';
 import RootLayoutShell, { defaultMetadata } from '@/components/RootLayoutShell';
 import { fetchGlobalPageSettings } from '@/lib/generate-page-metadata';

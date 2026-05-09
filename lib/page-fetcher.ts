@@ -24,7 +24,7 @@ export interface PaginationContext {
   defaultPage?: number;
 }
 
-import { resolveFieldLinkValue, resolveRefCollectionItemId, generateLinkHref, isLinkAtCollectionBoundary, parseCollectionLinkValue } from '@/lib/link-utils';
+import { resolveFieldLinkValue, resolveRefCollectionItemId, generateLinkHref, isLinkAtCollectionBoundary, parseCollectionLinkValue, extractCrossCollectionItemIds } from '@/lib/link-utils';
 import type { LinkResolutionContext } from '@/lib/link-utils';
 import { getLinkSettingsFromMark } from '@/lib/tiptap-extensions/rich-text-link';
 import { SWIPER_CLASS_MAP, SWIPER_DATA_ATTR_MAP } from '@/lib/slider-constants';
@@ -3114,6 +3114,42 @@ export function generatePaginationWrapper(
 }
 
 /**
+ * Fetch slugs for collection items referenced by link field values in other collections.
+ * Enriches the provided slugs map in-place.
+ */
+async function enrichSlugsFromLinkFields(
+  items: CollectionItemWithValues[],
+  collectionFields: CollectionField[],
+  existingSlugs: Record<string, string>,
+  isPublished: boolean,
+): Promise<void> {
+  const linkFieldIds = collectionFields.filter(f => f.type === 'link').map(f => f.id);
+  if (linkFieldIds.length === 0) return;
+
+  const missingItemIds = extractCrossCollectionItemIds(items, linkFieldIds, existingSlugs);
+  if (missingItemIds.length === 0) return;
+
+  const refItems = await getItemsWithValuesByIds(missingItemIds, isPublished);
+  const refCollectionIds = new Set(Object.values(refItems).map(i => i.collection_id));
+
+  const fieldsByCollection = new Map<string, CollectionField[]>();
+  await Promise.all(
+    Array.from(refCollectionIds).map(async (collId) => {
+      const fields = await getFieldsByCollectionId(collId, isPublished);
+      fieldsByCollection.set(collId, fields);
+    })
+  );
+
+  for (const refItem of Object.values(refItems)) {
+    const fields = fieldsByCollection.get(refItem.collection_id);
+    const slugField = fields?.find(f => f.key === 'slug');
+    if (slugField && refItem.values[slugField.id]) {
+      existingSlugs[refItem.id] = refItem.values[slugField.id];
+    }
+  }
+}
+
+/**
  * Render collection items to HTML string for "Load More" pagination
  * Takes the original layer template and renders each item with injected data
  * @param items - Collection items with values
@@ -3147,6 +3183,10 @@ export async function renderCollectionItemsToHtml(
     ensureMapTokens(),
   ]);
   const htmlTimezone = (timezoneRaw as string | null) || 'UTC';
+
+  // Enrich slugs with cross-collection link field references
+  const enrichedSlugs = { ...collectionItemSlugs };
+  await enrichSlugsFromLinkFields(items, collectionFields, enrichedSlugs, isPublished);
 
   // Pre-process: translations + date formatting (pure computation)
   const preprocessed = items.map(item => {
@@ -3247,7 +3287,7 @@ export async function renderCollectionItemsToHtml(
       // Convert layers to HTML (handles fragments from resolved collections)
       const itemHtml = resolvedLayers
         .map((layer) =>
-          layerToHtml(layer, item.id, pages, folders, collectionItemSlugs, locale, translations, anchorMap, item.values, undefined, assetMap, undefined, undefined)
+          layerToHtml(layer, item.id, pages, folders, enrichedSlugs, locale, translations, anchorMap, item.values, undefined, assetMap, undefined, undefined)
         )
         .join('');
 
