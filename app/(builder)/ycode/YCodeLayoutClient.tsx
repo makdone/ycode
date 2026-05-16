@@ -5,6 +5,12 @@ import { usePathname } from 'next/navigation';
 import YCodeBuilder from './components/YCodeBuilderMain';
 import { useEditorUrl } from '@/hooks/use-editor-url';
 import { useAuthStore } from '@/stores/useAuthStore';
+import {
+  startLockExpirationCheck,
+  stopLockExpirationCheck,
+  startNotificationCleanup,
+  stopNotificationCleanup,
+} from '@/stores/useCollaborationPresenceStore';
 
 /**
  * YCode Editor Layout (Client Component)
@@ -40,6 +46,18 @@ function YCodeLayoutInner({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     initialize();
   }, [initialize]);
+
+  // Reap expired collaboration locks and stale notifications for the lifetime
+  // of the editor session. Both stores are global, so a single mount here
+  // covers every builder route.
+  useEffect(() => {
+    startLockExpirationCheck();
+    startNotificationCleanup();
+    return () => {
+      stopLockExpirationCheck();
+      stopNotificationCleanup();
+    };
+  }, []);
 
   // Exclude standalone routes from YCodeBuilder
   // These routes should render independently without the editor UI
