@@ -81,14 +81,12 @@ const nextConfig: NextConfig = {
       },
       {
         // Apply to public pages ONLY (exclude /ycode/*, /_next/*, /a/*)
+        // NOTE: Do NOT set Cache-Control here. Vercel recommends letting
+        // ISR manage cache headers automatically so per-URL cache-tag
+        // tracking works for selective revalidateTag invalidations.
+        // Manual s-maxage breaks per-URL purging on catch-all routes.
         source: '/:path((?!ycode|_next|a/).*)*',
         headers: [
-          {
-            key: 'Cache-Control',
-            // Cache until re-published: CDN caches for up to 1 year
-            // On publish, revalidatePath purges CDN; revalidateTag purges data cache
-            value: 'public, s-maxage=31536000, stale-while-revalidate=31536000',
-          },
           {
             // Open the TLS connection to fonts.gstatic.com while the document
             // is still streaming so woff2 binaries can be fetched the moment

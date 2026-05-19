@@ -1,5 +1,6 @@
 import { notFound, redirect, permanentRedirect } from 'next/navigation';
 import { unstable_cache } from 'next/cache';
+import { addCacheTag } from '@vercel/functions';
 import type { Metadata } from 'next';
 import { getSupabaseAdmin } from '@/lib/supabase-server';
 import { buildSlugPath } from '@/lib/page-utils';
@@ -150,7 +151,15 @@ export async function generateStaticParams() {
  * Cached per slug and page for revalidation
  */
 async function fetchPublishedPageWithLayers(slugPath: string) {
-  const tags = ['all-pages', `route-/${slugPath}`];
+  // Tags are both 'route-/X' AND 'all-pages':
+  // - route-/X lets selective invalidation purge just this page's data cache
+  // - all-pages lets full invalidation (color variables, redirects, etc.)
+  //   sweep every page's data cache in one invalidateByTag call.
+  // Vercel's invalidateByTag is tag-precise — invalidating one route's tag
+  // doesn't cascade to entries that only share 'all-pages'. (Next.js bug
+  // #63509 would apply if we used revalidateTag for selective, but we route
+  // exclusively through invalidateByTag on Vercel.)
+  const tags = [`route-/${slugPath}`, 'all-pages'];
   const opts = { tags, revalidate: false as const };
 
   const [core, layers] = await Promise.all([
@@ -182,7 +191,7 @@ async function fetchPublishedPageForMetadata(slugPath: string) {
   return unstable_cache(
     async () => fetchPageByPathForMetadata(slugPath, true),
     [`metadata-/${slugPath}`],
-    { tags: ['all-pages', `route-/${slugPath}`], revalidate: false }
+    { tags: [`route-/${slugPath}`, 'all-pages'], revalidate: false }
   )();
 }
 
@@ -255,6 +264,11 @@ export default async function Page({ params }: PageProps) {
   // Handle catch-all slug (join array into path)
   const slugPath = Array.isArray(slug) ? slug.join('/') : slug;
 
+  // Tag this response for Vercel CDN cache invalidation. The publish endpoint
+  // purges this exact tag (route-/<slug>) so only this URL's cache entry is
+  // invalidated. No-ops outside Vercel.
+  await addCacheTag([`route-/${slugPath}`, 'all-pages']);
+
   // Check for redirects before processing the page
   const currentPath = `/${slugPath}`;
   const redirects = await fetchCachedRedirects();
@@ -300,7 +314,10 @@ export default async function Page({ params }: PageProps) {
     notFound();
   }
 
-  const { page, pageLayers, components, collectionItem, collectionFields, pageCollectionSortedItemIds, pageCollectionSortedItemSlugs, locale, availableLocales, translations } = data;
+  const { page, pageLayers, components, collectionItem, collectionFields, pageCollectionSortedItemIds, pageCollectionSortedItemSlugs, locale, availableLocales, translations, generatedCss } = data;
+
+  // Per-page CSS with fallback to global published_css
+  const cssForPage = generatedCss || globalSettings.publishedCss || undefined;
 
   // Check password protection for this page.
   // First evaluate without cookies() so non-protected pages stay cacheable.
@@ -363,7 +380,7 @@ export default async function Page({ params }: PageProps) {
       page={page}
       layers={pageLayers.layers || []}
       components={components}
-      generatedCss={globalSettings.publishedCss || undefined}
+      generatedCss={cssForPage}
       colorVariablesCss={globalSettings.colorVariablesCss || undefined}
       collectionItem={collectionItem}
       collectionFields={collectionFields}
@@ -427,7 +444,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
       baseUrl: getSiteBaseUrl({ globalCanonicalUrl: globalSettings.globalCanonicalUrl }),
     }),
     [`data-for-route-/${slugPath}-meta`],
-    { tags: ['all-pages', `route-/${slugPath}`], revalidate: false }
+    { tags: [`route-/${slugPath}`, 'all-pages'], revalidate: false }
   )();
 
   if (baseUrl) {
