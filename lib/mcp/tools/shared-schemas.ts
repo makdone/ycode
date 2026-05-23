@@ -1,4 +1,6 @@
 import { z } from 'zod';
+
+import type { DesignProperties } from '@/types';
 import { ELEMENT_TEMPLATES } from '@/lib/mcp/utils';
 
 /**
@@ -20,8 +22,6 @@ export const richTextBlockSchema = z.object({
   level: z.number().optional().describe('Heading level 1-6 (for heading type)'),
   items: z.array(z.string()).optional().describe('List items (for bulletList/orderedList)'),
 });
-
-import type { DesignProperties } from '@/types';
 
 export const designSchema = z.object({
   layout: z.object({

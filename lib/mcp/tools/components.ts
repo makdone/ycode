@@ -28,14 +28,7 @@ import {
   broadcastComponentDeleted,
   broadcastComponentLayersUpdated,
 } from '@/lib/mcp/broadcast';
-import { designSchema, templateEnum } from './shared-schemas';
-
-const richTextBlockSchema = z.object({
-  type: z.enum(['paragraph', 'heading', 'blockquote', 'bulletList', 'orderedList', 'codeBlock', 'horizontalRule']),
-  text: z.string().optional().describe('Text content. Supports **bold**, *italic*, [link](url).'),
-  level: z.number().optional().describe('Heading level 1-6 (for heading type)'),
-  items: z.array(z.string()).optional().describe('List items (for bulletList/orderedList)'),
-});
+import { designSchema, richTextBlockSchema, templateEnum } from './shared-schemas';
 
 const variableSchema = z.object({
   name: z.string().describe('Display name (e.g. "Button label", "Hero image")'),
