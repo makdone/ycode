@@ -232,6 +232,7 @@ const LayerRenderer: React.FC<LayerRendererProps> = ({
                 collectionLayerId={originalLayerId}
                 itemIds={layer._paginationMeta!.itemIds}
                 layerTemplate={layer._paginationMeta!.layerTemplate}
+                collectionLayer={layer._filterConfig?.collectionLayer || layer._paginationMeta!.collectionLayer}
               >
                 {content}
               </LoadMoreCollection>
@@ -265,6 +266,7 @@ const LayerRenderer: React.FC<LayerRendererProps> = ({
               collectionLayerClasses={layer._filterConfig!.collectionLayerClasses}
               collectionLayerTag={layer._filterConfig!.collectionLayerTag}
               isPublished={layer._filterConfig!.isPublished}
+              collectionLayer={layer._filterConfig!.collectionLayer}
             >
               {content}
             </FilterableCollection>

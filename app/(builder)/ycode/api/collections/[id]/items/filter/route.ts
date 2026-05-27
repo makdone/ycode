@@ -521,6 +521,7 @@ export async function POST(
     const {
       layerTemplate,
       collectionLayerId,
+      collectionLayer,
       filterGroups = [],
       sortBy,
       sortOrder = 'asc',
@@ -530,6 +531,9 @@ export async function POST(
       collectionLayerClasses,
       collectionLayerTag,
       published: isPublished = true,
+      isPreview = false,
+      pageCollectionItemId,
+      pageCollectionSortedItemIds,
     } = body;
 
     if (!layerTemplate || !Array.isArray(layerTemplate)) {
@@ -547,7 +551,7 @@ export async function POST(
 
     if (matchingIds.length === 0) {
       return noCache({
-        data: { html: '', total: 0, count: 0, offset, hasMore: false },
+        data: { html: '', total: 0, count: 0, offset, hasMore: false, itemIds: [] },
       });
     }
 
@@ -652,6 +656,14 @@ export async function POST(
       undefined,
       collectionLayerClasses,
       collectionLayerTag,
+      {
+        isPreview: Boolean(isPreview),
+        pageCollectionItemId,
+        pageCollectionSortedItemIds: Array.isArray(pageCollectionSortedItemIds)
+          ? pageCollectionSortedItemIds
+          : undefined,
+      },
+      collectionLayer as Omit<Layer, 'children'> | undefined,
     );
 
     return noCache({
@@ -661,6 +673,7 @@ export async function POST(
         count: paginatedItems.length,
         offset: pageOffset,
         hasMore,
+        itemIds: paginatedItems.map(item => item.id),
       },
     });
   } catch (error) {
