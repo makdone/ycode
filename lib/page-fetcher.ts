@@ -2301,7 +2301,15 @@ export async function resolveCollectionLayers(
               .filter(item => {
                 const val = item.values[sourceFieldId!];
                 if (!val) return false;
-                return val === parentItemId || (typeof val === 'string' && val.includes(`"${parentItemId}"`));
+                // Single reference: bare UUID string. Multi-reference: castValue already
+                // JSON-parses the stored array into a JS array, so check membership
+                // directly. The legacy `val.includes('"id"')` substring check is kept as
+                // a fallback for any value that arrives un-parsed.
+                if (Array.isArray(val)) return val.includes(parentItemId);
+                if (typeof val === 'string') {
+                  return val === parentItemId || val.includes(`"${parentItemId}"`);
+                }
+                return false;
               })
               .map(item => item.id);
           } else if (sourceFieldId && itemValues) {
