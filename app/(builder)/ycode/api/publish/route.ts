@@ -613,9 +613,13 @@ export async function POST(request: NextRequest) {
           const { generateCSSForPages } = await import('@/lib/server/cssGenerator');
           await generateCSSForPages(cssAffectedPageIds);
 
-          // Re-publish layers for these pages so published version has fresh CSS
+          // Re-publish layers for these pages so published version has fresh CSS.
+          // force=true: the draft layers' JSONB still references the changed
+          // component/style by ID, so content_hash is unchanged even though
+          // the resolved/rendered output differs. Without force, downstream
+          // consumers (static export, GitHub writer) see stale data.
           const { batchPublishPageLayers } = await import('@/lib/repositories/pageLayersRepository');
-          const relayerResult = await batchPublishPageLayers(cssAffectedPageIds);
+          const relayerResult = await batchPublishPageLayers(cssAffectedPageIds, { force: true });
           if (relayerResult.changedPageIds.length > 0) {
             publishedPageIds.push(...relayerResult.changedPageIds);
             console.log(`[Cache] CSS catch-up: republished ${relayerResult.changedPageIds.length} page layer(s)`);

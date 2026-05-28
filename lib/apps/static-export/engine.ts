@@ -96,8 +96,8 @@ async function resolvePageOgImage(page: Page): Promise<string | null> {
   }
 }
 
-export async function exportSite(): Promise<ExportJob> {
-  const jobId = randomUUID()
+export async function exportSite(presetJobId?: string): Promise<ExportJob> {
+  const jobId = presetJobId ?? randomUUID()
   const job: ExportJob = {
     id: jobId,
     status: 'running',

@@ -414,7 +414,10 @@ export async function publishPageLayers(draftPageId: string, publishedPageId: st
  * @param pageIds - Array of page IDs to publish layers for
  * @returns Object with count and the page IDs that actually changed
  */
-export async function batchPublishPageLayers(pageIds: string[]): Promise<{ count: number; changedPageIds: string[] }> {
+export async function batchPublishPageLayers(
+  pageIds: string[],
+  options: { force?: boolean } = {},
+): Promise<{ count: number; changedPageIds: string[] }> {
   if (pageIds.length === 0) {
     return { count: 0, changedPageIds: [] };
   }
@@ -454,8 +457,13 @@ export async function batchPublishPageLayers(pageIds: string[]): Promise<{ count
   for (const draft of draftLayers) {
     const existing = publishedById.get(draft.id);
 
-    // Only include if new or content_hash changed
-    if (!existing || existing.content_hash !== draft.content_hash) {
+    // Skip the content_hash equality check when forced. The catch-up path
+    // for component/style changes calls this with force=true because the
+    // draft layers' JSONB still references the component by ID (so the
+    // hash is unchanged) even though the resolved/rendered output now
+    // differs. Without force, the static export reads stale published
+    // layers and downstream writers (GitHub) see an empty diff.
+    if (options.force || !existing || existing.content_hash !== draft.content_hash) {
       layersToUpsert.push({
         id: draft.id,
         page_id: draft.page_id,

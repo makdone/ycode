@@ -1,5 +1,7 @@
+import { randomUUID } from 'crypto';
+
 import { NextRequest } from 'next/server';
-import { exportSite } from '@/lib/apps/static-export';
+import { exportSite, saveLastExportJob } from '@/lib/apps/static-export';
 import { noCache } from '@/lib/api-response';
 
 export const dynamic = 'force-dynamic';
@@ -15,18 +17,40 @@ export const revalidate = 0;
  */
 export async function POST(_request: NextRequest) {
   try {
-    // Start the export — fire it off without awaiting for the HTTP response.
-    // The engine persists the terminal job to app_settings, so we don't
-    // need any module-scope state here (which would never survive across
-    // serverless isolates anyway).
-    exportSite().catch((err) => {
-      console.error('[Static Export] Export job failed:', err);
+    // Generate the job id in the route handler and persist the `running`
+    // job synchronously BEFORE returning. The client polls /status by
+    // job id; if we let the engine generate it on its own (deferred via
+    // setImmediate), the client's initial /status fetch races ahead of
+    // the engine's first write and pulls the previous completed job —
+    // it then polls that stale id forever.
+    const jobId = randomUUID();
+    const startedAt = new Date().toISOString();
+
+    await saveLastExportJob({
+      id: jobId,
+      status: 'running',
+      startedAt,
+      completedAt: null,
+      error: null,
+      pagesExported: 0,
+      filesWritten: 0,
+    }).catch(() => { /* non-fatal — engine will retry the write */ });
+
+    // Detach via setImmediate so the engine Promise isn't part of the
+    // request's async context. Without this, Next.js / the Node runtime
+    // keeps the response stream open until the engine settles, leaving
+    // the client `await response.json()` hanging.
+    setImmediate(() => {
+      exportSite(jobId).catch((err) => {
+        console.error('[Static Export] Export job failed:', err);
+      });
     });
 
     return noCache({
       data: {
         message: 'Export started',
         status: 'running',
+        jobId,
       },
     });
   } catch (error) {

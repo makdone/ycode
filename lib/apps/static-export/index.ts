@@ -15,6 +15,6 @@
  *   - engine.ts          — orchestration (exportSite)
  */
 
-export { APP_ID, getExportConfig, saveExportConfig, getLastExportJob } from './config'
+export { APP_ID, getExportConfig, saveExportConfig, getLastExportJob, saveLastExportJob } from './config'
 export { exportSite } from './engine'
 export { computeOutputKey } from './paths'
