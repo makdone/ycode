@@ -12,18 +12,20 @@ import { BREAKPOINTS } from '@/lib/breakpoint-utils';
 const IMPLICIT_ON_LOAD_TRIGGERS: ReadonlyArray<LayerInteraction['trigger']> = ['load', 'scroll-into-view'];
 
 /**
- * Returns the effective apply mode for a tween property, treating intro
- * triggers (load, scroll-into-view) as implicit `on-load` so the initial
- * state is painted server-side. Stops `to`-state flashes before the
- * timeline starts.
+ * Returns the effective apply mode for a tween property. Honors an explicit
+ * `apply_styles` choice; otherwise falls back to `on-load` for intro
+ * triggers (load, scroll-into-view) so new intro animations stay
+ * flicker-free, and `on-trigger` for everything else.
  */
 export function getEffectiveApplyStyle(
   trigger: LayerInteraction['trigger'],
   propertyKey: TweenPropertyKey,
   applyStyles: InteractionTween['apply_styles'] | undefined
 ): ApplyStyles {
+  const explicit = applyStyles?.[propertyKey];
+  if (explicit) return explicit;
   if (IMPLICIT_ON_LOAD_TRIGGERS.includes(trigger)) return 'on-load';
-  return applyStyles?.[propertyKey] || 'on-trigger';
+  return 'on-trigger';
 }
 
 /**
@@ -696,6 +698,11 @@ export function generateInitialAnimationCSS(layers: Layer[]): InitialAnimationRe
           const breakpointValue = interaction.timeline?.breakpoints?.join(' ') || null;
 
           (interaction.tweens || []).forEach((tween) => {
+            // SplitText tweens target child elements (.word/.char/.line) created at
+            // run-time, not the parent layer. Painting the `from` state on the parent
+            // would offset/hide the whole element and never be cleared.
+            if (tween.splitText) return;
+
             const styles: string[] = [];
             const transforms: string[] = [];
             const filterValues: Partial<Record<FilterPropertyKey, string>> = {};

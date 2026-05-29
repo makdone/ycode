@@ -20,6 +20,8 @@ const PUBLIC_COLLECTION_ITEM_SUFFIXES = ['/items/filter', '/items/load-more'];
 
 const PUBLIC_API_EXACT = [
   '/ycode/api/revalidate', // Cache revalidation — has own secret token auth
+  '/ycode/api/oauth/register', // RFC 7591 Dynamic Client Registration — anonymous
+  '/ycode/api/oauth/token',    // OAuth token exchange — auth is via PKCE/refresh
 ];
 
 /**
@@ -126,9 +128,11 @@ async function verifyApiAuth(request: NextRequest): Promise<NextResponse | null>
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // MCP endpoint uses its own token-based authentication — skip session auth.
-  // Cloud overlay proxies MUST also exempt this path to avoid login redirects.
-  if (pathname.startsWith('/ycode/mcp/')) {
+  // MCP endpoints use their own token-based authentication — skip session auth.
+  // Cloud overlay proxies MUST also exempt these paths to avoid login redirects.
+  //   - `/ycode/mcp/<token>`: legacy URL-token endpoint (Cursor, Windsurf, etc.)
+  //   - `/ycode/mcp`: OAuth Bearer-token endpoint (Claude.ai web, ChatGPT)
+  if (pathname === '/ycode/mcp' || pathname.startsWith('/ycode/mcp/')) {
     const response = NextResponse.next();
     response.headers.set('x-pathname', pathname);
     return response;

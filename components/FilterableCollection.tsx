@@ -2,6 +2,7 @@
 
 import React, { useEffect, useLayoutEffect, useRef, useCallback, useState } from 'react';
 import { useFilterStore } from '@/stores/useFilterStore';
+import { LOAD_MORE_APPENDED_ATTR } from '@/components/LoadMoreCollection';
 import type { ConditionalVisibility, Layer } from '@/types';
 import { isDateFieldType, isDatePreset, resolveDateFilterValue } from '@/lib/collection-field-utils';
 
@@ -95,6 +96,7 @@ export default function FilterableCollection({
   const ssrNextClassRef = useRef<string | null>(null);
   const ssrCountTextRef = useRef<string | null>(null);
   const ssrLoadMoreBtnDisplayRef = useRef<string | null>(null);
+  const ssrWrapperHadHiddenRef = useRef<boolean | null>(null);
   const strippedPaginationParamRef = useRef(false);
 
   const strippedId = collectionLayerId.startsWith('lyr-')
@@ -109,17 +111,23 @@ export default function FilterableCollection({
     return markerRef.current?.parentElement as HTMLElement | null;
   }, []);
 
-  const hideSSR = useCallback(() => {
+  const setSsrItemsDisplay = useCallback((display: '' | 'none') => {
     ssrChildrenRef.current.forEach(el => {
-      (el as HTMLElement).style.display = 'none';
+      (el as HTMLElement).style.display = display;
     });
-  }, []);
+    // Items previously appended by LoadMoreCollection live alongside the SSR
+    // children but aren't captured by `ssrChildrenRef` (they're added after
+    // mount). Toggle them in tandem so a runtime filter doesn't leave stale
+    // load-more rows visible underneath the filtered results.
+    const parent = getParent();
+    if (!parent) return;
+    parent.querySelectorAll(`[${LOAD_MORE_APPENDED_ATTR}]`).forEach(el => {
+      (el as HTMLElement).style.display = display;
+    });
+  }, [getParent]);
 
-  const showSSR = useCallback(() => {
-    ssrChildrenRef.current.forEach(el => {
-      (el as HTMLElement).style.display = '';
-    });
-  }, []);
+  const hideSSR = useCallback(() => setSsrItemsDisplay('none'), [setSsrItemsDisplay]);
+  const showSSR = useCallback(() => setSsrItemsDisplay(''), [setSsrItemsDisplay]);
 
   const clearFilteredDOM = useCallback(() => {
     const parent = getParent();
@@ -184,7 +192,15 @@ export default function FilterableCollection({
   );
 
   const buildApiFilters = useCallback(() => {
-    type FilterItem = { fieldId: string; operator: string; value: string; value2?: string; fieldType?: string };
+    type FilterItem = {
+      fieldId: string;
+      operator: string;
+      value: string;
+      value2?: string;
+      fieldType?: string;
+      source?: 'collection_field' | 'self';
+      includesCurrentPageItem?: boolean;
+    };
     const operatorsWithoutValue = new Set([
       'is_present',
       'is_empty',
@@ -201,6 +217,21 @@ export default function FilterableCollection({
       const activeInGroup: FilterItem[] = [];
 
       for (const condition of group.conditions) {
+        // Self conditions compare against the item's own ID — no fieldId needed,
+        // and they're forwarded verbatim so the server resolves the current page item.
+        if (condition.source === 'self') {
+          const hasStaticIds = !!condition.value && condition.value !== '[]';
+          if (!hasStaticIds && !condition.includesCurrentPageItem) continue;
+          activeInGroup.push({
+            fieldId: '',
+            operator: condition.operator,
+            value: condition.value || '[]',
+            source: 'self',
+            includesCurrentPageItem: condition.includesCurrentPageItem,
+          });
+          continue;
+        }
+
         if (!condition.fieldId) continue;
 
         let value = condition.inputLayerId ? '' : (condition.value || '');
@@ -353,9 +384,18 @@ export default function FilterableCollection({
     ) as HTMLElement | null;
   }, [collectionLayerId]);
 
+  const toggleSsrWrapperHidden = useCallback((wrapper: HTMLElement, hide: boolean) => {
+    if (ssrWrapperHadHiddenRef.current === null) {
+      ssrWrapperHadHiddenRef.current = wrapper.classList.contains('hidden');
+    }
+    wrapper.classList.toggle('hidden', hide);
+  }, []);
+
   const updateSsrPaginationDisplay = useCallback((page: number, totalPages: number) => {
     const wrapper = getSsrPaginationWrapper();
     if (!wrapper) return;
+
+    toggleSsrWrapperHidden(wrapper, totalPages <= 0);
 
     const infoEl = wrapper.querySelector(`[data-layer-id$="-pagination-info"]`) as HTMLElement | null;
     if (infoEl) {
@@ -394,11 +434,13 @@ export default function FilterableCollection({
         nextBtn.classList.add('cursor-pointer');
       }
     }
-  }, [getSsrPaginationWrapper]);
+  }, [getSsrPaginationWrapper, toggleSsrWrapperHidden]);
 
   const updateSsrLoadMoreDisplay = useCallback((loaded: number, total: number, hasMore: boolean) => {
     const wrapper = getSsrPaginationWrapper();
     if (!wrapper) return;
+
+    toggleSsrWrapperHidden(wrapper, total <= 0);
 
     const countEl = wrapper.querySelector(`[data-layer-id$="-pagination-count"]`) as HTMLElement | null;
     if (countEl) {
@@ -451,6 +493,11 @@ export default function FilterableCollection({
       const loadMoreBtn = wrapper.querySelector(`[data-pagination-action="load_more"]`) as HTMLElement | null;
       if (loadMoreBtn) loadMoreBtn.style.display = ssrLoadMoreBtnDisplayRef.current;
       ssrLoadMoreBtnDisplayRef.current = null;
+    }
+
+    if (ssrWrapperHadHiddenRef.current !== null) {
+      wrapper.classList.toggle('hidden', ssrWrapperHadHiddenRef.current);
+      ssrWrapperHadHiddenRef.current = null;
     }
   }, [getSsrPaginationWrapper]);
 
@@ -533,7 +580,15 @@ export default function FilterableCollection({
   // --- Fetch logic ---
 
   const fetchFiltered = useCallback((
-    filterGroups: Array<Array<{ fieldId: string; operator: string; value: string; value2?: string; fieldType?: string }>>,
+    filterGroups: Array<Array<{
+      fieldId: string;
+      operator: string;
+      value: string;
+      value2?: string;
+      fieldType?: string;
+      source?: 'collection_field' | 'self';
+      includesCurrentPageItem?: boolean;
+    }>>,
     offset: number,
     append: boolean,
   ) => {

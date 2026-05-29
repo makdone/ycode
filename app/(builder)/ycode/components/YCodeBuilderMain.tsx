@@ -21,7 +21,7 @@
 // 1. React/Next.js
 import { useEffect, useState, useMemo, useRef, useCallback, Suspense, lazy } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 // 2. Internal components
 import CenterCanvas from '../components/CenterCanvas';
 import HeaderBar from '../components/HeaderBar';
@@ -97,6 +97,7 @@ interface YCodeBuilderProps {
 
 export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCodeBuilderProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { routeType, resourceId, sidebarTab, navigateToLayers, navigateToCollection, navigateToCollections, navigateToComponent, urlState, updateQueryParams } = useEditorUrl();
 
   // Role-based access
@@ -485,6 +486,17 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
       document.documentElement.classList.add('dark');
     }
   }, [user]);
+
+  // After login, honor `?next=` (used by the OAuth consent flow to bounce
+  // unauthenticated users through `/ycode` and back). Only same-origin
+  // paths starting with `/ycode` are accepted to prevent open redirects.
+  useEffect(() => {
+    if (!user || !authInitialized) return;
+    const next = searchParams?.get('next');
+    if (!next) return;
+    if (!next.startsWith('/ycode')) return;
+    router.replace(next);
+  }, [user, authInitialized, searchParams, router]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -81,7 +81,7 @@ import {
 import type { TriggerType, PropertyType, ParsedAnimationValue } from '@/lib/animation-utils';
 
 // 4. Types
-import type { Layer, LayerInteraction, InteractionTimeline, InteractionTween, TweenProperties, Breakpoint } from '@/types';
+import type { ApplyStyles, Layer, LayerInteraction, InteractionTimeline, InteractionTween, TweenProperties, Breakpoint } from '@/types';
 import { BREAKPOINTS, BREAKPOINT_VALUES } from '@/lib/breakpoint-utils';
 import { useColorVariablesStore } from '@/stores/useColorVariablesStore';
 import { Badge } from '@/components/ui/badge';
@@ -2292,14 +2292,15 @@ export default function InteractionsPanel({
                       return (
                         <div key={prop.key} className="flex items-center gap-1.25">
                           {!prop.toOnly && (() => {
-                            const effectiveApplyStyle = selectedInteraction
-                              ? getEffectiveApplyStyle(selectedInteraction.trigger, prop.key, selectedTween.apply_styles)
-                              : (selectedTween.apply_styles?.[prop.key] || 'on-trigger');
-                            // Intro triggers (load, scroll-into-view) are implicitly on-load
-                            // to prevent flicker — lock the toggle in that case.
-                            const isImplicitOnLoad = selectedInteraction
-                              ? (selectedInteraction.trigger === 'load' || selectedInteraction.trigger === 'scroll-into-view')
-                              : false;
+                            // SplitText tweens target child .word/.char/.line elements that
+                            // only exist after SplitText runs client-side, so the on-load /
+                            // on-trigger toggle is a no-op — they always behave as on-trigger.
+                            const isNoOpForSplitText = !!selectedTween.splitText;
+                            const effectiveApplyStyle: ApplyStyles = isNoOpForSplitText
+                              ? 'on-trigger'
+                              : selectedInteraction
+                                ? getEffectiveApplyStyle(selectedInteraction.trigger, prop.key, selectedTween.apply_styles)
+                                : (selectedTween.apply_styles?.[prop.key] || 'on-trigger');
                             const isOnLoad = effectiveApplyStyle === 'on-load';
 
                             return (
@@ -2310,13 +2311,12 @@ export default function InteractionsPanel({
                                       size="xs"
                                       variant="secondary"
                                       className="size-7 p-0 shrink-0 transition-none"
-                                      disabled={isFromCurrent || isImplicitOnLoad}
+                                      disabled={isFromCurrent || isNoOpForSplitText}
                                       onClick={() => {
-                                        const currentValue = selectedTween.apply_styles?.[prop.key] || 'on-trigger';
                                         handleUpdateTween(selectedTween.id, {
                                           apply_styles: {
                                             ...selectedTween.apply_styles,
-                                            [prop.key]: currentValue === 'on-load' ? 'on-trigger' : 'on-load',
+                                            [prop.key]: isOnLoad ? 'on-trigger' : 'on-load',
                                           },
                                         });
                                       }}
@@ -2325,8 +2325,8 @@ export default function InteractionsPanel({
                                     </Button>
                                   </TooltipTrigger>
                                   <TooltipContent side="top" align="start">
-                                    {isImplicitOnLoad
-                                      ? 'Always applied on page load for this trigger'
+                                    {isNoOpForSplitText
+                                      ? 'Text animations always apply styles on trigger'
                                       : isOnLoad
                                         ? 'Apply property style on page load'
                                         : 'Apply property style on trigger'}

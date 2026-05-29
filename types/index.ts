@@ -1336,6 +1336,10 @@ export interface CollectionPaginationMeta {
   // paging will return overlapping (duplicate) items.
   sortBy?: string;
   sortOrder?: 'asc' | 'desc';
+  // Optional cap from `collectionVariable.limit` when pagination is enabled.
+  // Treated as a max total: clamps `totalItems` and stops `load_more` once
+  // reached, even if the underlying collection has more matching rows.
+  maxTotal?: number;
 }
 
 // Conditional Visibility Types
@@ -1348,6 +1352,9 @@ export type BooleanOperator = 'is';
 export type ReferenceOperator = 'is_one_of' | 'is_not_one_of' | 'exists' | 'does_not_exist';
 export type MultiReferenceOperator = 'is_one_of' | 'is_not_one_of' | 'contains_all_of' | 'contains_exactly' | 'item_count' | 'has_items' | 'has_no_items';
 export type PageCollectionOperator = 'item_count' | 'has_items' | 'has_no_items';
+// Self filter: compare the item's own ID against a set of IDs (statically picked
+// and/or the current dynamic page item). Mirrors reference field semantics.
+export type SelfOperator = 'is_one_of' | 'is_not_one_of';
 
 export type VisibilityOperator =
   | TextOperator
@@ -1356,11 +1363,12 @@ export type VisibilityOperator =
   | BooleanOperator
   | ReferenceOperator
   | MultiReferenceOperator
-  | PageCollectionOperator;
+  | PageCollectionOperator
+  | SelfOperator;
 
 export interface VisibilityCondition {
   id: string;
-  source: 'collection_field' | 'page_collection';
+  source: 'collection_field' | 'page_collection' | 'self';
   // For collection_field source
   fieldId?: string;
   fieldType?: CollectionFieldType;
@@ -1373,6 +1381,9 @@ export interface VisibilityCondition {
   collectionLayerName?: string; // Display name for the layer
   compareOperator?: 'eq' | 'lt' | 'lte' | 'gt' | 'gte'; // For 'item_count' operator
   compareValue?: number; // For 'item_count' operator
+  // For self source: when true, the current dynamic page item ID is injected
+  // into the comparison set alongside any statically picked IDs in `value`.
+  includesCurrentPageItem?: boolean;
   // For linking filter value to an input layer inside a Filter
   inputLayerId?: string;
   inputLayerId2?: string; // For second bound (e.g. 'is_between')
