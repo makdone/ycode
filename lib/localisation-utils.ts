@@ -1,4 +1,4 @@
-import type { Layer, Page, Translation, Locale, LocaleOption, CollectionField } from '@/types';
+import type { Layer, Page, Translation, Locale, LocaleOption, CollectionField, Component, ComponentVariable, DynamicTextVariable, DynamicRichTextVariable } from '@/types';
 import { getLayerIcon, getLayerName } from '@/lib/layer-display-utils';
 import {
   buildLayerTranslationKey,
@@ -9,6 +9,7 @@ import {
 import { createDynamicTextVariable, createDynamicRichTextVariable, createDynamicRichTextVariableFromPlainText, createAssetVariable } from '@/lib/variable-utils';
 import { castValue } from '@/lib/collection-utils';
 import { tiptapDocHasFormatting, tiptapDocToCanonicalString, hasVariableNode, hasAnyTextOrVariable } from '@/lib/tiptap-utils';
+import { stringToTiptapContent } from '@/lib/text-format-utils';
 import { isRichTextLayer } from '@/lib/layer-utils';
 import { looksLikeFormattedHtml } from '@/lib/translation-classification';
 import type { IconProps } from '@/components/ui/icon';
@@ -282,6 +283,9 @@ export interface TranslatableItem {
     icon: IconProps['name']; // Icon name for the item
     label: string; // Item label (e.g., "SEO Title", "Heading")
     description?: string; // Optional item description
+    // Optional breadcrumb segments rendered inline (icon + label, › separated).
+    // Used by component override rows: "[component] Name › [type] Variable".
+    segments?: Array<{ icon: IconProps['name']; label: string }>;
   }
 }
 
@@ -321,23 +325,17 @@ export function extractImageAltText(layer: Layer): string | null {
  * format for `text` content, and the JSON-stringified Tiptap doc for
  * `richtext` content, so downstream rendering is unambiguous.
  */
-function classifyLayerTextForTranslation(
-  layer: Layer
+function classifyTextVariableForTranslation(
+  textVariable: DynamicTextVariable | DynamicRichTextVariable | undefined | null,
+  isRichSource: boolean
 ): { contentType: 'text' | 'richtext'; value: string; openInSheet: boolean } | null {
-  const textVariable = layer.variables?.text;
   if (!textVariable) return null;
-
-  // Only true rich-text layers (block-level editor with paragraphs/headings/
-  // lists) open in the doc-style sheet. Simple text/heading layers flatten
-  // multi-paragraph content to line breaks on canvas, so the translation
-  // editor should stay inline and compact to match.
-  const isRichLayer = isRichTextLayer(layer);
 
   if (textVariable.type === 'dynamic_text') {
     const text = textVariable.data.content;
     if (!text || typeof text !== 'string' || !text.trim()) return null;
     if (looksLikeFormattedHtml(text) || text.includes('<ycode-inline-variable>')) {
-      return { contentType: 'richtext', value: text.trim(), openInSheet: isRichLayer };
+      return { contentType: 'richtext', value: text.trim(), openInSheet: isRichSource };
     }
     return { contentType: 'text', value: text.trim(), openInSheet: false };
   }
@@ -349,7 +347,7 @@ function classifyLayerTextForTranslation(
     if (tiptapDocHasFormatting(doc) || hasVariableNode(doc)) {
       const json = JSON.stringify(doc);
       if (!hasAnyTextOrVariable(doc)) return null;
-      return { contentType: 'richtext', value: json, openInSheet: isRichLayer };
+      return { contentType: 'richtext', value: json, openInSheet: isRichSource };
     }
 
     const canonical = tiptapDocToCanonicalString(doc).trim();
@@ -358,6 +356,16 @@ function classifyLayerTextForTranslation(
   }
 
   return null;
+}
+
+function classifyLayerTextForTranslation(
+  layer: Layer
+): { contentType: 'text' | 'richtext'; value: string; openInSheet: boolean } | null {
+  // Only true rich-text layers (block-level editor with paragraphs/headings/
+  // lists) open in the doc-style sheet. Simple text/heading layers flatten
+  // multi-paragraph content to line breaks on canvas, so the translation
+  // editor should stay inline and compact to match.
+  return classifyTextVariableForTranslation(layer.variables?.text as any, isRichTextLayer(layer));
 }
 
 /**
@@ -445,13 +453,117 @@ function extractMediaTranslatableItems(
 }
 
 /**
- * Recursively extract all translatable text items from layers
+ * Extract translatable items from a component instance's `componentOverrides`.
+ *
+ * Per-instance overrides are page-scoped: each instance can be translated
+ * independently. Keys mirror what `translateComponentOverrides` consumes at
+ * render time:
+ *   - `layer:<instanceId>:override:text:<varId>`
+ *   - `layer:<instanceId>:override:rich_text:<varId>`
+ *   - `layer:<instanceId>:override:image_src:<varId>`
+ *   - `layer:<instanceId>:override:image_alt:<varId>`
+ */
+function extractComponentOverrideTranslatableItems(
+  layer: Layer,
+  pageId: string,
+  componentsById: Map<string, Component> | undefined,
+  items: TranslatableItem[]
+): void {
+  const overrides = layer.componentOverrides;
+  if (!overrides || !layer.componentId) return;
+
+  const component = componentsById?.get(layer.componentId);
+  const componentName = component?.name || getLayerName(layer);
+  const getVar = (varId: string): ComponentVariable | undefined =>
+    component?.variables?.find(v => v.id === varId);
+
+  // Build the item `info`: a flattened label (for search) plus inline
+  // breadcrumb segments "[component] Name › [type] Variable".
+  const buildInfo = (
+    variableLabel: string,
+    typeIcon: IconProps['name']
+  ): TranslatableItem['info'] => ({
+    icon: 'component',
+    label: `${componentName} › ${variableLabel}`,
+    segments: [
+      { icon: 'component', label: componentName },
+      { icon: typeIcon, label: variableLabel },
+    ],
+  });
+
+  // Text and rich-text overrides
+  for (const category of ['text', 'rich_text'] as const) {
+    const catOverrides = overrides[category];
+    if (!catOverrides) continue;
+
+    for (const [varId, value] of Object.entries(catOverrides)) {
+      const classification = classifyTextVariableForTranslation(
+        value as DynamicTextVariable | DynamicRichTextVariable,
+        category === 'rich_text'
+      );
+      if (!classification) continue;
+
+      const variableName = getVar(varId)?.name || getLayerName(layer);
+      items.push({
+        key: `page:${pageId}:layer:${layer.id}:override:${category}:${varId}`,
+        source_type: 'page',
+        source_id: pageId,
+        content_key: `layer:${layer.id}:override:${category}:${varId}`,
+        content_type: classification.contentType,
+        content_value: classification.value,
+        open_in_sheet: classification.openInSheet,
+        info: buildInfo(variableName, classification.contentType === 'richtext' ? 'type' : 'text'),
+      });
+    }
+  }
+
+  // Image overrides (source asset + alt text)
+  const imageOverrides = overrides.image;
+  if (imageOverrides) {
+    for (const [varId, value] of Object.entries(imageOverrides)) {
+      const imageValue = value as any;
+      const variableName = getVar(varId)?.name || getLayerName(layer);
+
+      const src = imageValue?.src;
+      if (src && src.type === 'asset' && src.data?.asset_id) {
+        items.push({
+          key: `page:${pageId}:layer:${layer.id}:override:image_src:${varId}`,
+          source_type: 'page',
+          source_id: pageId,
+          content_key: `layer:${layer.id}:override:image_src:${varId}`,
+          content_type: 'asset_id',
+          content_value: src.data.asset_id,
+          info: buildInfo(`${variableName} (source)`, 'image'),
+        });
+      }
+
+      const alt = imageValue?.alt;
+      if (alt && alt.type === 'dynamic_text' && typeof alt.data?.content === 'string' && alt.data.content.trim()) {
+        items.push({
+          key: `page:${pageId}:layer:${layer.id}:override:image_alt:${varId}`,
+          source_type: 'page',
+          source_id: pageId,
+          content_key: `layer:${layer.id}:override:image_alt:${varId}`,
+          content_type: 'text',
+          content_value: alt.data.content.trim(),
+          info: buildInfo(`${variableName} (alt text)`, 'text'),
+        });
+      }
+    }
+  }
+}
+
+/**
+ * Recursively extract all translatable text items from layers.
+ * When `componentsById` is provided (page context only), per-instance
+ * component overrides are surfaced as page-scoped translatable items.
  */
 function extractLayerTranslatableItems(
   layers: Layer[],
   sourceType: 'page' | 'component',
   sourceId: string,
-  items: TranslatableItem[]
+  items: TranslatableItem[],
+  componentsById?: Map<string, Component>
 ): void {
   for (const layer of layers) {
     // The locale-selector label renders the active locale name dynamically and
@@ -480,8 +592,13 @@ function extractLayerTranslatableItems(
 
     extractMediaTranslatableItems(layer, sourceType, sourceId, items);
 
+    // Component instance overrides are page-scoped and translated per instance.
+    if (sourceType === 'page' && layer.componentId && layer.componentOverrides) {
+      extractComponentOverrideTranslatableItems(layer, sourceId, componentsById, items);
+    }
+
     if (layer.children && Array.isArray(layer.children) && layer.children.length > 0) {
-      extractLayerTranslatableItems(layer.children, sourceType, sourceId, items);
+      extractLayerTranslatableItems(layer.children, sourceType, sourceId, items, componentsById);
     }
   }
 }
@@ -547,7 +664,8 @@ function extractSeoItems(
 export function extractPageTranslatableItems(
   page: Page,
   layers: Layer[],
-  locale?: Locale
+  locale?: Locale,
+  components?: Component[]
 ): TranslatableItem[] {
   const items: TranslatableItem[] = [];
 
@@ -572,9 +690,12 @@ export function extractPageTranslatableItems(
   // 2. Extract SEO items (second)
   extractSeoItems(page.id, page.settings?.seo, items);
 
-  // 3. Extract layer texts (third)
+  // 3. Extract layer texts (third), including per-instance component overrides
   if (layers && Array.isArray(layers) && layers.length > 0) {
-    extractLayerTranslatableItems(layers, 'page', page.id, items);
+    const componentsById = components
+      ? new Map(components.map(c => [c.id, c]))
+      : undefined;
+    extractLayerTranslatableItems(layers, 'page', page.id, items, componentsById);
   }
 
   return items;
@@ -800,12 +921,20 @@ export function injectTranslatedText(
       // Tiptap JSON into a `dynamic_text` variable would render as literal JSON.
       // The renderer handles `dynamic_rich_text` on simple text/heading layers
       // by flattening paragraphs into the layer's single tag.
-      if (textTranslation?.content_type === 'richtext') {
+      // Drive the injected variable type off the actual value shape, not the
+      // stored `content_type` — legacy/mismatched rows can disagree (a `text`
+      // row holding a Tiptap JSON doc, or a `richtext` row holding plain text).
+      // This keeps generated pages correct regardless of the stored type.
+      if (looksLikeTiptapJson(textValue)) {
+        // Serialized Tiptap doc → rich content. The renderer flattens it for
+        // simple text/heading layers, so this is safe even when the source is
+        // a `dynamic_text` layer. Avoids rendering raw JSON as visible text.
         (variableUpdates as any).text = createDynamicRichTextVariable(textValue);
       } else if (layer.variables?.text?.type === 'dynamic_rich_text') {
-        // Plain-text translation for a rich-text source: avoid noisy JSON.parse.
+        // Plain-text value for a rich-text source: convert without JSON.parse.
         (variableUpdates as any).text = createDynamicRichTextVariableFromPlainText(textValue);
       } else {
+        // Plain-text value for a simple text source.
         (variableUpdates as any).text = createDynamicTextVariable(textValue);
       }
     }
@@ -932,10 +1061,18 @@ export function translateComponentOverrides(
         const next: Record<string, any> = {};
         for (const [varId, value] of Object.entries(catOverrides)) {
           const v = lookup(`layer:${layer.id}:override:${category}:${varId}`);
-          if (v !== undefined && value && typeof value === 'object' && 'data' in (value as any)) {
-            const isRich = category === 'rich_text';
-            const content = isRich ? safeParseJson(v) : v;
-            next[varId] = { ...(value as any), data: { ...(value as any).data, content } };
+          const val = value as any;
+          if (v !== undefined && val && typeof val === 'object' && 'data' in val) {
+            // The stored override value's own type dictates the content shape,
+            // NOT the override category: text overrides are persisted as
+            // `dynamic_rich_text` (a Tiptap doc) even for plain `text`
+            // variables. Writing a bare string into a `dynamic_rich_text`
+            // value would render as empty, so convert plain translations into
+            // a Tiptap doc and parse serialized docs.
+            const content = val.type === 'dynamic_rich_text'
+              ? (looksLikeTiptapJson(v) ? safeParseJson(v) : stringToTiptapContent(v))
+              : v;
+            next[varId] = { ...val, data: { ...val.data, content } };
             categoryMutated = true;
           } else {
             next[varId] = value;
@@ -992,6 +1129,23 @@ function safeParseJson(value: string): unknown {
     return JSON.parse(value);
   } catch {
     return value;
+  }
+}
+
+/**
+ * Whether a translation value string looks like a serialized Tiptap document
+ * (rich text). Used to decide between JSON-parsing and treating the value as
+ * plain text, guarding against content_type / value-shape mismatches.
+ */
+export function looksLikeTiptapJson(value: string | null | undefined): boolean {
+  if (!value || typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return false;
+  try {
+    const parsed = JSON.parse(trimmed);
+    return !!parsed && typeof parsed === 'object';
+  } catch {
+    return false;
   }
 }
 
