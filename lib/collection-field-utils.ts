@@ -339,6 +339,39 @@ export function resolveDateFilterValue(
   }
 }
 
+/**
+ * True if a single condition compares a date field against a date preset
+ * (e.g. `$today`). Such conditions resolve relative to the current date, so
+ * the static export re-evaluates them client-side instead of baking the result.
+ */
+export function isDynamicDateCondition(
+  condition: { source?: string; fieldType?: string; value?: string },
+): boolean {
+  if (condition.source !== 'collection_field') return false;
+  if (!condition.fieldType || !isDateFieldType(condition.fieldType as CollectionFieldType)) return false;
+  return isDatePreset(condition.value);
+}
+
+/**
+ * True if a ConditionalVisibility expression contains any date-preset condition.
+ * Used by the static export to detect rules that need client-side re-evaluation.
+ */
+export function hasDynamicDateRule(
+  visibility:
+    | { groups?: Array<{ conditions?: Array<{ source?: string; fieldType?: string; value?: string }> }> }
+    | undefined
+    | null,
+): boolean {
+  if (!visibility?.groups) return false;
+  for (const group of visibility.groups) {
+    if (!group.conditions) continue;
+    for (const condition of group.conditions) {
+      if (isDynamicDateCondition(condition)) return true;
+    }
+  }
+  return false;
+}
+
 /** Match `YYYY-MM-DD` (the format emitted by `<input type="date">` and date presets). */
 const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 

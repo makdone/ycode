@@ -457,6 +457,15 @@ export interface Layer {
   _paginationMeta?: CollectionPaginationMeta;
   // SSR-only property for dynamic inline styles from CMS color field bindings
   _dynamicStyles?: Record<string, string>;
+  // SSR-only property: when a conditionalVisibility rule references a date
+  // preset (e.g. `$today`), the layer is kept in the tree even if the
+  // export-time eval is false, and this metadata is attached so layerToHtml
+  // can serialize it for the static-export client-side runtime to re-eval.
+  // Non-date conditions are baked to a boolean at export time; only
+  // date-preset conditions are re-evaluated client-side against the current date.
+  _dynamicVisibilityRule?: {
+    groups: Array<{ conditions: DynamicVisibilityCondition[] }>;
+  };
   // SSR-only property for filterable collection config (when collection has linked filter inputs)
   _filterConfig?: {
     collectionId: string;
@@ -1397,6 +1406,15 @@ export interface VisibilityConditionGroup {
 export interface ConditionalVisibility {
   groups: VisibilityConditionGroup[];
 }
+
+/**
+ * A single condition in a serialized dynamic-date visibility rule (static export).
+ * Date-preset conditions are re-evaluated against the current date on the client;
+ * all other conditions carry their export-time result, baked in.
+ */
+export type DynamicVisibilityCondition =
+  | { dynamic: true; operator: VisibilityOperator; value: string; fieldValue: string }
+  | { dynamic: false; result: boolean };
 
 // Localisation Types
 
