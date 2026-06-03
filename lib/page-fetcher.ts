@@ -8,7 +8,7 @@ import { getValuesByItemIds } from '@/lib/repositories/collectionItemValueReposi
 import { getFieldsByCollectionId } from '@/lib/repositories/collectionFieldRepository';
 import { enrichItemsWithCountValues } from '@/lib/repositories/collectionCountRepository';
 import type { Page, PageFolder, PageLayers, Component, ComponentVariable, CollectionItemWithValues, CollectionField, Layer, CollectionPaginationMeta, Translation, Locale } from '@/types';
-import { getCollectionVariable, resolveFieldValue, evaluateVisibility, getLayerHtmlTag, filterDisabledSliderLayers } from '@/lib/layer-utils';
+import { getCollectionVariable, resolveFieldValue, evaluateVisibility, evaluateCondition, getLayerHtmlTag, filterDisabledSliderLayers } from '@/lib/layer-utils';
 import { isFieldVariable, isAssetVariable, createDynamicTextVariable, createDynamicRichTextVariable, createAssetVariable, getDynamicTextContent, getVariableStringValue, getAssetId, resolveDesignStyles } from '@/lib/variable-utils';
 import { buildImageSizes, generateImageSrcset, getOptimizedImageUrl, getAssetProxyUrl, DEFAULT_ASSETS, collectLayerAssetIds, buildSvgDataUrl, parseImageDimension } from '@/lib/asset-utils';
 import { resolveComponents, applyComponentOverrides } from '@/lib/resolve-components';
@@ -30,7 +30,7 @@ import type { LinkResolutionContext } from '@/lib/link-utils';
 import { getLinkSettingsFromMark } from '@/lib/tiptap-extensions/rich-text-link';
 import { SWIPER_CLASS_MAP, SWIPER_DATA_ATTR_MAP } from '@/lib/slider-constants';
 import { resolveInlineVariables, resolveInlineVariablesFromData } from '@/lib/inline-variables';
-import { formatFieldValue } from '@/lib/cms-variables-utils';
+import { formatFieldValue, resolveFieldFromSources } from '@/lib/cms-variables-utils';
 import { buildLayerTranslationKey, getTranslationByKey, hasValidTranslationValue, getTranslationValue, injectTranslatedText, applyCmsTranslations, translateComponentOverrides } from '@/lib/localisation-utils';
 import { formatDateFieldsInItemValues } from '@/lib/date-format-utils';
 import { getSettingByKey } from '@/lib/repositories/settingsRepository';
@@ -40,8 +40,8 @@ import { generateInitialAnimationCSS } from '@/lib/animation-utils';
 import { getMapIframeProps, DEFAULT_MAP_SETTINGS } from '@/lib/map-utils';
 import { getMapboxAccessToken, getGoogleMapsEmbedApiKey } from '@/lib/map-server';
 import { getAssetsByIds } from '@/lib/repositories/assetRepository';
-import { isVirtualAssetField, findDisplayField } from '@/lib/collection-field-utils';
-import type { FieldVariable, AssetVariable, DynamicTextVariable, LinkSettings } from '@/types';
+import { isVirtualAssetField, findDisplayField, hasDynamicDateRule, isDynamicDateCondition } from '@/lib/collection-field-utils';
+import type { DynamicVisibilityCondition, FieldVariable, AssetVariable, DynamicTextVariable, LinkSettings } from '@/types';
 import type { DesignColorVariable } from '@/types';
 
 // Cached map provider tokens for synchronous use inside layerToHtml.
@@ -1517,8 +1517,9 @@ function resolveRichTextVariables(
     const isBlockNode = (n: any) =>
       n?.type === 'paragraph' || n?.type === 'heading' ||
       n?.type === 'bulletList' || n?.type === 'orderedList' ||
-      n?.type === 'richTextComponent' || n?.type === 'richTextImage' ||
-      n?.type === 'table' || n?.type === 'richTextHtmlEmbed' || n?.type === 'horizontalRule';
+      n?.type === 'blockquote' || n?.type === 'richTextComponent' ||
+      n?.type === 'richTextImage' || n?.type === 'table' ||
+      n?.type === 'richTextHtmlEmbed' || n?.type === 'horizontalRule';
     const hasBlockChildren = result.content.some(isBlockNode);
     if (hasBlockChildren) {
       const lifted: any[] = [];
@@ -2298,11 +2299,6 @@ export async function resolveCollectionLayers(
             offset = collectionVariable.offset;
           }
 
-          // When field-based sorting is active, fetch ALL items so we sort the
-          // full set before applying limit/offset. DB-level pagination uses
-          // manual_order which would give us the wrong subset.
-          const isFieldSort = sortBy && sortBy !== 'none' && sortBy !== 'manual' && sortBy !== 'random';
-
           // Determine allowed item IDs for reference/inverse-reference filtering
           let allowedItemIds: string[] | undefined;
           if (sourceFieldType === 'inverse_reference' && sourceFieldId && parentItemId) {
@@ -2366,14 +2362,43 @@ export async function resolveCollectionLayers(
                 pageCollectionCounts: {},
                 currentItemId: item.id,
                 pageCollectionItemId: pageCollectionItemId ?? parentCollectionItemId,
+                timezone,
               })
             );
           }
 
+          // Sort the FULL filtered set BEFORE capping or paginating. The
+          // maxTotal cap and the page slice must operate on already-sorted
+          // data; otherwise (for field sorts) the cap is applied in cache
+          // order (manual_order/created_at) and can drop items that should
+          // appear first after sorting, producing a scattered/incomplete
+          // result that diverges from the canvas (which sorts at the DB level).
+          if (sortBy && sortBy !== 'none') {
+            if (sortBy === 'manual') {
+              filteredItems.sort((a, b) => a.manual_order - b.manual_order);
+            } else if (sortBy === 'random') {
+              filteredItems.sort(() => Math.random() - 0.5);
+            } else {
+              filteredItems.sort((a, b) => {
+                const aStr = String(a.values[sortBy] || '');
+                const bStr = String(b.values[sortBy] || '');
+                const aNum = aStr.trim() !== '' ? Number(aStr) : NaN;
+                const bNum = bStr.trim() !== '' ? Number(bStr) : NaN;
+
+                if (!isNaN(aNum) && !isNaN(bNum)) {
+                  return sortOrder === 'desc' ? bNum - aNum : aNum - bNum;
+                }
+
+                const comparison = aStr.localeCompare(bStr);
+                return sortOrder === 'desc' ? -comparison : comparison;
+              });
+            }
+          }
+
           // When pagination is enabled, `collectionVariable.limit` acts as a
           // hard cap on the total — both for the displayed count and for how
-          // far `load_more` can page. Without pagination, the legacy slice
-          // below applies it as a per-page limit instead.
+          // far `load_more` can page. Without pagination, the slice below
+          // applies it as a per-page limit instead.
           const maxTotal = isPaginated && typeof collectionVariable.limit === 'number' && collectionVariable.limit > 0
             ? collectionVariable.limit
             : undefined;
@@ -2391,44 +2416,11 @@ export async function resolveCollectionLayers(
 
           const totalItems = filteredItems.length;
 
-          // For non-field-sort, apply limit/offset in-memory (mirrors DB pagination)
-          let items: CollectionItemWithValues[];
-          if (!isFieldSort && (limit || offset)) {
+          // Apply limit/offset to the sorted, capped set (mirrors DB pagination).
+          let sortedItems = filteredItems;
+          if (limit || offset) {
             const start = offset || 0;
-            items = filteredItems.slice(start, limit ? start + limit : undefined);
-          } else {
-            items = filteredItems;
-          }
-
-          // Apply sorting if specified (since API doesn't handle sortBy yet)
-          let sortedItems = items;
-          if (sortBy && sortBy !== 'none') {
-            if (sortBy === 'manual') {
-              sortedItems = items.sort((a, b) => a.manual_order - b.manual_order);
-            } else if (sortBy === 'random') {
-              sortedItems = items.sort(() => Math.random() - 0.5);
-            } else {
-              sortedItems = items.sort((a, b) => {
-                const aValue = a.values[sortBy] || '';
-                const bValue = b.values[sortBy] || '';
-                const aStr = String(aValue);
-                const bStr = String(bValue);
-                const aNum = aStr.trim() !== '' ? Number(aStr) : NaN;
-                const bNum = bStr.trim() !== '' ? Number(bStr) : NaN;
-
-                if (!isNaN(aNum) && !isNaN(bNum)) {
-                  return sortOrder === 'desc' ? bNum - aNum : aNum - bNum;
-                }
-
-                const comparison = aStr.localeCompare(bStr);
-                return sortOrder === 'desc' ? -comparison : comparison;
-              });
-
-              if (limit || offset) {
-                const start = offset || 0;
-                sortedItems = sortedItems.slice(start, limit ? start + limit : undefined);
-              }
-            }
+            sortedItems = filteredItems.slice(start, limit ? start + limit : undefined);
           }
 
           // Find slug field for building collection item URLs
@@ -2835,7 +2827,7 @@ export async function resolveCollectionLayers(
   // Third pass: Filter layers by conditional visibility
   // We need to compute collection counts first, then filter
   // parentItemValues is the page collection data for dynamic pages
-  const filteredResult = filterByVisibility(resultWithPagination, undefined, parentItemValues, pageCollectionItemId ?? parentCollectionItemId);
+  const filteredResult = filterByVisibility(resultWithPagination, undefined, parentItemValues, pageCollectionItemId ?? parentCollectionItemId, timezone);
 
   return filteredResult;
 }
@@ -2932,6 +2924,7 @@ function filterByVisibility(
   collectionLayerData?: Record<string, string>,
   pageCollectionData?: Record<string, string> | null,
   pageCollectionItemId?: string | null,
+  timezone: string = 'UTC',
 ): Layer[] {
   const pageCollectionCounts = computeCollectionCounts(layers);
   const filterableCollectionIds = findFilterableCollectionIds(layers);
@@ -2952,6 +2945,7 @@ function filterByVisibility(
         pageCollectionCounts,
         currentItemId: effectiveCurrentItemId,
         pageCollectionItemId,
+        timezone,
       });
       const filterTarget = getFilterableCollectionTarget(conditionalVisibility, filterableCollectionIds);
       if (filterTarget) {
@@ -2974,6 +2968,63 @@ function filterByVisibility(
             display: isVisible ? '' : 'none',
           },
           attributes,
+          children: layer.children
+            ? layer.children
+              .map(child => filterLayer(child, effectiveCollectionLayerData, effectiveCurrentItemId))
+              .filter((child): child is Layer => child !== null)
+            : undefined,
+        };
+      }
+      // Layers whose visibility depends on a date preset ($today, etc.)
+      // are kept in the tree even when the export-time evaluation is false,
+      // so the static-export client-side runtime can re-evaluate against
+      // the current date and reveal/hide them as time passes. Only the
+      // date-preset conditions are re-evaluated on the client; every other
+      // condition (text, number, reference, presence, page_collection, …)
+      // is evaluated once here and its result baked in — so the runtime
+      // never has to reimplement the full visibility engine. layerToHtml
+      // serializes this onto a data attribute, gated on
+      // pageLinkContext.isStaticExport — live SSR sees the layer present
+      // but display:none, which renders identically to a removed layer.
+      if (hasDynamicDateRule(conditionalVisibility)) {
+        const visibilityContext = {
+          collectionLayerData: effectiveCollectionLayerData,
+          pageCollectionData,
+          pageCollectionCounts,
+          currentItemId: effectiveCurrentItemId,
+          pageCollectionItemId,
+          timezone,
+        };
+        const groups = conditionalVisibility.groups.map(group => ({
+          conditions: (group.conditions || []).map((condition): DynamicVisibilityCondition => {
+            if (isDynamicDateCondition(condition) && condition.fieldId) {
+              const v = resolveFieldFromSources(
+                condition.fieldId,
+                undefined,
+                effectiveCollectionLayerData,
+                pageCollectionData,
+              );
+              return {
+                dynamic: true,
+                operator: condition.operator,
+                value: String(condition.value ?? ''),
+                fieldValue: String(v ?? ''),
+                dateOnly: condition.fieldType === 'date_only',
+              };
+            }
+            return {
+              dynamic: false,
+              result: evaluateCondition(condition, visibilityContext),
+            };
+          }),
+        }));
+        return {
+          ...layer,
+          _dynamicStyles: {
+            ...(layer._dynamicStyles || {}),
+            display: isVisible ? '' : 'none',
+          },
+          _dynamicVisibilityRule: { timezone, groups },
           children: layer.children
             ? layer.children
               .map(child => filterLayer(child, effectiveCollectionLayerData, effectiveCurrentItemId))
@@ -3359,7 +3410,7 @@ export async function renderCollectionItemsToHtml(
       }
 
       // Apply conditional visibility based on this item's field values
-      resolvedLayers = filterByVisibility(resolvedLayers, item.values, undefined, pageLinkContext?.pageCollectionItemId);
+      resolvedLayers = filterByVisibility(resolvedLayers, item.values, undefined, pageLinkContext?.pageCollectionItemId, htmlTimezone);
 
       // Preferred path: rebuild a full clone of the collection layer just
       // like SSR does (link/action/attributes preserved). Renders one HTML
@@ -4158,6 +4209,15 @@ export function layerToHtml(
 
   if (layer.id) {
     attrs.push(`data-layer-id="${escapeHtml(layer.id)}"`);
+  }
+
+  // Serialize a date-preset visibility rule for the static-export
+  // client-side runtime. Live SSR ignores this entirely — the layer just
+  // renders with its `_dynamicStyles.display` (none / unset) as usual.
+  if (pageLinkContext?.isStaticExport && layer._dynamicVisibilityRule) {
+    attrs.push(
+      `data-ycode-vis-rule="${escapeHtml(JSON.stringify(layer._dynamicVisibilityRule))}"`,
+    );
   }
 
   // Add data attributes for slider nav/pagination elements (used by SliderInitializer)

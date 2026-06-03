@@ -1945,6 +1945,8 @@ export interface VisibilityContext {
   currentItemId?: string;
   /** ID of the dynamic page's collection item, when on a dynamic page. */
   pageCollectionItemId?: string | null;
+  /** Project timezone (IANA) used for day-aware date condition comparisons. */
+  timezone?: string;
 }
 
 /**
@@ -1953,11 +1955,12 @@ export interface VisibilityContext {
  * @param context - The context containing field values and collection counts
  * @returns True if condition is met, false otherwise
  */
-function evaluateCondition(
+export function evaluateCondition(
   condition: import('@/types').VisibilityCondition,
   context: VisibilityContext
 ): boolean {
   const { collectionLayerData, pageCollectionData, pageCollectionCounts, currentItemId, pageCollectionItemId } = context;
+  const timezone = context.timezone || 'UTC';
 
   // Self conditions: compare the item being evaluated against a set of item
   // IDs (statically picked and/or the current dynamic page item). Used for
@@ -2014,9 +2017,10 @@ function evaluateCondition(
     let compareValue2 = condition.value2;
     let effectiveOperator = condition.operator;
     const fieldType = condition.fieldType || 'text';
+    const isDateOnly = fieldType === 'date_only';
 
     if (isDateFieldType(fieldType) && isDatePreset(compareValue)) {
-      const resolved = resolveDateFilterValue(effectiveOperator, compareValue, compareValue2);
+      const resolved = resolveDateFilterValue(effectiveOperator, compareValue, compareValue2, timezone);
       if (resolved) {
         effectiveOperator = resolved.operator as typeof effectiveOperator;
         compareValue = resolved.value;
@@ -2040,7 +2044,7 @@ function evaluateCondition(
           return parseFloat(value) === parseFloat(compareValue);
         }
         if (isDateFieldType(fieldType)) {
-          return compareDateFilter(value, 'is', compareValue);
+          return compareDateFilter(value, 'is', compareValue, undefined, timezone, isDateOnly);
         }
         return value === compareValue;
 
@@ -2052,7 +2056,7 @@ function evaluateCondition(
           return parseFloat(value) !== parseFloat(compareValue);
         }
         if (isDateFieldType(fieldType)) {
-          return !compareDateFilter(value, 'is', compareValue);
+          return !compareDateFilter(value, 'is', compareValue, undefined, timezone, isDateOnly);
         }
         return value !== compareValue;
 
@@ -2081,15 +2085,16 @@ function evaluateCondition(
       case 'gte':
         return parseFloat(value) >= parseFloat(compareValue);
 
-      // Date operators (day-aware: `YYYY-MM-DD` filter values span the full UTC day)
+      // Date operators (day-aware: `YYYY-MM-DD` filter values span the full day
+      // in the project timezone; `date_only` fields compare in UTC)
       case 'is_before':
-        return compareDateFilter(value, 'is_before', compareValue);
+        return compareDateFilter(value, 'is_before', compareValue, undefined, timezone, isDateOnly);
 
       case 'is_after':
-        return compareDateFilter(value, 'is_after', compareValue);
+        return compareDateFilter(value, 'is_after', compareValue, undefined, timezone, isDateOnly);
 
       case 'is_between':
-        return compareDateFilter(value, 'is_between', compareValue, compareValue2);
+        return compareDateFilter(value, 'is_between', compareValue, compareValue2, timezone, isDateOnly);
 
       case 'is_not_empty':
         return isPresent;

@@ -138,8 +138,12 @@ export async function proxy(request: NextRequest) {
     return response;
   }
 
+  // Debug escape hatch: skip auth on preview routes when explicitly enabled.
+  const skipPreviewAuth = process.env.DISABLE_PREVIEW_AUTH === 'true'
+    && pathname.startsWith('/ycode/preview');
+
   // Protect API and preview routes with auth
-  if (pathname.startsWith('/ycode/api') || pathname.startsWith('/ycode/preview')) {
+  if (!skipPreviewAuth && (pathname.startsWith('/ycode/api') || pathname.startsWith('/ycode/preview'))) {
     const authResponse = await verifyApiAuth(request);
     if (authResponse) {
       if (authResponse.status === 401) {
