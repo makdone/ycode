@@ -1,6 +1,6 @@
 import { getSupabaseAdmin } from '@/lib/supabase-server';
 import { getKnexClient } from '@/lib/knex-client';
-import { SUPABASE_QUERY_LIMIT, SUPABASE_WRITE_BATCH_SIZE } from '@/lib/supabase-constants';
+import { SUPABASE_IN_FILTER_CHUNK_SIZE, SUPABASE_QUERY_LIMIT, SUPABASE_WRITE_BATCH_SIZE } from '@/lib/supabase-constants';
 import type { CollectionField, CollectionItem, CollectionItemWithValues } from '@/types';
 import { randomUUID } from 'crypto';
 import { getFieldsByCollectionId } from '@/lib/repositories/collectionFieldRepository';
@@ -8,6 +8,7 @@ import { getValuesByFieldId, getValuesByItemIds, getValuesByItemId } from '@/lib
 import { generateCollectionItemContentHash } from '@/lib/hash-utils';
 import { castValue } from '../collection-utils';
 import { findStatusFieldId, buildStatusValue } from '@/lib/collection-field-utils';
+import { chunk } from '@/lib/utils';
 
 /**
  * Collection Item Repository
@@ -261,17 +262,28 @@ export async function fetchPublishedHashMap(
 
   let publishedRows: Array<{ id: string; content_hash: string | null }> | null = null;
   try {
-    const { data, error } = await client
-      .from('collection_items')
-      .select('id, content_hash')
-      .in('id', itemIds)
-      .eq('is_published', true)
-      .is('deleted_at', null);
+    // Chunk the ID list: a single large `.in()` overflows the request URL length
+    // limit and returns 400 Bad Request. Fetch chunks in parallel and merge.
+    const chunkResults = await Promise.all(
+      chunk(itemIds, SUPABASE_IN_FILTER_CHUNK_SIZE).map(async (idsChunk) => {
+        const { data, error } = await client
+          .from('collection_items')
+          .select('id, content_hash')
+          .in('id', idsChunk)
+          .eq('is_published', true)
+          .is('deleted_at', null);
 
-    if (error) {
-      console.error('Failed to fetch published items for status:', error.message);
-    } else {
-      publishedRows = data;
+        if (error) {
+          console.error('Failed to fetch published items for status:', error.message);
+          return null;
+        }
+        return data;
+      }),
+    );
+
+    // If every chunk failed, keep publishedRows null; otherwise merge successful chunks
+    if (chunkResults.some((rows) => rows !== null)) {
+      publishedRows = chunkResults.flatMap((rows) => rows ?? []);
     }
   } catch (err) {
     // Transient network errors should not break the items endpoint
