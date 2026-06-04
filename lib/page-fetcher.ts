@@ -3474,6 +3474,14 @@ async function injectCollectionDataForHtml(
   rawItemValues?: Record<string, string>,
   timezone: string = 'UTC'
 ): Promise<Layer> {
+  // Nested collection layers are resolved separately by resolveCollectionLayers,
+  // which clones them per referenced item and injects each item's own values.
+  // Injecting here with the parent item's values would resolve their inner
+  // variables against the wrong context and clobber them (emptying nested fields).
+  if (layer.variables?.collection?.id) {
+    return layer;
+  }
+
   // Reference fields are resolved once per item by the caller
   // (renderCollectionItemsToHtml). Re-resolving on every recursive
   // child would cause redundant Supabase queries.
