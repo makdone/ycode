@@ -800,6 +800,8 @@ function layerToHtmlString(layer: Layer, indent: number): string {
     if (layer.attributes?.loop) attrs.push('loop');
     if (layer.attributes?.muted) attrs.push('muted');
     if (layer.attributes?.autoplay) attrs.push('autoplay');
+    // Mobile (iOS/Android) requires playsinline for inline autoplay (no forced fullscreen).
+    if (layer.name === 'video') attrs.push('playsinline');
   }
 
   const attrStr = attrs.length > 0 ? ` ${attrs.join(' ')}` : '';
