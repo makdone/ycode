@@ -597,6 +597,7 @@ const CenterCanvas = React.memo(function CenterCanvas({
   const previewContainerRef = useRef<HTMLDivElement>(null);
   const [previewContentHeight, setPreviewContentHeight] = useState(0);
   const [previewContainerHeight, setPreviewContainerHeight] = useState(0);
+  const [previewContainerWidth, setPreviewContainerWidth] = useState(0);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // State for iframe element (for SelectionOverlay)
@@ -880,6 +881,19 @@ const CenterCanvas = React.memo(function CenterCanvas({
     return (previewContainerHeight - CANVAS_PADDING) / (previewZoom / 100);
   }, [previewContainerHeight, previewZoom]);
 
+  // Natural (unscaled) width of the preview iframe — its true layout viewport.
+  // Mirrors the previous `width: '100%' (minWidth: viewport)` vs fixed-width
+  // logic, but as a concrete pixel value so the iframe can be scaled with
+  // `transform` instead of CSS `zoom`. In desktop autofit the preview fills the
+  // available container width (but never below the desktop breakpoint); other
+  // modes use the exact breakpoint width.
+  const previewStageWidth = useMemo(() => {
+    if (viewportMode === 'desktop' && previewZoomMode === 'autofit') {
+      return Math.max(previewContainerWidth - CANVAS_PADDING, previewContentWidth);
+    }
+    return previewContentWidth;
+  }, [viewportMode, previewZoomMode, previewContainerWidth, previewContentWidth]);
+
   const previewObserverRef = useRef<ResizeObserver | null>(null);
 
   /** Measure the preview iframe content and set up a ResizeObserver for re-measurement */
@@ -1147,7 +1161,10 @@ const CenterCanvas = React.memo(function CenterCanvas({
     const container = previewContainerRef.current;
     if (!container) return;
 
-    const update = () => setPreviewContainerHeight(container.clientHeight);
+    const update = () => {
+      setPreviewContainerHeight(container.clientHeight);
+      setPreviewContainerWidth(container.clientWidth);
+    };
     update();
     const resizeObserver = new ResizeObserver(update);
     resizeObserver.observe(container);
@@ -2566,19 +2583,38 @@ const CenterCanvas = React.memo(function CenterCanvas({
                   position: 'relative',
                 }}
               >
+                {/* Sizer: occupies the SCALED footprint so the scroll area,
+                    centering, and drop shadow match the visible canvas size. */}
                 <div
                   className={editingComponentId ? 'relative' : 'bg-white shadow-3xl relative'}
                   style={{
-                    zoom: zoom / 100,
-                    width: `${effectiveCanvasWidth}px`,
-                    height: `${finalIframeHeight}px`,
+                    width: `${effectiveCanvasWidth * (zoom / 100)}px`,
+                    height: `${finalIframeHeight * (zoom / 100)}px`,
                     flexShrink: 0, // Prevent shrinking - maintain fixed size
-                    // No transition to prevent shifts
-                    transition: 'none',
                     // Clip overflow when canvas is smaller than iframe (component editing)
                     overflow: editingComponentId ? 'hidden' : undefined,
                   }}
                 >
+                  {/* Stage: natural (unscaled) size, scaled with CSS transform from
+                      the top-left corner. We deliberately use `transform: scale()`
+                      instead of CSS `zoom`: Safari shrinks an iframe's content layout
+                      viewport when an ancestor uses `zoom`, which rendered the page
+                      too narrow (white space on the right) and misaligned the
+                      selection overlay. transform keeps the iframe at its true
+                      breakpoint width while only scaling the painted output. */}
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: `${effectiveCanvasWidth}px`,
+                      height: `${finalIframeHeight}px`,
+                      transform: `scale(${zoom / 100})`,
+                      transformOrigin: 'top left',
+                      // No transition to prevent shifts
+                      transition: 'none',
+                    }}
+                  >
                   {/* Inner wrapper: keep iframe at viewport width for natural content rendering */}
                   <div
                     style={{
@@ -2835,6 +2871,7 @@ const CenterCanvas = React.memo(function CenterCanvas({
                     </div>
                   )}
                   </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2894,45 +2931,59 @@ const CenterCanvas = React.memo(function CenterCanvas({
               <Spinner />
             </div>
           )}
+          {/* Sizer: occupies the SCALED footprint so centering and scrolling
+              match the visible preview size. */}
           <div
             className="bg-white shadow-3xl relative mx-auto my-auto"
             style={{
-              zoom: previewZoom / 100,
-              width: viewportMode === 'desktop' && previewZoomMode === 'autofit'
-                ? '100%'
-                : viewportSizes[viewportMode].width,
-              minWidth: viewportMode === 'desktop' && previewZoomMode === 'autofit'
-                ? viewportSizes[viewportMode].width
-                : undefined,
-              height: finalPreviewIframeHeight > 0 ? `${finalPreviewIframeHeight}px` : '100%',
+              width: `${previewStageWidth * (previewZoom / 100)}px`,
+              height: finalPreviewIframeHeight > 0
+                ? `${finalPreviewIframeHeight * (previewZoom / 100)}px`
+                : '100%',
               flexShrink: 0,
-              transition: 'none',
             }}
           >
-            {layers.length > 0 && isPreviewMode ? (
-              <iframe
-                ref={iframeRef}
-                src={previewUrl}
-                className="w-full h-full border-0"
-                title="Preview"
-                tabIndex={-1}
-                onLoad={handlePreviewLoad}
-              />
-            ) : layers.length === 0 && isPreviewMode ? (
-              <div className="w-full h-full flex items-center justify-center p-12">
-                <div className="text-center max-w-md">
-                  <div className="w-20 h-20 bg-linear-to-br from-blue-100 to-blue-50 rounded-2xl mx-auto mb-6 flex items-center justify-center">
-                    <Icon name="layout" className="w-10 h-10 text-blue-500" />
+            {/* Stage: natural (unscaled) size, scaled with `transform` instead of
+                CSS `zoom`. Safari shrinks an iframe's content viewport under an
+                ancestor `zoom`, which rendered previews too narrow; transform keeps
+                the iframe at its true breakpoint width. */}
+            <div
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: `${previewStageWidth}px`,
+                height: finalPreviewIframeHeight > 0 ? `${finalPreviewIframeHeight}px` : '100%',
+                transform: `scale(${previewZoom / 100})`,
+                transformOrigin: 'top left',
+                transition: 'none',
+              }}
+            >
+              {layers.length > 0 && isPreviewMode ? (
+                <iframe
+                  ref={iframeRef}
+                  src={previewUrl}
+                  className="w-full h-full border-0"
+                  title="Preview"
+                  tabIndex={-1}
+                  onLoad={handlePreviewLoad}
+                />
+              ) : layers.length === 0 && isPreviewMode ? (
+                <div className="w-full h-full flex items-center justify-center p-12">
+                  <div className="text-center max-w-md">
+                    <div className="w-20 h-20 bg-linear-to-br from-blue-100 to-blue-50 rounded-2xl mx-auto mb-6 flex items-center justify-center">
+                      <Icon name="layout" className="w-10 h-10 text-blue-500" />
+                    </div>
+                    <h2 className="text-2xl font-bold text-gray-900 mb-3">
+                      No content
+                    </h2>
+                    <p className="text-gray-600">
+                      This page has no content to preview.
+                    </p>
                   </div>
-                  <h2 className="text-2xl font-bold text-gray-900 mb-3">
-                    No content
-                  </h2>
-                  <p className="text-gray-600">
-                    This page has no content to preview.
-                  </p>
                 </div>
-              </div>
-            ) : null}
+              ) : null}
+            </div>
           </div>
         </div>
       </div>
