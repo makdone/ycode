@@ -96,6 +96,8 @@ interface LayerRendererPublicProps {
   currentLocale?: Locale | null;
   availableLocales?: Locale[];
   localeSelectorFormat?: 'locale' | 'code';
+  /** Pre-computed relative URLs per locale ID (translated slugs) for the locale selector. */
+  localizedPageUrls?: Record<string, string>;
   isInsideForm?: boolean;
   isInsideLink?: boolean;
   parentFormSettings?: FormSettings;
@@ -139,6 +141,7 @@ const LayerRendererPublic: React.FC<LayerRendererPublicProps> = ({
   currentLocale,
   availableLocales = [],
   localeSelectorFormat,
+  localizedPageUrls,
   isInsideForm = false,
   isInsideLink = false,
   parentFormSettings,
@@ -252,6 +255,7 @@ const LayerRendererPublic: React.FC<LayerRendererPublicProps> = ({
         currentLocale={currentLocale}
         availableLocales={availableLocales}
         localeSelectorFormat={localeSelectorFormat}
+        localizedPageUrls={localizedPageUrls}
         isInsideForm={isInsideForm}
         isInsideLink={isInsideLink}
         parentFormSettings={parentFormSettings}
@@ -294,6 +298,7 @@ const LayerItem: React.FC<{
   currentLocale?: Locale | null;
   availableLocales?: Locale[];
   localeSelectorFormat?: 'locale' | 'code';
+  localizedPageUrls?: Record<string, string>;
   isInsideForm?: boolean;
   isInsideLink?: boolean;
   parentFormSettings?: FormSettings;
@@ -324,6 +329,7 @@ const LayerItem: React.FC<{
   currentLocale,
   availableLocales,
   localeSelectorFormat,
+  localizedPageUrls,
   isInsideForm = false,
   isInsideLink = false,
   parentFormSettings,
@@ -384,6 +390,7 @@ const LayerItem: React.FC<{
     currentLocale,
     availableLocales,
     localeSelectorFormat,
+    localizedPageUrls,
     isInsideForm,
     isInsideLink,
     parentFormSettings,
@@ -398,7 +405,7 @@ const LayerItem: React.FC<{
     serverSettings,
     lcpCandidateLayerId,
     passwordProtection,
-  }), [isPublished, pageId, collectionLayerData, collectionLayerItemId, effectiveLayerDataMap, pageCollectionItemId, pageCollectionItemData, pageCollectionSortedItemIds, hiddenLayerInfo, currentLocale, availableLocales, localeSelectorFormat, isInsideForm, isInsideLink, parentFormSettings, pages, folders, collectionItemSlugs, isPreview, translations, anchorMap, resolvedAssets, componentsProp, serverSettings, lcpCandidateLayerId, passwordProtection]);
+  }), [isPublished, pageId, collectionLayerData, collectionLayerItemId, effectiveLayerDataMap, pageCollectionItemId, pageCollectionItemData, pageCollectionSortedItemIds, hiddenLayerInfo, currentLocale, availableLocales, localeSelectorFormat, localizedPageUrls, isInsideForm, isInsideLink, parentFormSettings, pages, folders, collectionItemSlugs, isPreview, translations, anchorMap, resolvedAssets, componentsProp, serverSettings, lcpCandidateLayerId, passwordProtection]);
 
   const renderComponentBlock: RenderComponentBlockFn = useCallback(
     (comp, resolvedLayers, _overrides, key, innerAncestorIds) => {
@@ -1675,6 +1682,7 @@ const LayerItem: React.FC<{
               currentLocale={currentLocale}
               availableLocales={availableLocales}
               localeSelectorFormat={localeSelectorFormat}
+              localizedPageUrls={localizedPageUrls}
               isInsideForm={isInsideForm}
               isInsideLink={isInsideLink}
               parentFormSettings={parentFormSettings}
@@ -1737,6 +1745,7 @@ const LayerItem: React.FC<{
             availableLocales={availableLocales}
             currentPageSlug={currentPageSlug}
             isPublished={isPublished}
+            localizedPageUrls={localizedPageUrls}
           />
         </Tag>
       );
