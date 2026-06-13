@@ -24,6 +24,7 @@ import { getTranslatedAssetId, getTranslatedText } from '@/lib/locale-runtime';
 import { isValidLinkSettings, generateLinkHref, resolveLinkAttrs, isLinkAtCollectionBoundary, isLinkToCurrentPage, type LinkResolutionContext } from '@/lib/link-utils';
 import { DEFAULT_ASSETS, buildImageSizes, generateImageSrcset, getOptimizedImageUrl, getSvgAspectRatioStyle, parseImageDimension } from '@/lib/asset-utils';
 import { resolveInlineVariablesFromData } from '@/lib/inline-variables';
+import { extractPlainTextFromTiptap } from '@/lib/tiptap-utils';
 import { renderRichText, hasBlockElementsWithInlineVariables, getTextStyleClasses, flattenTiptapParagraphs, type RichTextLinkContext, type RenderComponentBlockFn } from '@/lib/text-format-utils';
 import { combineBgValues, mergeStaticBgVars } from '@/lib/tailwind-class-mapper';
 import { clsx } from 'clsx';
@@ -651,8 +652,13 @@ const LayerItem: React.FC<{
     pageCollectionItemData
   );
 
-  // Get image alt text, resolve inline variables, and apply translation if available
-  const rawImageAlt = String(getDynamicTextContent(effectiveImageSettings?.alt) || 'Image');
+  // Get image alt text, resolve inline variables, and apply translation if available.
+  // Alt is an attribute and must be a plain string: if a Tiptap doc slips in
+  // (e.g. legacy data), extract its text instead of stringifying to "[object Object]".
+  const rawImageAltContent = getDynamicTextContent(effectiveImageSettings?.alt) as unknown;
+  const rawImageAlt = typeof rawImageAltContent === 'object' && rawImageAltContent !== null
+    ? (extractPlainTextFromTiptap(rawImageAltContent) || 'Image')
+    : String(rawImageAltContent || 'Image');
   const originalImageAlt = rawImageAlt.includes('<ycode-inline-variable>')
     ? resolveInlineVariablesFromData(rawImageAlt, collectionLayerData, pageCollectionItemData ?? undefined, timezone, effectiveLayerDataMap)
     : rawImageAlt;

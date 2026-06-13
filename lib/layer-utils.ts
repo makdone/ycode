@@ -4313,17 +4313,22 @@ export function updateLayerProps(
 
 /**
  * Find all layers with a custom anchor ID (settings.id takes priority over attributes.id).
+ * Deduplicates by anchor ID since an `#id` link resolves to the first match, so a
+ * repeated ID (e.g. duplicated component instances) would otherwise produce duplicate
+ * dropdown options and React key collisions.
  * Used by link settings to populate anchor selection dropdowns.
  */
 export function findLayersWithAnchorId(layers: Layer[]): Array<{ layer: Layer; id: string }> {
   const result: Array<{ layer: Layer; id: string }> = [];
+  const seen = new Set<string>();
   const stack: Layer[] = [...layers];
 
   while (stack.length > 0) {
     const layer = stack.pop()!;
 
     const layerId = layer.settings?.id || layer.attributes?.id;
-    if (layerId) {
+    if (layerId && !seen.has(layerId)) {
+      seen.add(layerId);
       result.push({ layer, id: layerId });
     }
 
