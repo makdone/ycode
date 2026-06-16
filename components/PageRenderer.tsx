@@ -777,6 +777,7 @@ export default async function PageRenderer({
         data-layer-id="body"
         data-layer-type="div"
         data-is-empty={hasLayers ? 'false' : 'true'}
+        lang={(locale?.code || availableLocales.find((l) => l.is_default)?.code) || undefined}
       >
         <LayerRendererPublic
           layers={childLayers}
