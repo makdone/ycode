@@ -25,7 +25,7 @@ import { REF_PAGE_PREFIX, REF_COLLECTION_PREFIX, isCollectionItemKeyword, parseC
 import { getClassesString, hasPasswordFormLayer } from '@/lib/layer-utils';
 import { buildLocalizedPageUrls, type LocalizedDynamicSlug } from '@/lib/page-utils';
 import { getTranslatableKey } from '@/lib/locale-runtime';
-import { getTranslationsByLocale } from '@/lib/repositories/translationRepository';
+import { getSlugTranslationsByLocale } from '@/lib/repositories/translationRepository';
 import type { Layer, Component, Page, CollectionItemWithValues, CollectionField, Locale, PageFolder, PasswordProtectionContext, Translation } from '@/types';
 
 interface PageLinkRef { collection_item_id: string; page_id: string }
@@ -449,7 +449,9 @@ export default async function PageRenderer({
               translationsByLocale[l.id] = translations as Record<string, Translation>;
               return;
             }
-            const rows = await getTranslationsByLocale(l.id, usePublishedData);
+            // Only slug rows are needed to build localized URLs for the locale
+            // switcher — avoid loading the full CMS-content catalogue per locale.
+            const rows = await getSlugTranslationsByLocale(l.id, usePublishedData);
             const map: Record<string, Translation> = {};
             for (const t of rows) {
               map[getTranslatableKey(t)] = t;
