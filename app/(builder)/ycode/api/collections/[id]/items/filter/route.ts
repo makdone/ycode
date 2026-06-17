@@ -40,6 +40,11 @@ interface FilterCondition {
 // Conservative chunk size avoids hitting URL length limits (~8KB).
 const IN_CHUNK_SIZE = 150;
 
+// How many chunk queries to run at once. Chunks are independent, so issuing them
+// concurrently overlaps the round-trips (the dominant cost on large collections)
+// while the cap keeps us from opening an unbounded number of DB connections.
+const CHUNK_CONCURRENCY = 6;
+
 function escapeLikeValue(val: string): string {
   return val.replace(/[%_\\]/g, '\\$&');
 }
@@ -47,6 +52,9 @@ function escapeLikeValue(val: string): string {
 /**
  * Run a query against collection_item_values in chunks to avoid
  * Supabase/PostgREST URL-length limits on .in() clauses.
+ *
+ * Chunks are issued in bounded-concurrency batches: each batch runs in parallel
+ * (overlapping latency) and batches run sequentially (capping connections).
  *
  * @param build  - receives a chunk of item IDs; must return { data, error }
  * @param itemIds - full array of item IDs to query against
@@ -60,10 +68,19 @@ async function chunkedQuery<T>(
     const { data } = await build(itemIds);
     return data || [];
   }
-  const results: T[] = [];
+
+  const chunks: string[][] = [];
   for (let i = 0; i < itemIds.length; i += IN_CHUNK_SIZE) {
-    const { data } = await build(itemIds.slice(i, i + IN_CHUNK_SIZE));
-    if (data) results.push(...data);
+    chunks.push(itemIds.slice(i, i + IN_CHUNK_SIZE));
+  }
+
+  const results: T[] = [];
+  for (let i = 0; i < chunks.length; i += CHUNK_CONCURRENCY) {
+    const batch = chunks.slice(i, i + CHUNK_CONCURRENCY);
+    const settled = await Promise.all(batch.map(chunk => build(chunk)));
+    for (const { data } of settled) {
+      if (data) results.push(...data);
+    }
   }
   return results;
 }
@@ -602,6 +619,7 @@ export async function POST(
       sortOrder = 'asc',
       limit,
       offset = 0,
+      maxTotal,
       localeCode,
       collectionLayerClasses,
       collectionLayerTag,
@@ -618,6 +636,20 @@ export async function POST(
       return noCache({ error: 'collectionLayerId is required' }, 400);
     }
 
+    // Collection fields, page/folder maps, and translations are needed only for
+    // rendering and don't depend on the timezone or which items match. Fetch them
+    // concurrently with the timezone lookup and the (slower) filter resolution so
+    // they're off the critical path.
+    const metadataPromise = Promise.all([
+      getFieldsByCollectionId(collectionId, isPublished, { excludeComputed: true }),
+      getAllPages(),
+      getAllPageFolders(),
+      localeCode ? loadTranslationsForLocale(localeCode, isPublished) : Promise.resolve(null),
+    ]);
+    // Register a no-op rejection handler so bailing out early (empty result) or
+    // an error in filtering doesn't surface as an unhandled promise rejection.
+    metadataPromise.catch(() => {});
+
     const timezone = (await getSettingByKey('timezone') as string | null) || 'UTC';
 
     const { matchingIds, total: filteredTotal } = await getFilteredItemIds(
@@ -628,14 +660,26 @@ export async function POST(
       pageCollectionItemId,
     );
 
-    if (matchingIds.length === 0) {
+    const pageOffset = Math.max(0, offset || 0);
+
+    // `maxTotal` (the collection's display limit when pagination is enabled)
+    // caps the total just like SSR, so a client-side reconcile reports the same
+    // "Showing X of Y" and stops load_more/paging at the same boundary instead
+    // of exposing the raw filtered count.
+    const cappedTotal = typeof maxTotal === 'number' && maxTotal > 0
+      ? Math.min(filteredTotal, maxTotal)
+      : filteredTotal;
+
+    if (matchingIds.length === 0 || pageOffset >= cappedTotal) {
       return noCache({
-        data: { html: '', total: 0, count: 0, offset, hasMore: false, itemIds: [] },
+        data: { html: '', total: cappedTotal, count: 0, offset: pageOffset, hasMore: false, itemIds: [] },
       });
     }
 
-    const pageOffset = Math.max(0, offset || 0);
-    const pageLimit = limit && limit > 0 ? limit : filteredTotal;
+    // Never serve items past the cap: shrink the page window to what's left
+    // below `cappedTotal`.
+    const requestedLimit = limit && limit > 0 ? limit : cappedTotal;
+    const pageLimit = Math.min(requestedLimit, cappedTotal - pageOffset);
     let pageRawItems: CollectionItem[] = [];
     let pageItemIds: string[] = [];
 
@@ -695,9 +739,10 @@ export async function POST(
     // render the live number in the filtered HTML.
     await enrichItemsWithCountValues(paginatedItems, collectionId, isPublished);
 
-    const hasMore = pageOffset + paginatedItems.length < filteredTotal;
+    const hasMore = pageOffset + paginatedItems.length < cappedTotal;
 
-    const collectionFields = await getFieldsByCollectionId(collectionId, isPublished, { excludeComputed: true });
+    const [collectionFields, pages, folders, localeData] = await metadataPromise;
+
     const slugField = collectionFields.find(f => f.key === 'slug');
     const collectionItemSlugs: Record<string, string> = {};
     if (slugField) {
@@ -708,18 +753,8 @@ export async function POST(
       }
     }
 
-    const [pages, folders] = await Promise.all([
-      getAllPages(),
-      getAllPageFolders(),
-    ]);
-
-    let locale = null;
-    let translations: Record<string, any> | undefined;
-    if (localeCode) {
-      const localeData = await loadTranslationsForLocale(localeCode, isPublished);
-      locale = localeData.locale;
-      translations = localeData.translations;
-    }
+    const locale = localeData?.locale ?? null;
+    const translations = localeData?.translations;
 
     const html = await renderCollectionItemsToHtml(
       paginatedItems,
@@ -748,7 +783,7 @@ export async function POST(
     return noCache({
       data: {
         html,
-        total: filteredTotal,
+        total: cappedTotal,
         count: paginatedItems.length,
         offset: pageOffset,
         hasMore,

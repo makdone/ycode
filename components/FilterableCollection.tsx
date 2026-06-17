@@ -16,6 +16,9 @@ interface FilterableCollectionProps {
   sortByInputLayerId?: string;
   sortOrderInputLayerId?: string;
   limit?: number;
+  /** Hard cap on the total — clamps the displayed count and `hasMore` so a
+   * client-side reconcile matches the SSR-capped "Showing X of Y". */
+  maxTotal?: number;
   paginationMode?: 'pages' | 'load_more';
   layerTemplate: Layer[];
   collectionLayerClasses?: string[];
@@ -32,6 +35,40 @@ interface FilterableCollectionProps {
 }
 
 const FC_FILTERED_ATTR = 'data-fc-filtered';
+const FC_SKELETON_ATTR = 'data-fc-skeleton';
+const FC_RUNTIME_SKELETON_ATTR = 'data-fc-runtime-skeleton';
+const FC_SKELETON_STYLE_ID = 'fc-skeleton-style';
+const FC_PRERENDER_HIDE_ATTR = 'data-fc-prerender-hide';
+
+/**
+ * Inject the skeleton pulse keyframes once. Published sites ship their own
+ * compiled CSS (no guaranteed Tailwind utilities), so the loading placeholder
+ * relies on inline styles plus this self-contained animation rather than
+ * framework classes.
+ */
+function ensureSkeletonStyles() {
+  if (typeof document === 'undefined') return;
+  if (document.getElementById(FC_SKELETON_STYLE_ID)) return;
+  const style = document.createElement('style');
+  style.id = FC_SKELETON_STYLE_ID;
+  style.textContent = getSkeletonStyles();
+  document.head.appendChild(style);
+}
+
+function getSkeletonStyles() {
+  return (
+    `@keyframes fc-skeleton-pulse{0%,100%{opacity:1}50%{opacity:.45}}` +
+    `[${FC_SKELETON_ATTR}]{` +
+    `min-height:7rem;border-radius:.5rem;` +
+    `background:currentColor;color:rgba(120,120,120,.18);` +
+    `animation:fc-skeleton-pulse 1.2s ease-in-out infinite;}`
+  );
+}
+
+function getPrerenderHideStyles() {
+  return getSkeletonStyles() +
+    `[${FC_PRERENDER_HIDE_ATTR}]~:not([${FC_SKELETON_ATTR}]){display:none!important;}`;
+}
 
 /**
  * Browser custom event dispatched after collection HTML is appended/replaced
@@ -61,6 +98,7 @@ export default function FilterableCollection({
   sortByInputLayerId,
   sortOrderInputLayerId,
   limit,
+  maxTotal,
   paginationMode,
   layerTemplate,
   collectionLayerClasses,
@@ -88,6 +126,7 @@ export default function FilterableCollection({
   // live server on mount so the list always reflects the real "today" (and stays
   // consistent with the server-side search/filter, which re-resolves it fresh).
   const hasDynamicDateFilter = hasDynamicDateRule(filters);
+  const [renderInitialSkeleton, setRenderInitialSkeleton] = useState(hasDynamicDateFilter);
   // Input-linked filters (e.g. a URL-driven search) hide the SSR list up front so
   // we don't flash the full list before narrowing it. A date-only reconcile keeps
   // the SSR list visible and relies on the loading dim (`isFiltering` opacity)
@@ -146,10 +185,60 @@ export default function FilterableCollection({
     parent.querySelectorAll(`[${FC_FILTERED_ATTR}]`).forEach(el => el.remove());
   }, [getParent]);
 
+  const removeLoadingSkeleton = useCallback(() => {
+    setRenderInitialSkeleton(false);
+    const parent = getParent();
+    if (!parent) return;
+    parent.querySelectorAll(`[${FC_RUNTIME_SKELETON_ATTR}]`).forEach(el => el.remove());
+  }, [getParent]);
+
+  // Show placeholder cards while a fresh list is fetched, but only when there's
+  // nothing already on screen to dim. This targets the relative-date reconcile
+  // (and any filter that starts from an empty list), where the SSR HTML can be
+  // empty — without it the list looks broken/empty for the 1-3s round-trip.
+  const showLoadingSkeleton = useCallback(() => {
+    const parent = getParent();
+    if (!parent) return;
+    if (parent.querySelector(`[${FC_SKELETON_ATTR}]`)) return;
+
+    const hasVisibleSsr = ssrChildrenRef.current.some(
+      el => (el as HTMLElement).style.display !== 'none'
+    );
+    const hasVisibleFiltered = parent.querySelector(`[${FC_FILTERED_ATTR}]`) !== null;
+    if (hasVisibleSsr || hasVisibleFiltered) return;
+
+    ensureSkeletonStyles();
+
+    const count = Math.min(Math.max(limit && limit > 0 ? limit : 6, 1), 8);
+    // Clone a real item when one exists (best layout fidelity); otherwise fall
+    // back to a generic block that flows in whatever grid/flex the parent uses.
+    const template = ssrChildrenRef.current[0] as HTMLElement | undefined;
+    for (let i = 0; i < count; i++) {
+      let node: HTMLElement;
+      if (template) {
+        node = template.cloneNode(true) as HTMLElement;
+        node.style.color = 'rgba(120,120,120,.18)';
+        node.style.background = 'currentColor';
+        node.style.borderRadius = '0.5rem';
+        node.style.animation = 'fc-skeleton-pulse 1.2s ease-in-out infinite';
+        node.querySelectorAll('*').forEach(child => {
+          (child as HTMLElement).style.visibility = 'hidden';
+        });
+      } else {
+        node = document.createElement('div');
+      }
+      node.style.display = '';
+      node.setAttribute(FC_SKELETON_ATTR, '');
+      node.setAttribute(FC_RUNTIME_SKELETON_ATTR, '');
+      parent.appendChild(node);
+    }
+  }, [getParent, limit]);
+
   const injectFilteredHTML = useCallback((html: string, append: boolean, itemIds: string[]) => {
     const parent = getParent();
     if (!parent) return;
     if (!append) {
+      removeLoadingSkeleton();
       hideSSR();
       clearFilteredDOM();
     }
@@ -162,19 +251,29 @@ export default function FilterableCollection({
     }
     const detail: ItemsInjectedDetail = { collectionLayerId, layerTemplate, itemIds, append, collectionLayer };
     window.dispatchEvent(new CustomEvent<ItemsInjectedDetail>(ITEMS_INJECTED_EVENT, { detail }));
-  }, [getParent, hideSSR, clearFilteredDOM, collectionLayerId, layerTemplate, collectionLayer]);
+  }, [getParent, hideSSR, clearFilteredDOM, removeLoadingSkeleton, collectionLayerId, layerTemplate, collectionLayer]);
 
-  // Capture SSR children on mount (before paint) and hide if pending
+  // Capture SSR children on mount (before paint) and hide stale SSR output when
+  // the initial runtime reconcile will replace it. Without this, cached rows can
+  // flash briefly before the skeleton/fresh fetch starts.
   useLayoutEffect(() => {
     if (!markerRef.current) return;
     const parent = markerRef.current.parentElement;
     if (!parent) return;
     ssrChildrenRef.current = Array.from(parent.children).filter(
-      el => el !== markerRef.current && !(el as HTMLElement).hasAttribute('data-collection-marker')
+      el =>
+        el !== markerRef.current &&
+        el.tagName.toLowerCase() !== 'style' &&
+        !(el as HTMLElement).hasAttribute('data-collection-marker') &&
+        !(el as HTMLElement).hasAttribute(FC_SKELETON_ATTR)
     );
     if (pendingFirstEvalRef.current) {
       hideSSR();
+    } else if (hasDynamicDateFilter) {
+      hideSSR();
+      showLoadingSkeleton();
     }
+    markerRef.current.removeAttribute(FC_PRERENDER_HIDE_ATTR);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filterValues = useFilterStore((state) => state.values);
@@ -627,6 +726,7 @@ export default function FilterableCollection({
     if (inFlightRequestKeyRef.current === requestKey) return;
 
     setIsFiltering(true);
+    if (!append) showLoadingSkeleton();
 
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -644,6 +744,7 @@ export default function FilterableCollection({
         sortOrder: effectiveSortOrder,
         limit,
         offset,
+        maxTotal,
         published: isPublished,
         collectionLayerClasses,
         collectionLayerTag,
@@ -661,12 +762,14 @@ export default function FilterableCollection({
       .then(result => {
         if (result.error) {
           console.error('Filter API error:', result.error);
+          removeLoadingSkeleton();
           setIsFiltering(false);
           return;
         }
 
         const data = result.data;
         if (!data) {
+          removeLoadingSkeleton();
           setIsFiltering(false);
           return;
         }
@@ -693,6 +796,7 @@ export default function FilterableCollection({
       .catch(err => {
         if (err.name !== 'AbortError') {
           console.error('Filter fetch failed:', err);
+          removeLoadingSkeleton();
           setIsFiltering(false);
         }
       })
@@ -702,7 +806,7 @@ export default function FilterableCollection({
           abortRef.current = null;
         }
       });
-  }, [collectionId, collectionLayerId, layerTemplate, effectiveSortBy, effectiveSortOrder, limit, paginationMode, updateEmptyStateElements, injectFilteredHTML, collectionLayerClasses, collectionLayerTag, isPublished, isPreview, pageCollectionItemId, pageCollectionSortedItemIds, collectionLayer]);
+  }, [collectionId, collectionLayerId, layerTemplate, effectiveSortBy, effectiveSortOrder, limit, maxTotal, paginationMode, updateEmptyStateElements, injectFilteredHTML, showLoadingSkeleton, removeLoadingSkeleton, collectionLayerClasses, collectionLayerTag, isPublished, isPreview, pageCollectionItemId, pageCollectionSortedItemIds, collectionLayer]);
 
   const fetchFilteredRef = useRef(fetchFiltered);
   useEffect(() => { fetchFilteredRef.current = fetchFiltered; }, [fetchFiltered]);
@@ -761,6 +865,7 @@ export default function FilterableCollection({
       setFilteredTotal(0);
       setFilteredLoaded(0);
       loadMoreOffsetRef.current = 0;
+      removeLoadingSkeleton();
       clearFilteredDOM();
       showSSR();
       detachPaginationIntercept();
@@ -809,7 +914,7 @@ export default function FilterableCollection({
 
     const startOffset = (startPage - 1) * (limit || 10);
     fetchFiltered(filterGroups, startOffset, false);
-  }, [filterValues, buildApiFilters, fetchFiltered, paginationMode, attachPaginationIntercept, detachPaginationIntercept, restoreSsrPagination, getSsrPaginationWrapper, updateEmptyStateElements, fpKey, pKey, limit, hasRuntimeSortOverride, hasDynamicDateFilter, effectiveSortBy, effectiveSortOrder, showSSR, clearFilteredDOM]);
+  }, [filterValues, buildApiFilters, fetchFiltered, paginationMode, attachPaginationIntercept, detachPaginationIntercept, restoreSsrPagination, getSsrPaginationWrapper, updateEmptyStateElements, fpKey, pKey, limit, hasRuntimeSortOverride, hasDynamicDateFilter, effectiveSortBy, effectiveSortOrder, showSSR, clearFilteredDOM, removeLoadingSkeleton]);
 
   useEffect(() => {
     if (!hasActiveFilters || paginationMode !== 'pages') return;
@@ -843,13 +948,26 @@ export default function FilterableCollection({
     }
   }, [isFiltering, getParent]);
 
-  // Zero DOM footprint: invisible marker + direct children
+  const initialSkeletonCount = hasDynamicDateFilter
+    ? Math.min(Math.max(limit && limit > 0 ? limit : 6, 1), 8)
+    : 0;
+
+  // Zero DOM footprint for normal lists; dynamic-date lists include first-paint
+  // skeletons so stale cached SSR rows never flash before hydration.
   return (
     <>
+      {renderInitialSkeleton && (
+        <style dangerouslySetInnerHTML={{ __html: getPrerenderHideStyles() }} />
+      )}
       <span
-        ref={markerRef} data-collection-marker=""
+        ref={markerRef}
+        data-collection-marker=""
+        {...(renderInitialSkeleton ? { [FC_PRERENDER_HIDE_ATTR]: '' } : {})}
         style={{ display: 'none' }}
       />
+      {renderInitialSkeleton && Array.from({ length: initialSkeletonCount }).map((_, index) => (
+        <div key={`fc-skeleton-${index}`} {...{ [FC_SKELETON_ATTR]: '' }} />
+      ))}
       {children}
     </>
   );

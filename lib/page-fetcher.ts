@@ -353,15 +353,17 @@ async function getCollectionItemBySlug(
             // Extract item ID from translation key
             const itemId = translation.source_id;
 
-            // Verify this item belongs to the correct collection
-            const { data: item, error: itemError } = await supabase
+            // Verify this item belongs to the correct collection. On the public
+            // path also require is_publishable so unpublished items can't resolve.
+            let itemQuery = supabase
               .from('collection_items')
               .select('*')
               .eq('id', itemId)
               .eq('collection_id', collectionId)
               .eq('is_published', isPublished)
-              .is('deleted_at', null)
-              .single();
+              .is('deleted_at', null);
+            if (isPublished) itemQuery = itemQuery.eq('is_publishable', true);
+            const { data: item, error: itemError } = await itemQuery.single();
 
             if (!itemError && item) {
               // Found the item via translation - return it with all values
@@ -387,15 +389,17 @@ async function getCollectionItemBySlug(
       return null;
     }
 
-    // Verify the item belongs to the correct collection
-    const { data: item, error: itemError } = await supabase
+    // Verify the item belongs to the correct collection. On the public path
+    // also require is_publishable so unpublished items can't resolve.
+    let itemQuery = supabase
       .from('collection_items')
       .select('*')
       .eq('id', valueData.item_id)
       .eq('collection_id', collectionId)
       .eq('is_published', isPublished)
-      .is('deleted_at', null)
-      .single();
+      .is('deleted_at', null);
+    if (isPublished) itemQuery = itemQuery.eq('is_publishable', true);
+    const { data: item, error: itemError } = await itemQuery.single();
 
     if (itemError || !item) {
       return null;
@@ -1790,16 +1794,32 @@ interface CollectionDataCache {
  *
  * Stops recursion at child layers that define their own collection scope.
  */
-function collectBoundFieldIds(layers: Layer[]): { fieldIds: Set<string>; fieldPaths: Set<string> } {
+function collectBoundFieldIds(layers: Layer[]): { fieldIds: Set<string>; fieldPaths: Set<string>; pathsByLayerId: Map<string, Set<string>> } {
   const fieldIds = new Set<string>();
   const fieldPaths = new Set<string>();
+  // Paths bound with an explicit collection_layer_id pointing at an ancestor
+  // collection layer (e.g. a binding inside a nested collection that reads a
+  // field from the enclosing collection). These must be re-attributed to that
+  // ancestor so its reference paths get resolved on SSR.
+  const pathsByLayerId = new Map<string, Set<string>>();
 
-  function addFieldVariable(fv: { type: 'field'; data: { field_id: string | null; relationships?: string[] } }) {
+  function addFieldVariable(fv: { type: 'field'; data: { field_id: string | null; relationships?: string[]; collection_layer_id?: string } }) {
     const fid = fv.data.field_id;
     if (!fid) return;
     fieldIds.add(fid);
     const rels = fv.data.relationships || [];
-    fieldPaths.add(rels.length > 0 ? [fid, ...rels].join('.') : fid);
+    const path = rels.length > 0 ? [fid, ...rels].join('.') : fid;
+    fieldPaths.add(path);
+
+    const clid = fv.data.collection_layer_id;
+    if (clid) {
+      let set = pathsByLayerId.get(clid);
+      if (!set) {
+        set = new Set<string>();
+        pathsByLayerId.set(clid, set);
+      }
+      set.add(path);
+    }
   }
 
   function scanInlineVariableTags(html: string) {
@@ -1961,7 +1981,7 @@ function collectBoundFieldIds(layers: Layer[]): { fieldIds: Set<string>; fieldPa
   }
 
   layers.forEach(scanLayer);
-  return { fieldIds, fieldPaths };
+  return { fieldIds, fieldPaths, pathsByLayerId };
 }
 
 function collectAllCollectionIds(layers: Layer[]): Set<string> {
@@ -2029,10 +2049,17 @@ async function buildCollectionCache(
   const refCollectionIds: string[] = [];
   const refFieldIdToCollectionId = new Map<string, string>();
   for (const f of fieldsData || []) {
-    if (f.type === 'reference' && f.reference_collection_id && !collectionIds.has(f.reference_collection_id)) {
+    if (f.type === 'reference' && f.reference_collection_id) {
       if (!boundFieldIds || boundFieldIds.has(f.id)) {
-        refCollectionIds.push(f.reference_collection_id);
+        // Always map the reference field to its target so relationship paths
+        // (refFieldId.targetFieldId) resolve. Only schedule a separate items
+        // fetch when the target isn't already a primary collection — otherwise
+        // its items are loaded by the primary fetch (with target fields merged
+        // into primaryFieldFilter below).
         refFieldIdToCollectionId.set(f.id, f.reference_collection_id);
+        if (!collectionIds.has(f.reference_collection_id)) {
+          refCollectionIds.push(f.reference_collection_id);
+        }
       }
     }
   }
@@ -2143,6 +2170,13 @@ async function buildCollectionCache(
   if (boundFieldIds && boundFieldIds.size > 0) {
     const merged = new Set(boundFieldIds);
     for (const sid of slugFieldIds) merged.add(sid);
+    // A primary collection can also be the target of a bound reference path
+    // (e.g. a nested collection whose items are referenced by an ancestor's
+    // reference field). Include those relationship target fields so the shared
+    // primary fetch loads them — otherwise the ancestor's path never resolves.
+    for (const [, fids] of refCollectionBoundFieldIds) {
+      for (const fid of fids) merged.add(fid);
+    }
     primaryFieldFilter = Array.from(merged);
   }
 
@@ -2243,11 +2277,29 @@ export async function resolveCollectionLayers(
   function scanCollectionLayersForBounds(layerList: Layer[]) {
     for (const layer of layerList) {
       if (layer.variables?.collection?.id) {
-        const { fieldIds: fids, fieldPaths: fpaths } = collectBoundFieldIds([layer]);
+        const { fieldIds: fids, fieldPaths: fpaths, pathsByLayerId } = collectBoundFieldIds([layer]);
         for (const fid of fids) mergedBoundFieldIds.add(fid);
         for (const fp of fpaths) mergedBoundFieldPaths.add(fp);
         boundFieldPathsByLayerId.set(layer.id, fpaths);
         scannedCollectionIds.add(layer.variables.collection.id);
+
+        // Re-attribute bindings that target an ancestor collection layer via
+        // collection_layer_id (ancestors are scanned before their descendants,
+        // so the target set already exists). Without this, a field read from an
+        // enclosing collection inside a nested collection never gets its
+        // reference paths resolved on SSR and renders empty.
+        for (const [targetLayerId, paths] of pathsByLayerId) {
+          if (targetLayerId === layer.id) continue;
+          let target = boundFieldPathsByLayerId.get(targetLayerId);
+          if (!target) {
+            target = new Set<string>();
+            boundFieldPathsByLayerId.set(targetLayerId, target);
+          }
+          for (const p of paths) {
+            target.add(p);
+            mergedBoundFieldPaths.add(p);
+          }
+        }
       }
       if (layer.children) scanCollectionLayersForBounds(layer.children);
     }
@@ -2686,6 +2738,7 @@ export async function resolveCollectionLayers(
               sortByInputLayerId: collectionVariable.sort_by_inputLayerId,
               sortOrderInputLayerId: collectionVariable.sort_order_inputLayerId,
               limit: isPaginated ? paginationConfig.items_per_page : collectionVariable.limit,
+              maxTotal,
               paginationMode: isPaginated ? paginationConfig.mode : undefined,
               layerTemplate: layer.children || [],
               collectionLayerClasses: Array.isArray(layer.classes) ? layer.classes : (layer.classes ? [layer.classes] : []),
