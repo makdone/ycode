@@ -72,6 +72,22 @@ function createResolvedAssetVariable(
   fallback: FieldVariable
 ): FieldVariable | AssetVariable | DynamicTextVariable {
   if (!resolvedValue) return fallback;
+
+  // A link/url field bound as a media source stores a serialized
+  // CollectionLinkValue. Unwrap it to the underlying URL (literal src) or
+  // asset id before building the variable; otherwise the JSON blob would be
+  // treated as an asset id and fail to resolve.
+  const linkValue = parseCollectionLinkValue(resolvedValue);
+  if (linkValue) {
+    if (linkValue.type === 'url') {
+      return linkValue.url ? createDynamicTextVariable(linkValue.url) : fallback;
+    }
+    if (linkValue.type === 'asset') {
+      return linkValue.asset?.id ? createAssetVariable(linkValue.asset.id) : fallback;
+    }
+    return fallback;
+  }
+
   return isVirtualAssetField(fieldId)
     ? createDynamicTextVariable(resolvedValue)
     : createAssetVariable(resolvedValue);
