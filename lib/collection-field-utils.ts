@@ -826,8 +826,8 @@ export const ASSET_FIELD_TYPES: CollectionFieldType[] = ['image', 'audio', 'vide
 /** Field types that can be bound to color design properties */
 export const COLOR_FIELD_TYPES: CollectionFieldType[] = ['color'];
 
-/** Field types that can be bound to image layers (image fields) */
-export const IMAGE_FIELD_TYPES: CollectionFieldType[] = ['image'];
+/** Field types that can be bound to image layers (image fields, or link/url fields holding an image URL) */
+export const IMAGE_FIELD_TYPES: CollectionFieldType[] = ['image', 'link'];
 
 /** Field types that can be bound to audio layers (audio fields) */
 export const AUDIO_FIELD_TYPES: CollectionFieldType[] = ['audio'];
