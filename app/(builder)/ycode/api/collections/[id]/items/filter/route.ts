@@ -10,6 +10,7 @@ import { getAllPageFolders } from '@/lib/repositories/pageFolderRepository';
 import { renderCollectionItemsToHtml, loadTranslationsForLocale } from '@/lib/page-fetcher';
 import { noCache } from '@/lib/api-response';
 import { compareDateFilter, isDateFieldType, isDatePreset, parseItemIdList, resolveDateFilterValue } from '@/lib/collection-field-utils';
+import { fetchAllRows } from '@/lib/supabase-constants';
 import type { Layer, CollectionItem, CollectionItemWithValues } from '@/types';
 
 export const dynamic = 'force-dynamic';
@@ -90,20 +91,24 @@ async function getAllItemIdsForCollection(
   collectionId: string,
   isPublished: boolean,
 ): Promise<string[]> {
-  let query = client
-    .from('collection_items')
-    .select('id')
-    .eq('collection_id', collectionId)
-    .eq('is_published', isPublished)
-    .is('deleted_at', null);
-
-  if (isPublished) {
-    query = query.eq('is_publishable', true);
-  }
-
-  const { data, error } = await query;
-  if (error) throw new Error(`Failed to fetch item IDs: ${error.message}`);
-  return data?.map(d => d.id) || [];
+  // Page past Supabase/PostgREST's 1000-row default cap; otherwise collections
+  // with >1000 items silently lose their tail from the candidate pool, so valid
+  // items vanish from filtered/load-more results. Match SSR and load-more
+  // ordering so tie-breaks and any `maxTotal` slice select the same items.
+  const rows = await fetchAllRows<{ id: string }>((from, to) => {
+    let q = client
+      .from('collection_items')
+      .select('id')
+      .eq('collection_id', collectionId)
+      .eq('is_published', isPublished)
+      .is('deleted_at', null)
+      .order('manual_order', { ascending: true })
+      .order('created_at', { ascending: false })
+      .range(from, to);
+    if (isPublished) q = q.eq('is_publishable', true);
+    return q;
+  });
+  return rows.map(r => r.id);
 }
 
 async function getIdsMatchingFilter(
