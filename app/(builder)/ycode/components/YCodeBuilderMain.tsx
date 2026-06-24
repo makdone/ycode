@@ -34,7 +34,7 @@ import MigrationChecker from '@/components/MigrationChecker';
 import BuilderLoading from '@/components/BuilderLoading';
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
-import { checkCircularReference } from '@/lib/component-utils';
+import { checkCircularReference, detachSpecificLayerFromComponent } from '@/lib/component-utils';
 
 // Right sidebar is always visible in editor mode - load eagerly to avoid delay
 import RightSidebar from '../components/RightSidebar';
@@ -64,6 +64,7 @@ import { useClipboardStore } from '@/stores/useClipboardStore';
 import { useEditorStore } from '@/stores/useEditorStore';
 import { usePagesStore, consumePageMcpSync } from '@/stores/usePagesStore';
 import { useComponentsStore } from '@/stores/useComponentsStore';
+import { useCanvasTextEditorStore } from '@/stores/useCanvasTextEditorStore';
 import { useLayerStylesStore } from '@/stores/useLayerStylesStore';
 import { useCollaborationPresenceStore, getResourceLockKey, RESOURCE_TYPES } from '@/stores/useCollaborationPresenceStore';
 import { useSettingsStore } from '@/stores/useSettingsStore';
@@ -1329,7 +1330,7 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
   // Exit component edit mode handler
   const handleExitComponentEditMode = useCallback(async () => {
     const { editingComponentId, returnToPageId, setEditingComponentId, returnToLayerId, getReturnDestination, setSelectedLayerId: setLayerIdFromStore } = useEditorStore.getState();
-    const { saveComponentDraft, clearComponentDraft, getComponentById, saveTimeouts, loadComponentDraft } = useComponentsStore.getState();
+    const { saveComponentDraft, clearComponentDraft, getComponentById, loadComponentDraft } = useComponentsStore.getState();
     const { updateComponentOnLayers } = usePagesStore.getState();
 
     if (!editingComponentId || isExitingComponentModeRef.current) return;
@@ -1338,9 +1339,23 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
     isExitingComponentModeRef.current = true;
 
     try {
-      // Clear any pending auto-save timeout to avoid duplicate saves
-      if (saveTimeouts[editingComponentId]) {
-        clearTimeout(saveTimeouts[editingComponentId]);
+      // Inline text editing commits its content lazily (on blur/unmount), so a
+      // pending edit hasn't reached the component draft yet. Finish it now —
+      // while edit mode is still active — so the latest content is written into
+      // the draft (and marks it dirty) before we save below. Without this the
+      // first exit persists stale content and the edit only "sticks" on a
+      // subsequent attempt once the editor has already flushed.
+      const { isEditing, requestFinish } = useCanvasTextEditorStore.getState();
+      if (isEditing) {
+        requestFinish();
+      }
+
+      // Clear any pending auto-save timeout to avoid duplicate saves. Read it
+      // fresh because finishing inline editing above may have scheduled a new
+      // one via updateComponentDraft.
+      const pendingSaveTimeout = useComponentsStore.getState().saveTimeouts[editingComponentId];
+      if (pendingSaveTimeout) {
+        clearTimeout(pendingSaveTimeout);
       }
 
       // Capture whether this draft has any unpersisted edits before saving,
@@ -2003,47 +2018,15 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
             if (layer?.componentId) {
               const { getComponentById } = useComponentsStore.getState();
               const component = getComponentById(layer.componentId);
-
-              if (!component || !component.layers || component.layers.length === 0) {
-                // If component not found or has no layers, just remove the componentId
-                updateLayer(currentPageId, selectedLayerId, {
-                  componentId: undefined,
-                  componentOverrides: undefined,
-                });
-              } else {
-                // Replace layer with component's layers (detach)
-                const detachDraft = usePagesStore.getState().draftsByPageId[currentPageId];
-                if (detachDraft) {
-                  const replaceLayerWithComponentLayers = (layers: Layer[]): Layer[] => {
-                    return layers.flatMap(currentLayer => {
-                      if (currentLayer.id === selectedLayerId) {
-                        // Deep clone and regenerate IDs
-                        const clonedLayers = JSON.parse(JSON.stringify(component.layers));
-                        return clonedLayers.map((l: Layer) => ({
-                          ...l,
-                          id: crypto.randomUUID(),
-                          children: l.children ? regenerateChildIds(l.children) : undefined,
-                        }));
-                      }
-                      if (currentLayer.children) {
-                        return { ...currentLayer, children: replaceLayerWithComponentLayers(currentLayer.children) };
-                      }
-                      return currentLayer;
-                    });
-                  };
-
-                  const regenerateChildIds = (children: Layer[]): Layer[] => {
-                    return children.map(child => ({
-                      ...child,
-                      id: crypto.randomUUID(),
-                      children: child.children ? regenerateChildIds(child.children) : undefined,
-                    }));
-                  };
-
-                  const newLayers = replaceLayerWithComponentLayers(detachDraft.layers);
-                  setDraftLayers(currentPageId, newLayers);
-                  setSelectedLayerId(null);
-                }
+              const detachDraft = usePagesStore.getState().draftsByPageId[currentPageId];
+              if (detachDraft) {
+                const newLayers = detachSpecificLayerFromComponent(
+                  detachDraft.layers,
+                  selectedLayerId,
+                  component || undefined
+                );
+                setDraftLayers(currentPageId, newLayers);
+                setSelectedLayerId(null);
               }
             }
           }
