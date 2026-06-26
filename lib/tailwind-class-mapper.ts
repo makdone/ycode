@@ -283,6 +283,7 @@ const CLASS_PROPERTY_MAP: Record<string, RegExp> = {
   overflow: /^overflow-(visible|hidden|clip|scroll|auto|x-visible|x-hidden|x-clip|x-scroll|x-auto|y-visible|y-hidden|y-clip|y-scroll|y-auto)$/,
   aspectRatio: /^aspect-(\[.+\]|auto|square|video)$/,
   objectFit: /^object-(contain|cover|fill|none|scale-down)$/,
+  objectPosition: /^object-(left-top|right-top|left-bottom|right-bottom|top|bottom|left|right|center|\[.+\])$/,
   gridColumnSpan: /^col-span-(1|2|3|4|5|6|7|8|9|10|11|12|auto|full)$/,
   gridRowSpan: /^row-span-(1|2|3|4|5|6|7|8|9|10|11|12|auto|full)$/,
 
@@ -875,6 +876,11 @@ export function propertyToClass(
 
     // Object Fit
     if (property === 'objectFit') {
+      return `object-${value}`;
+    }
+
+    // Object Position
+    if (property === 'objectPosition') {
       return `object-${value}`;
     }
 
@@ -1666,9 +1672,14 @@ export function classesToDesign(classes: string | string[]): Layer['design'] {
 
     // Object Fit
     if (cls.startsWith('object-')) {
-      const match = cls.match(/^object-(contain|cover|fill|none|scale-down)$/);
-      if (match) {
-        design.sizing!.objectFit = match[1];
+      const fitMatch = cls.match(/^object-(contain|cover|fill|none|scale-down)$/);
+      if (fitMatch) {
+        design.sizing!.objectFit = fitMatch[1];
+      }
+      // Object Position (disjoint value set from object-fit)
+      const positionMatch = cls.match(/^object-(left-top|right-top|left-bottom|right-bottom|top|bottom|left|right|center|\[.+\])$/);
+      if (positionMatch) {
+        design.sizing!.objectPosition = positionMatch[1];
       }
     }
 
