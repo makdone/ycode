@@ -88,6 +88,7 @@ Each layer's \`design\` object controls its appearance. Use update_layer_design 
 - flexDirection: "row" | "column" | "row-reverse" | "column-reverse"
 - justifyContent: "start" | "end" | "center" | "between" | "around" | "evenly"
 - alignItems: "start" | "end" | "center" | "baseline" | "stretch"
+- alignSelf: "auto" | "start" | "end" | "center" | "baseline" | "stretch" (per-child override of parent alignItems)
 - gap: CSS value ("16px", "1rem")
 - gridTemplateColumns: "4" (bare integer count, normalized to repeat(N, 1fr)), "1fr 1fr 1fr", "repeat(3, 1fr)"
 

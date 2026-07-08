@@ -42,6 +42,7 @@ import Icon from '@/components/ui/icon';
 import { getPageIcon, isHomepage, buildSlugPath, buildFolderPath, folderHasIndexPage, generateUniqueSlug, generateSlug, sanitizeSlug, isReservedRootSlug } from '@/lib/page-utils';
 import { isAssetOfType, ASSET_CATEGORIES } from '@/lib/asset-utils';
 import { Textarea } from '@/components/ui/textarea';
+import { CodeEditor } from '@/components/ui/code-editor';
 import { useAsset } from '@/hooks/use-asset';
 import { useEditorStore } from '@/stores/useEditorStore';
 import RichTextEditor from './RichTextEditor';
@@ -1867,10 +1868,10 @@ const PageSettingsPanel = React.forwardRef<PageSettingsPanelHandle, PageSettings
                         Add custom code to the &lt;head&gt; section of the page. It can be useful when you want to add custom meta tags, analytics, or custom CSS.
                       </FieldDescription>
                       <div className="relative">
-                        <Textarea
-                          ref={(el) => { customCodeHeadRef.current = el; }}
+                        <CodeEditor
+                          textareaRef={customCodeHeadRef}
                           value={customCodeHead}
-                          onChange={(e) => setCustomCodeHead(e.target.value)}
+                          onValueChange={setCustomCodeHead}
                           placeholder="<script>...</script>"
                           className="min-h-48 w-full"
                         />
@@ -1896,10 +1897,10 @@ const PageSettingsPanel = React.forwardRef<PageSettingsPanelHandle, PageSettings
                         Add custom code before the closing &lt;/body&gt; tag. It can be useful when you want to add custom scripts that need to run after the page loads.
                       </FieldDescription>
                       <div className="relative">
-                        <Textarea
-                          ref={(el) => { customCodeBodyRef.current = el; }}
+                        <CodeEditor
+                          textareaRef={customCodeBodyRef}
                           value={customCodeBody}
-                          onChange={(e) => setCustomCodeBody(e.target.value)}
+                          onValueChange={setCustomCodeBody}
                           placeholder="<script>...</script>"
                           className="min-h-48 w-full"
                         />

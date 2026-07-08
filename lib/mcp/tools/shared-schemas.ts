@@ -53,6 +53,7 @@ export const designSchema = z.object({
     flexWrap: z.string().optional(),
     justifyContent: z.string().optional(),
     alignItems: z.string().optional(),
+    alignSelf: z.string().optional(),
     gap: z.string().optional(),
     columnGap: z.string().optional(),
     rowGap: z.string().optional(),

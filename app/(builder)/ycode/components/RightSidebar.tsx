@@ -62,6 +62,7 @@ import RichTextEditor from './RichTextEditor';
 import ComponentVariableLabel, { VARIABLE_TYPE_ICONS } from './ComponentVariableLabel';
 import InteractionsPanel from './InteractionsPanel';
 import LayoutControls from './LayoutControls';
+import SelfLayoutControls from './SelfLayoutControls';
 import LayerStylesPanel from './LayerStylesPanel';
 import PositionControls from './PositionControls';
 import TransformControls from './TransformControls';
@@ -353,6 +354,14 @@ const RightSidebar = React.memo(function RightSidebar({
     if (!selectedLayerId) return false;
     const result = indexedFindLayerWithParent(layerIndexes, selectedLayerId);
     return result?.parent === null;
+  }, [selectedLayerId, layerIndexes]);
+
+  // Parent of the selected layer - drives the align-self control (its axis and
+  // visibility depend on the parent's flex/grid layout, not the layer's own)
+  const selectedLayerParent: Layer | null = useMemo(() => {
+    if (!selectedLayerId) return null;
+    const result = indexedFindLayerWithParent(layerIndexes, selectedLayerId);
+    return result?.parent ?? null;
   }, [selectedLayerId, layerIndexes]);
 
   // Check if selected collection is nested inside another collection
@@ -1954,6 +1963,13 @@ const RightSidebar = React.memo(function RightSidebar({
 
           {shouldShowControl('layout', selectedLayer) && !showTextStyleControls && (
             <LayoutControls layer={controlLayer} onLayerUpdate={controlUpdate} />
+          )}
+
+          {!showTextStyleControls && (
+            <SelfLayoutControls
+              layer={controlLayer} parentLayer={selectedLayerParent}
+              onLayerUpdate={controlUpdate}
+            />
           )}
 
           {shouldShowControl('spacing', selectedLayer) && (

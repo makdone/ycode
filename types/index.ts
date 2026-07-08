@@ -17,6 +17,7 @@ export interface LayoutDesign {
   flexWrap?: string;
   justifyContent?: string;
   alignItems?: string;
+  alignSelf?: string;
   gap?: string;
   columnGap?: string;
   rowGap?: string;

@@ -250,6 +250,7 @@ const CLASS_PROPERTY_MAP: Record<string, RegExp> = {
   flexWrap: /^flex-(wrap|wrap-reverse|nowrap)$/,
   justifyContent: /^justify-(start|end|center|between|around|evenly|stretch)$/,
   alignItems: /^items-(start|end|center|baseline|stretch)$/,
+  alignSelf: /^self-(auto|start|end|center|baseline|stretch)$/,
   alignContent: /^content-(start|end|center|between|around|evenly|stretch)$/,
   gap: /^gap-(\[.+\]|\d+|px|0\.5|1\.5|2\.5|3\.5)$/,
   columnGap: /^gap-x-(\[.+\]|\d+|px|0\.5|1\.5|2\.5|3\.5)$/,
@@ -571,6 +572,19 @@ export function removeConflictingClasses(
       }
     }
 
+    // Special handling for font-[...] arbitrary values
+    // Distinguish fontWeight (numeric, e.g. font-[700]) from fontFamily
+    // (non-numeric, e.g. font-[Gelasio_Regular]) — both match each other's
+    // pattern via \[.+\], so keep the mismatched one instead of removing it.
+    if (baseClass.startsWith('font-[')) {
+      const value = extractArbitraryValue(baseClass);
+      if (value) {
+        const isNumeric = /^\d/.test(value);
+        if (property === 'fontWeight' && !isNumeric) return true;
+        if (property === 'fontFamily' && isNumeric) return true;
+      }
+    }
+
     // Background-image CSS variable classes are always backgroundImage
     if (BG_IMG_VAR_RE.test(baseClass)) {
       if (property === 'backgroundColor') return true;
@@ -702,6 +716,13 @@ export function propertyToClass(
           'flex-end': 'end',
         };
         return `items-${itemsMap[value] || value}`;
+      }
+      case 'alignSelf': {
+        const selfMap: Record<string, string> = {
+          'flex-start': 'start',
+          'flex-end': 'end',
+        };
+        return `self-${selfMap[value] || value}`;
       }
       case 'alignContent': {
         const contentMap: Record<string, string> = {
@@ -1227,6 +1248,19 @@ export function getAffectedProperties(className: string): string[] {
     }
   }
 
+  // Special handling for font-[...] arbitrary values
+  // Must distinguish between fontWeight (numeric, e.g. font-[700]) and
+  // fontFamily (non-numeric, e.g. font-[Gelasio_Regular]). Both share the
+  // font-[…] namespace, so without this an arbitrary weight would be treated
+  // as a family (and vice versa) and strip its sibling typography class.
+  if (baseClass.startsWith('font-[')) {
+    const value = extractArbitraryValue(baseClass);
+    if (value) {
+      properties.push(/^\d/.test(value) ? 'fontWeight' : 'fontFamily');
+      return properties;
+    }
+  }
+
   // Background-image CSS variable classes are always backgroundImage
   if (BG_IMG_VAR_RE.test(baseClass)) {
     properties.push('backgroundImage');
@@ -1412,6 +1446,14 @@ export function classesToDesign(classes: string | string[]): Layer['design'] {
       const value = cls.replace('items-', '');
       if (['start', 'end', 'center', 'baseline', 'stretch'].includes(value)) {
         design.layout!.alignItems = value;
+      }
+    }
+
+    // Align Self
+    if (cls.startsWith('self-')) {
+      const value = cls.replace('self-', '');
+      if (['auto', 'start', 'end', 'center', 'baseline', 'stretch'].includes(value)) {
+        design.layout!.alignSelf = value;
       }
     }
 
