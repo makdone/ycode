@@ -70,6 +70,23 @@ export function maxResponsiveNumber(value: ResponsiveNumber | undefined, fallbac
 }
 
 /**
+ * Per-breakpoint per-view CSS vars used to pre-size slides before Swiper inits
+ * (prevents a 1-slide flash), or null when not needed. Only numeric multi-view
+ * sliders (per-view > 1 on some breakpoint) are pre-sized; per-view 1 sliders
+ * keep their own slide widths (e.g. custom-width peek carousels using 'auto').
+ * The presence of this object also gates the `data-slider-presize` marker.
+ */
+export function getSliderPresizeVars(settings: SliderSettings): Record<string, number> | null {
+  const spv = settings.groupSlide;
+  if (maxResponsiveNumber(spv, 1) <= 1) return null;
+  return {
+    '--ycode-spv-mobile': resolveResponsiveNumber(spv, 'mobile', 1),
+    '--ycode-spv-tablet': resolveResponsiveNumber(spv, 'tablet', 1),
+    '--ycode-spv-desktop': resolveResponsiveNumber(spv, 'desktop', 1),
+  };
+}
+
+/**
  * Snapshot React-applied inline CSS custom properties (e.g. --bg-img) on a
  * slider's slide elements and return a restore function. Swiper's
  * destroy(cleanStyles=true) wipes each slide's entire style attribute, which
@@ -134,9 +151,17 @@ export function buildBaseSwiperOptions(
 
   if (effectModule) modules.push(effectModule);
 
-  const perView = (bp: Breakpoint) => resolveResponsiveNumber(settings.groupSlide, bp, 1);
+  // When "Per view" is 1 (default), defer to each slide's own CSS width via
+  // `slidesPerView: 'auto'` so custom slide widths (e.g. a peek carousel with
+  // `w-[80%]`) are respected. Only force a numeric slidesPerView when the user
+  // explicitly wants more than one slide per view.
+  const perViewCount = (bp: Breakpoint) => resolveResponsiveNumber(settings.groupSlide, bp, 1);
+  const perView = (bp: Breakpoint): number | 'auto' => {
+    const count = perViewCount(bp);
+    return count > 1 ? count : 'auto';
+  };
   const perGroup = (bp: Breakpoint) =>
-    Math.min(resolveResponsiveNumber(settings.slidesPerGroup, bp, 1), perView(bp));
+    Math.min(resolveResponsiveNumber(settings.slidesPerGroup, bp, 1), perViewCount(bp));
 
   const config: SwiperOptions = {
     modules,
