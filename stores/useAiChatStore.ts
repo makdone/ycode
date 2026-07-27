@@ -58,6 +58,9 @@ export interface ChatMessage {
   mentions?: Mention[];
   /** Wall-clock duration of the turn, shown as "Thought for Ns". */
   thinkingMs?: number;
+  /** Model id that produced this assistant turn (e.g. "claude-sonnet-5").
+   * Absent on user messages and on turns run before this was recorded. */
+  model?: string;
   /** Pages this turn edited, with per-page affected layer counts (Changes card). */
   changes?: TurnChange[];
   /** True for the auto-generated visual self-review turn (rendered compactly). */
@@ -429,6 +432,7 @@ function stripMessageForStorage(message: ChatMessage): ChatMessage {
     thinkingMs: message.thinkingMs,
     changes: message.changes,
     review: message.review,
+    model: message.model,
     // Keep the reference metadata so @page/component/layer badges re-render
     // when a chat is reloaded from history (the raw "@label" text alone can't
     // reconstruct the pill's type/icon).
@@ -504,6 +508,12 @@ export const useAiChatStore = create<AiChatStore>()(
         const isReview = reviewDepth > 0;
         const promptText = trimmed || 'Use the attached image(s) as a reference for what to build.';
 
+        // Review passes run on the cheaper review model of the same provider;
+        // the user's pick only applies to the main turn. Recorded on the
+        // assistant message so history (and the admin transcript view) shows
+        // which model produced each turn.
+        const turnModel = isReview ? reviewModelFor(get().model) : get().model ?? undefined;
+
         const userMessage: ChatMessage = {
           id: newId(),
           role: 'user',
@@ -513,7 +523,14 @@ export const useAiChatStore = create<AiChatStore>()(
           mentions: attachment?.mentions && attachment.mentions.length > 0 ? attachment.mentions : undefined,
           review: isReview || undefined,
         };
-        const assistantMessage: ChatMessage = { id: newId(), role: 'assistant', text: '', toolCalls: [], parts: [] };
+        const assistantMessage: ChatMessage = {
+          id: newId(),
+          role: 'assistant',
+          text: '',
+          toolCalls: [],
+          parts: [],
+          model: turnModel,
+        };
 
         // Fallback Undo baseline: snapshot the active page before the turn in case
         // the server can't supply authoritative before-layers (page_changed
@@ -573,9 +590,7 @@ export const useAiChatStore = create<AiChatStore>()(
               selectedLayers: attachment?.selectedLayers ?? [],
               mentions: attachment?.mentions ?? [],
               referenceUrls: attachment?.referenceUrls ?? [],
-              // Review passes run on the cheaper review model of the same
-              // provider; the user's pick only applies to the main turn.
-              model: isReview ? reviewModelFor(get().model) : get().model ?? undefined,
+              model: turnModel,
             }),
             signal,
           });

@@ -28,6 +28,10 @@ export interface AgentToolUseBlock {
   id: string;
   name: string;
   input: Record<string, unknown>;
+  /** Gemini attaches an opaque signature to functionCall parts that must be
+   * echoed back verbatim in history, or tool calling degrades (the API warns
+   * about missing thought_signature). Other providers ignore it. */
+  thoughtSignature?: string;
 }
 
 export interface AgentToolResultBlock {
@@ -64,7 +68,7 @@ export interface AgentUsage {
  */
 export type ProviderStreamEvent =
   | { type: 'text_delta'; text: string }
-  | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
+  | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown>; thoughtSignature?: string }
   | { type: 'message_stop'; stopReason: string | null; usage?: AgentUsage };
 
 export interface ProviderStreamOptions {

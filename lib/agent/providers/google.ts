@@ -90,6 +90,9 @@ export function createGoogleProvider(apiKey: string): AgentProvider {
               id: part.functionCall.id ?? `gemini_call_${Date.now()}_${toolCallCounter}`,
               name: part.functionCall.name,
               input: (part.functionCall.args ?? {}) as Record<string, unknown>,
+              // Opaque reasoning signature that must be echoed back on this
+              // functionCall part in history (see toGeminiContents).
+              thoughtSignature: part.thoughtSignature,
             };
           }
         }
@@ -138,7 +141,12 @@ function toGeminiContents(messages: AgentMessage[]): Content[] {
         parts.push({ inlineData: { mimeType: block.mediaType, data: block.data } });
       } else if (block.type === 'tool_use') {
         toolNameById.set(block.id, block.name);
-        parts.push({ functionCall: { name: block.name, args: block.input } });
+        parts.push({
+          functionCall: { name: block.name, args: block.input },
+          // Echo Gemini's thought signature back verbatim — omitting it makes
+          // the API warn and degrades multi-turn tool calling.
+          ...(block.thoughtSignature ? { thoughtSignature: block.thoughtSignature } : {}),
+        });
       } else if (block.type === 'tool_result') {
         parts.push({
           functionResponse: {

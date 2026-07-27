@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
 import { getAgentProvider, AgentConfigurationError } from '@/lib/agent/providers';
+import { humanizeProviderError } from '@/lib/agent/providers/errors';
 import { runAgent } from '@/lib/agent/runtime';
 import { getAuthUser } from '@/lib/supabase-auth';
 import { getTenantIdFromHeaders } from '@/lib/supabase-server';
@@ -144,7 +145,8 @@ export async function POST(request: Request): Promise<Response> {
           send(event);
         }
       } catch (error) {
-        send({ type: 'error', message: error instanceof Error ? error.message : 'Agent run failed' });
+        console.error('[AI chat] Agent run failed:', error);
+        send({ type: 'error', message: humanizeProviderError(error) });
       } finally {
         controller.enqueue(encoder.encode('data: [DONE]\n\n'));
         controller.close();

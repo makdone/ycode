@@ -51,14 +51,12 @@ export function createOpenAiProvider(apiKey: string): AgentProvider {
     id: 'openai-byok',
 
     async *streamMessage(options: ProviderStreamOptions): AsyncIterable<ProviderStreamEvent> {
+      const reasoningEffort = reasoningEffortFor(options.model);
       const stream = await client.chat.completions.create(
         {
           model: options.model,
           max_completion_tokens: options.maxTokens,
-          // Design/building work doesn't benefit from deep reasoning the way
-          // code does (Framer measured no eval difference), so default OpenAI
-          // reasoning models to low effort — faster and cheaper per turn.
-          ...(isReasoningModel(options.model) ? { reasoning_effort: 'low' as const } : {}),
+          ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
           messages: [
             { role: 'system', content: options.system },
             ...toOpenAiMessages(options.messages),
@@ -184,9 +182,18 @@ function toOpenAiMessages(messages: AgentMessage[]): OpenAI.Chat.Completions.Cha
   return out;
 }
 
-/** Models that accept the `reasoning_effort` parameter (GPT-5 family and o-series). */
-function isReasoningModel(model: string): boolean {
-  return /^(gpt-5|o\d)/.test(model);
+/**
+ * Reasoning effort per model, or null for models that don't accept the
+ * parameter. Design/building work doesn't benefit from deep reasoning the way
+ * code does (Framer measured no eval difference), so reasoning models default
+ * to low effort. gpt-5.5 rejects function tools combined with reasoning on
+ * /v1/chat/completions ("use /v1/responses or set reasoning_effort to 'none'"),
+ * so it runs with reasoning off — switching this provider to the Responses API
+ * is the path if we ever want reasoning + tools on that model.
+ */
+function reasoningEffortFor(model: string): 'none' | 'low' | null {
+  if (/^gpt-5\.5/.test(model)) return 'none';
+  return /^(gpt-5|o\d)/.test(model) ? 'low' : null;
 }
 
 /** Tool input arrives as streamed partial JSON; empty means a no-arg tool. */

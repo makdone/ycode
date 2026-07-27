@@ -236,6 +236,7 @@ export async function* runAgent(options: RunAgentOptions): AsyncIterable<Runtime
             id: event.id,
             name: event.name,
             input: event.input,
+            thoughtSignature: event.thoughtSignature,
           };
           toolUses.push(block);
           yield { type: 'tool_call', id: event.id, name: event.name, input: event.input };

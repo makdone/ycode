@@ -54,6 +54,47 @@ function parseUrls(text: string): string[] {
   return Array.from(new Set(text.match(URL_REGEX) ?? [])).map((url) => url.replace(/[.,)]+$/, ''));
 }
 
+/** Split text on bare URLs and render each as a link opening in a new tab. */
+function linkifyText(text: string): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  let lastIndex = 0;
+
+  for (const match of text.matchAll(URL_REGEX)) {
+    // Trailing punctuation belongs to the sentence, not the URL.
+    const url = match[0].replace(/[.,)]+$/, '');
+    if (match.index > lastIndex) {
+      nodes.push(text.slice(lastIndex, match.index));
+    }
+    nodes.push(
+      <a
+        key={`${url}-${match.index}`}
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="underline underline-offset-2 break-all hover:opacity-80"
+      >
+        {url}
+      </a>,
+    );
+    lastIndex = match.index + url.length;
+  }
+
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+  return nodes;
+}
+
+/** Error banner shown in the chat transcript; provider errors often contain
+ * docs/billing URLs, so bare links render clickable. */
+function ErrorNotice({ message }: { message: string }) {
+  return (
+    <div className="text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2 break-words">
+      {linkifyText(message)}
+    </div>
+  );
+}
+
 // Configure markdown parsing once rather than passing options on every parse.
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -454,11 +495,7 @@ export default function AiChatPanel({ embedded = false }: AiChatPanelProps) {
   ) : (
     <div className="flex-1 min-h-0 flex flex-col justify-start gap-4 p-3">
       {composer}
-      {error && (
-        <div className="text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2">
-          {error}
-        </div>
-      )}
+      {error && <ErrorNotice message={error} />}
     </div>
   );
 
@@ -584,11 +621,7 @@ export default function AiChatPanel({ embedded = false }: AiChatPanelProps) {
                 />
               ))}
 
-              {error && (
-                <div className="text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2">
-                  {error}
-                </div>
-              )}
+              {error && <ErrorNotice message={error} />}
             </div>
 
             {showJumpToLatest && (
@@ -969,14 +1002,32 @@ function groupParts(parts: ChatMessagePart[]): PartGroup[] {
   return groups;
 }
 
+/**
+ * Cheap markdown-syntax stripper for live-streamed narration. Re-parsing real
+ * markdown (marked + DOMPurify) on every streamed token is expensive and
+ * flickers on half-written syntax, but raw markers like **Publish** must never
+ * reach the user either — so streaming text drops the syntax and renders the
+ * words plain. Tolerates unterminated markers mid-stream.
+ */
+function stripMarkdownSyntax(text: string): string {
+  return text
+    .replace(/^```[^\n]*$/gm, '')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^\s*[-*+]\s+/gm, '• ')
+    .replace(/^>\s?/gm, '')
+    .replace(/\*\*|__/g, '')
+    .replace(/`/g, '')
+    .replace(/\*([^*\n]+)\*/g, '$1')
+    // Links: keep the label; a partially streamed "[label](htt" keeps the label.
+    .replace(/!?\[([^\]]*)\]\(([^)]*)\)?/g, '$1');
+}
+
 /** The intermediate narration + tool steps, shown inside the collapsed trail.
  * Narration text is dimmed so the closing summary below stays the focus.
  *
- * While streaming, narration is rendered as plain text rather than markdown:
- * the text grows a token at a time and re-parsing markdown (marked + DOMPurify)
- * on every token is expensive and flickers on half-written syntax. The trail
- * collapses once the turn finishes, so the full markdown render only runs when
- * the user re-expands it. */
+ * While streaming, narration is rendered as markdown-stripped plain text (see
+ * stripMarkdownSyntax). The trail collapses once the turn finishes, so the
+ * full markdown render only runs when the user re-expands it. */
 function ThinkingTrail({ parts, streaming }: { parts: ChatMessagePart[]; streaming: boolean }) {
   // Failed tool calls are hidden: the agent retries after errors, so showing
   // red X rows only alarms the user about steps that were already recovered.
@@ -996,7 +1047,7 @@ function ThinkingTrail({ parts, streaming }: { parts: ChatMessagePart[]; streami
         ) : (
           <div key={index} className="opacity-60">
             {streaming ? (
-              <div className="text-xs leading-relaxed break-words whitespace-pre-wrap">{group.text}</div>
+              <div className="text-xs leading-relaxed break-words whitespace-pre-wrap">{stripMarkdownSyntax(group.text)}</div>
             ) : (
               <MarkdownText text={group.text} />
             )}
