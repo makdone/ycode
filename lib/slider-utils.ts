@@ -257,11 +257,28 @@ export function buildCanvasSwiperOptions(
   return config;
 }
 
+/**
+ * Map stored easing values (Tailwind-style class names) to valid CSS
+ * transition-timing-function values. `ease-linear` is not valid CSS — the
+ * correct value is `linear` — while the others coincide with valid CSS.
+ */
+const EASING_TO_CSS: Record<string, string> = {
+  'ease-linear': 'linear',
+  'ease-in': 'ease-in',
+  'ease-in-out': 'ease-in-out',
+  'ease-out': 'ease-out',
+};
+
+/** Convert a stored slider/lightbox easing value to a valid CSS timing function */
+export function easingToCss(easing: string): string {
+  return EASING_TO_CSS[easing] || easing || 'ease-in-out';
+}
+
 /** Apply easing to the Swiper wrapper's CSS transition-timing-function */
 export function applySwiperEasing(swiperEl: HTMLElement, easing: string) {
   const wrapper = swiperEl.querySelector('.swiper-wrapper') as HTMLElement | null;
   if (wrapper) {
-    wrapper.style.transitionTimingFunction = easing || 'ease-in-out';
+    wrapper.style.transitionTimingFunction = easingToCss(easing);
   }
 }
 

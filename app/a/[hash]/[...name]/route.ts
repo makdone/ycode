@@ -99,30 +99,49 @@ export async function GET(
     // Never run Sharp on GIFs — it flattens animated frames into a single
     // static image, killing the animation. Serve the raw bytes instead.
     const isGif = asset.mime_type === 'image/gif';
+    const isAvif = asset.mime_type === 'image/avif';
     const canResize = transform && isImage && !isGif;
 
     if (canResize) {
       const buffer = Buffer.from(await response.arrayBuffer());
-      let pipeline = sharp(buffer);
 
-      if (transform.width || transform.height) {
-        pipeline = pipeline.resize(transform.width, transform.height, {
-          fit: 'cover',
-          withoutEnlargement: true,
+      try {
+        let pipeline = sharp(buffer);
+
+        if (transform.width || transform.height) {
+          pipeline = pipeline.resize(transform.width, transform.height, {
+            fit: 'cover',
+            withoutEnlargement: true,
+          });
+        }
+
+        // Preserve AVIF on output (already highly compressed); normalize every
+        // other raster format to WebP.
+        pipeline = isAvif
+          ? pipeline.avif({ quality: transform.quality })
+          : pipeline.webp({ quality: transform.quality });
+
+        const resized = await pipeline.toBuffer();
+
+        return new Response(new Uint8Array(resized), {
+          status: 200,
+          headers: {
+            'Content-Type': isAvif ? 'image/avif' : 'image/webp',
+            'Content-Length': resized.length.toString(),
+          },
+        });
+      } catch {
+        // Sharp's bundled decoder can't decode some bitstreams (e.g. 10/12-bit
+        // AVIF, which browsers still render). Since the decode failure blocks
+        // any re-encode, serve the original bytes untouched rather than failing.
+        return new Response(new Uint8Array(buffer), {
+          status: 200,
+          headers: {
+            'Content-Type': asset.mime_type || 'application/octet-stream',
+            'Content-Length': buffer.length.toString(),
+          },
         });
       }
-
-      pipeline = pipeline.webp({ quality: transform.quality });
-
-      const resized = await pipeline.toBuffer();
-
-      return new Response(new Uint8Array(resized), {
-        status: 200,
-        headers: {
-          'Content-Type': 'image/webp',
-          'Content-Length': resized.length.toString(),
-        },
-      });
     }
 
     // Mirror the upstream status (206 for partial content) and range headers so
