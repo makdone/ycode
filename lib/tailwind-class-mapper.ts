@@ -905,6 +905,13 @@ export function propertyToClass(
       // Special case: 100% → full
       if (value === '100%') return `${prefix}-full`;
 
+      // Tailwind fraction values (e.g. "1/2" → w-1/2); n/n equals 100% → full
+      const fractionMatch = value.match(/^(\d+)\/([1-9]\d*)$/);
+      if (fractionMatch) {
+        if (fractionMatch[1] === fractionMatch[2]) return `${prefix}-full`;
+        return `${prefix}-${value}`;
+      }
+
       // Use abstracted helper with allowed named values
       return formatMeasurementClass(value, prefix, ['auto', 'full', 'screen', 'min', 'max', 'fit', 'none']);
     }

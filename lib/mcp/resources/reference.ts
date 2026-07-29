@@ -147,7 +147,7 @@ const DESIGN_REFERENCE_JSON = JSON.stringify({
     },
     spacing: { padding: { type: 'css_value' }, margin: { type: 'css_value' } },
     sizing: {
-      width: { type: 'css_value', examples: ['100%', 'auto'] },
+      width: { type: 'css_value', examples: ['100%', 'auto', '1/2'] },
       maxWidth: { type: 'css_value', examples: ['1280px'] },
       aspectRatio: { type: 'string', examples: ['16/9', '1/1'] },
     },

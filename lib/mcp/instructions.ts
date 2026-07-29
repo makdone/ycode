@@ -129,7 +129,7 @@ Each layer's \`design\` object controls its appearance. Use update_layer_design 
 - margin/marginTop/etc.: "auto", "16px"
 
 **sizing** — Width, height, constraints
-- width: "100%", "auto", "320px"
+- width: "100%", "auto", "320px", or a fraction of the parent like "1/2", "5/12" (fractions equal to a whole, e.g. "12/12", normalize to "100%")
 - height: "auto", "100vh"
 - maxWidth: "1280px"
 - aspectRatio: "16/9", "1/1"

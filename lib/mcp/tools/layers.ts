@@ -12,6 +12,7 @@ import {
   getTiptapTextContent,
   buildTiptapDoc,
   applyDesignToLayer,
+  applyBackgroundImageDesign,
 } from '@/lib/mcp/utils';
 import type { RichTextBlock } from '@/lib/mcp/utils';
 import { layerToExportHtml } from '@/lib/html-layer-converter';
@@ -447,13 +448,26 @@ LINK TYPES:
         ? { type: 'asset' as const, data: { asset_id } }
         : { type: 'dynamic_text' as const, data: { content: url! } };
 
-      const updated = updateLayerById(layers, layer_id, (l) => ({
+      // Set the variable AND the design/classes that render it — the variable
+      // alone only supplies the --bg-img value, nothing displays it without
+      // the bg-[image:var(--bg-img)] class.
+      const updated = updateLayerById(layers, layer_id, (l) => applyBackgroundImageDesign({
         ...l,
         variables: { ...l.variables, backgroundImage: { src } },
       }));
 
       await savePageLayers(page_id, updated);
-      return { content: [{ type: 'text' as const, text: `Set background image for "${layer.customName || layer.name}"` }] };
+      const updatedLayer = findLayerById(updated, layer_id);
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({
+            message: `Set background image for "${layer.customName || layer.name}"`,
+            layer_id,
+            classes: updatedLayer?.classes,
+          }),
+        }],
+      };
     },
   );
 

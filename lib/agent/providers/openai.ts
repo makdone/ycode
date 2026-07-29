@@ -46,12 +46,24 @@ function getOpenAiTools(tools: readonly AgentTool[]): OpenAI.Chat.Completions.Ch
 
 export function createOpenAiProvider(apiKey: string): AgentProvider {
   const client = new OpenAI({ apiKey, maxRetries: 2 });
+  return createChatCompletionsProvider('openai-byok', client, reasoningEffortFor);
+}
 
+/**
+ * Shared Chat Completions streaming loop, reused by every OpenAI-compatible
+ * backend (OpenAI itself and xAI's Grok API). Only the client (API key + base
+ * URL) and the per-model reasoning-effort policy differ per vendor.
+ */
+export function createChatCompletionsProvider(
+  id: string,
+  client: OpenAI,
+  reasoningEffortForModel: (model: string) => 'none' | 'low' | null = () => null,
+): AgentProvider {
   return {
-    id: 'openai-byok',
+    id,
 
     async *streamMessage(options: ProviderStreamOptions): AsyncIterable<ProviderStreamEvent> {
-      const reasoningEffort = reasoningEffortFor(options.model);
+      const reasoningEffort = reasoningEffortForModel(options.model);
       const stream = await client.chat.completions.create(
         {
           model: options.model,

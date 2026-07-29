@@ -3,7 +3,7 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
-import { DEFAULT_AGENT_MODEL, reviewModelFor } from '@/lib/agent/models';
+import { DEFAULT_AGENT_MODEL } from '@/lib/agent/models';
 import { aiChatsApi } from '@/lib/api';
 import { syncLayerAssets } from '@/lib/canvas-asset-sync';
 import { findAddedLayerIds } from '@/lib/layer-utils';
@@ -63,12 +63,17 @@ export interface ChatMessage {
   model?: string;
   /** Pages this turn edited, with per-page affected layer counts (Changes card). */
   changes?: TurnChange[];
-  /** True for the auto-generated visual self-review turn (rendered compactly). */
+  /** True for an auto-generated visual self-review turn. The review pass has
+   * been removed, but older persisted chats still contain flagged turns —
+   * kept so they render compactly and stay excluded from model history. */
   review?: boolean;
   /** True while a turn checkpoint exists and can be restored (not persisted). */
   canRevert?: boolean;
   /** True once this turn's changes have been reverted (Redo re-applies them). */
   reverted?: boolean;
+  /** Why the turn failed (humanized provider error, e.g. out of credits).
+   * Persisted so reloaded chats and the admin transcript explain empty turns. */
+  error?: string;
 }
 
 type ChatStatus = 'idle' | 'streaming';
@@ -124,8 +129,6 @@ interface AiChatState {
   error: string | null;
   /** Cumulative token usage for the active session, shown in the panel header. */
   sessionUsage: SessionUsage;
-  /** When on, the agent screenshots its work and critiques/fixes it automatically. */
-  autoReview: boolean;
   /** Chosen model id, or null to use the server-resolved default. */
   model: string | null;
 }
@@ -180,7 +183,6 @@ interface AiChatActions {
   /** Remove a conversation from history (starts fresh if it was active). */
   deleteChat: (id: string) => void;
   stop: () => void;
-  setAutoReview: (value: boolean) => void;
   setModel: (model: string | null) => void;
   sendMessage: (text: string, attachment?: MessageAttachment) => Promise<void>;
   revertTurn: (messageId: string) => Promise<void>;
@@ -244,65 +246,12 @@ async function restoreCheckpointPages(pages: Array<{ pageId: string; layers: Lay
 }
 
 /**
- * Page ids the agent visually edited during the in-progress turn. Used to point
- * the visual self-review at the page that actually changed (not whatever page is
- * currently open on the canvas). Reset at the start of each top-level turn.
- */
-const turnEditedPageIds = new Set<string>();
-
-/**
- * Review screenshot started as soon as the edited page's authoritative snapshot
- * arrived (during the stream), so its offscreen render overlaps the stream tail
- * (closing summary + usage/done) instead of running strictly after it. The
- * post-stream review block awaits this when it matches the resolved review page,
- * otherwise it captures fresh. Reset at the start of every runTurn.
- */
-type PendingReviewCapture = { pageId: string; promise: Promise<ImageAttachment | null> };
-let pendingReviewCapture: PendingReviewCapture | null = null;
-
-/** Whether the in-progress turn should pre-start a review screenshot (main
- * turns with auto-review on), and the page pinned when the message was sent. Set
- * by runTurn before the stream is consumed. */
-let reviewCaptureEnabled = false;
-let reviewCapturePinnedPageId: string | null = null;
-
-/** Kick off the review screenshot for a just-synced page when it's a plausible
- * review target, so the capture runs while the stream is still finishing. Only
- * one capture is started per turn; correctness is preserved because the review
- * block re-resolves the target and falls back to a fresh capture on mismatch. */
-function maybeStartReviewCapture(pageId: string): void {
-  if (!reviewCaptureEnabled || pendingReviewCapture) return;
-  // Prefer the pinned page; when nothing was pinned, take the first edited page.
-  if (reviewCapturePinnedPageId && reviewCapturePinnedPageId !== pageId) return;
-  pendingReviewCapture = { pageId, promise: capturePageImage(pageId) };
-}
-
-/** Read the pipelined capture through a function so control-flow analysis
- * doesn't narrow the module-level variable to its last in-scope assignment
- * (it's mutated from applyEvent, which the runTurn closure can't see). */
-function getPendingReviewCapture(): PendingReviewCapture | null {
-  return pendingReviewCapture;
-}
-
-/**
  * Per-turn Changes-card entries, keyed by page id. Populated from the
  * authoritative `page_changed` events the server streams at the end of a turn
  * (it diffs its own cache, so the client never races the realtime broadcast).
- * Reset at the start of every runTurn so the main turn and each review pass get
- * a fresh baseline.
+ * Reset at the start of every runTurn so each turn gets a fresh baseline.
  */
 const turnChanges = new Map<string, TurnChange>();
-
-/** How many automatic review passes to run after a user turn. */
-const MAX_REVIEW_DEPTH = 1;
-
-/**
- * Skip the self-review pass when a turn touched fewer layers than this. A
- * review turn re-runs the full agent (system prompt + tools + screenshot), so
- * spending it on a one-layer tweak (a text edit, a color change) costs more
- * than it catches. Section builds and layout work clear this easily.
- */
-const MIN_CHANGED_LAYERS_FOR_REVIEW = 3;
 
 /**
  * Max prior turns sent with a request, bounding the wire payload. The server
@@ -312,21 +261,41 @@ const MIN_CHANGED_LAYERS_FOR_REVIEW = 3;
  */
 const MAX_HISTORY_MESSAGES = 24;
 
-/** Instruction sent alongside the screenshot during an auto-review pass. Names
- * the page explicitly so the agent reviews the page it actually edited and
- * doesn't mistake it for whatever was last open in the canvas. */
-function buildReviewPrompt(pageId: string): string {
-  const page = usePagesStore.getState().pages.find((p) => p.id === pageId);
-  const pageLabel = page?.name ? `the "${page.name}" page (id: ${pageId})` : `the page you edited (id: ${pageId})`;
-  return (
-    `Here is a screenshot of ${pageLabel} after your changes — this is the page these edits belong to, so review it as that page. ` +
-    'Critically review it against my request and good design principles — layout, spacing, alignment, contrast, overflow, readability, and visual hierarchy. ' +
-    'Also judge distinctiveness: if the page reads as a default template — generic blue/gray palette, default fonts, every section a centered container — push the weakest section toward the committed creative direction (when the site has an established design system, match that system instead of inventing a new look). ' +
-    'If anything looks wrong or low quality, fix it with the tools (using this page id). ' +
-    'If it already looks good, do not make changes for the sake of it. ' +
-    'Do not narrate your review, describe the screenshot, or list what looks good or what you checked. ' +
-    'Reply with at most one short sentence (e.g. "Tightened the nav spacing." or "Looks good — no changes needed."), nothing more.'
-  );
+/**
+ * Prior turns as plain text for the model. Auto-review turns — produced by the
+ * since-removed visual self-review pass and still present in older persisted
+ * chats — are excluded: they're self-contained (screenshot + review
+ * instruction + one-sentence reply), and replayed as history the instruction
+ * ("do not make changes for the sake of it", "reply with at most one short
+ * sentence") reads like a standing order — models then answer later, unrelated
+ * requests with "Looks good — no changes needed." instead of doing the work.
+ * Assistant turns that only ran tools still contribute a placeholder so
+ * user/assistant roles keep alternating.
+ */
+function buildModelHistory(messages: ChatMessage[]): Array<{ role: ChatMessage['role']; content: string }> {
+  const history: Array<{ role: ChatMessage['role']; content: string }> = [];
+  let skippingReviewReply = false;
+
+  for (const message of messages) {
+    if (message.role === 'user') {
+      skippingReviewReply = message.review === true;
+      if (skippingReviewReply) continue;
+    } else if (skippingReviewReply || message.review) {
+      // The assistant half of a review turn. Older persisted chats only flag
+      // the user half, so pair-skip in addition to the explicit flag.
+      skippingReviewReply = false;
+      continue;
+    }
+
+    const content =
+      message.text.trim() ||
+      (message.role === 'assistant' && message.toolCalls.length > 0 ? '(made the requested edits)' : '');
+    if (content.length > 0) {
+      history.push({ role: message.role, content });
+    }
+  }
+
+  return history;
 }
 
 const READONLY_TOOL_PREFIXES = ['get_', 'list_', 'export_', 'search_'];
@@ -354,54 +323,6 @@ function isVisualMutation(name: string): boolean {
   if (READONLY_TOOL_PREFIXES.some((prefix) => name.startsWith(prefix))) return false;
   if (NON_VISUAL_TOOLS.has(name)) return false;
   return true;
-}
-
-/** Capture a specific page's draft layers as a base64 image for the agent to
- * review. The page must have loaded drafts (returns null otherwise). */
-async function capturePageImage(pageId: string): Promise<ImageAttachment | null> {
-  const draft = usePagesStore.getState().draftsByPageId[pageId];
-  const layers = draft?.layers;
-  if (!layers || layers.length === 0) return null;
-
-  try {
-    const { captureLayersImage } = await import('@/lib/client/thumbnail-capture');
-    const components = useComponentsStore.getState().components;
-    // Reuse the server-compiled stylesheet (from the page_changed event) so the
-    // capture skips the fixed Tailwind CDN JIT wait and matches the real render.
-    const shot = await captureLayersImage(layers, components, draft.generated_css);
-    if (!shot) return null;
-    return { mediaType: shot.mediaType, data: shot.data, dataUrl: shot.dataUrl };
-  } catch (error) {
-    console.error('Visual review capture failed:', error);
-    return null;
-  }
-}
-
-/**
- * Pick which page the auto-review should screenshot — the page the agent
- * actually edited, so the critique never targets the wrong page. Returns null
- * (skip review) when that can't be done safely: the edited page's drafts aren't
- * loaded, or several pages were edited and there's no single clear target.
- *
- * This guards the reported failure where the agent edits page A but the review
- * screenshots the page currently open in the canvas (B) — e.g. the user
- * navigated mid-run, or the edit targeted an @-mentioned page — making the agent
- * "fix" the wrong page.
- */
-function resolveReviewPageId(pinnedPageId: string | null): string | null {
-  const editedPages = [...turnEditedPageIds];
-  const drafts = usePagesStore.getState().draftsByPageId;
-
-  // Prefer the page the user was editing when they sent the message, if the
-  // agent actually changed it and its drafts are available to screenshot.
-  if (pinnedPageId && editedPages.includes(pinnedPageId) && drafts[pinnedPageId]) {
-    return pinnedPageId;
-  }
-  // Otherwise review only when exactly one page was edited and it's loaded.
-  if (editedPages.length === 1 && drafts[editedPages[0]]) {
-    return editedPages[0];
-  }
-  return null;
 }
 
 /** Generate a v4 UUID. Chat ids are the `ai_chats` primary key (uuid column),
@@ -433,6 +354,7 @@ function stripMessageForStorage(message: ChatMessage): ChatMessage {
     changes: message.changes,
     review: message.review,
     model: message.model,
+    error: message.error,
     // Keep the reference metadata so @page/component/layer badges re-render
     // when a chat is reloaded from history (the raw "@label" text alone can't
     // reconstruct the pill's type/icon).
@@ -471,17 +393,14 @@ export const useAiChatStore = create<AiChatStore>()(
   persist(
     (set, get) => {
       /**
-   * Stream a single agent turn into a new assistant message. After a turn that
-   * makes visual edits, optionally captures the page and recurses for one
-   * automatic self-review pass (bounded by MAX_REVIEW_DEPTH).
+   * Stream a single agent turn into a new assistant message.
    */
       const runTurn = async (
         text: string,
         attachment: MessageAttachment | undefined,
-        reviewDepth: number,
         // Page context pinned for the whole turn. Captured once when the user
-        // sends the message and threaded through review passes so mid-run
-        // navigation can't drift the edit/review target to the wrong page.
+        // sends the message so mid-run navigation can't drift the edit target
+        // to the wrong page.
         pageId: string | null,
         // Component context pinned for the turn: when the user is editing a
         // component, the agent needs to know which component/variant so "this
@@ -498,21 +417,13 @@ export const useAiChatStore = create<AiChatStore>()(
         turnChanges.clear();
         turnCheckpointPages.clear();
         turnCheckpointPagesAfter.clear();
-        // Reset the pipelined review capture and arm it for main turns only, so
-        // page_changed can pre-start the screenshot while the stream finishes.
-        pendingReviewCapture = null;
-        reviewCaptureEnabled = get().autoReview && reviewDepth < MAX_REVIEW_DEPTH;
-        reviewCapturePinnedPageId = pageId;
         const startedAt = Date.now();
 
-        const isReview = reviewDepth > 0;
         const promptText = trimmed || 'Use the attached image(s) as a reference for what to build.';
 
-        // Review passes run on the cheaper review model of the same provider;
-        // the user's pick only applies to the main turn. Recorded on the
-        // assistant message so history (and the admin transcript view) shows
-        // which model produced each turn.
-        const turnModel = isReview ? reviewModelFor(get().model) : get().model ?? undefined;
+        // Recorded on the assistant message so history (and the admin
+        // transcript view) shows which model produced each turn.
+        const turnModel = get().model ?? undefined;
 
         const userMessage: ChatMessage = {
           id: newId(),
@@ -521,7 +432,6 @@ export const useAiChatStore = create<AiChatStore>()(
           toolCalls: [],
           images: images.length > 0 ? images.map((img) => ({ id: newId(), dataUrl: img.dataUrl })) : undefined,
           mentions: attachment?.mentions && attachment.mentions.length > 0 ? attachment.mentions : undefined,
-          review: isReview || undefined,
         };
         const assistantMessage: ChatMessage = {
           id: newId(),
@@ -536,26 +446,18 @@ export const useAiChatStore = create<AiChatStore>()(
         // the server can't supply authoritative before-layers (page_changed
         // overrides this per page). The checkpoint is finalized after the turn,
         // keyed by the assistant message that renders the Changes card.
-        if (!isReview && pageId) {
+        if (pageId) {
           const snapshot = usePagesStore.getState().draftsByPageId[pageId]?.layers;
           if (snapshot) {
             turnCheckpointPages.set(pageId, structuredClone(snapshot));
           }
         }
 
-        // History: prior turns as text. Assistant turns that only ran tools still
-        // contribute a placeholder so user/assistant roles keep alternating.
-        // Cap to the most recent turns to bound the wire payload (the server
-        // re-trims authoritatively against the model's context window).
-        const history = get()
-          .messages.map((message) => ({
-            role: message.role,
-            content:
-          message.text.trim() ||
-          (message.role === 'assistant' && message.toolCalls.length > 0 ? '(made the requested edits)' : ''),
-          }))
-          .filter((message) => message.content.length > 0)
-          .slice(-MAX_HISTORY_MESSAGES);
+        // History: prior turns as text, minus auto-review turns (see
+        // buildModelHistory). Cap to the most recent turns to bound the wire
+        // payload (the server re-trims authoritatively against the model's
+        // context window).
+        const history = buildModelHistory(get().messages).slice(-MAX_HISTORY_MESSAGES);
 
         set((state) => ({ messages: [...state.messages, userMessage, assistantMessage], error: null }));
 
@@ -597,7 +499,7 @@ export const useAiChatStore = create<AiChatStore>()(
 
           if (!response.ok || !response.body) {
             const message = await safeErrorMessage(response);
-            patchAssistant((m) => ({ ...m, text: m.text || message }));
+            patchAssistant((m) => ({ ...m, error: message }));
             set({ error: message });
             return;
           }
@@ -605,7 +507,9 @@ export const useAiChatStore = create<AiChatStore>()(
           await consumeSse(response.body, (event) => applyEvent(event, patchAssistant, set));
         } catch (error) {
           if ((error as Error).name === 'AbortError') return;
-          set({ error: error instanceof Error ? error.message : 'Something went wrong' });
+          const message = error instanceof Error ? error.message : 'Something went wrong';
+          patchAssistant((m) => ({ ...m, error: message }));
+          set({ error: message });
           return;
         }
 
@@ -639,32 +543,6 @@ export const useAiChatStore = create<AiChatStore>()(
           changes: changes.length > 0 ? changes : undefined,
           canRevert: canRevert || undefined,
         }));
-
-        // Visual self-review: if this turn changed enough layers to warrant a
-        // second look, screenshot the edited page and let the agent critique
-        // and fix its own work (one pass). Tiny tweaks skip it — the review
-        // costs a full extra agent turn.
-        if (get().autoReview && reviewDepth < MAX_REVIEW_DEPTH && !signal.aborted) {
-          const changedLayerCount = changes.reduce((total, change) => total + change.layerCount, 0);
-          const changedVisuals = changedLayerCount >= MIN_CHANGED_LAYERS_FOR_REVIEW;
-          // Review the page the agent actually edited, not whatever is open on the
-          // canvas — otherwise the agent critiques the wrong page and "fixes" it.
-          const reviewPageId = resolveReviewPageId(pageId);
-          if (changedVisuals && reviewPageId) {
-            // Reuse the screenshot started during the stream when it targets the
-            // same page; otherwise capture fresh (e.g. a different page won).
-            const pending = getPendingReviewCapture();
-            const shot =
-              pending && pending.pageId === reviewPageId
-                ? await pending.promise
-                : await capturePageImage(reviewPageId);
-            if (shot && !signal.aborted) {
-              // The self-review screenshots a page, so it runs with page context
-              // only — never carry the component context into the review pass.
-              await runTurn(buildReviewPrompt(reviewPageId), { images: [shot] }, reviewDepth + 1, reviewPageId, null, null);
-            }
-          }
-        }
       };
 
       /**
@@ -702,14 +580,12 @@ export const useAiChatStore = create<AiChatStore>()(
         status: 'idle',
         error: null,
         sessionUsage: EMPTY_USAGE,
-        autoReview: true,
         model: DEFAULT_AGENT_MODEL,
 
         open: () => set({ isOpen: true }),
         close: () => set({ isOpen: false }),
         toggle: () => set((state) => ({ isOpen: !state.isOpen })),
 
-        setAutoReview: (value: boolean) => set({ autoReview: value }),
         setModel: (model: string | null) => set({ model }),
 
         clear: () => {
@@ -898,21 +774,20 @@ export const useAiChatStore = create<AiChatStore>()(
           const hasContent = text.trim().length > 0 || (attachment?.images?.length ?? 0) > 0;
           if (!hasContent || get().status !== 'idle') return;
 
-          // Pin the page + component context for the whole turn (including review
-          // passes) so mid-run navigation can't drift edits/review to the wrong
-          // target. When a component is open, the agent is told to edit it.
+          // Pin the page + component context for the whole turn so mid-run
+          // navigation can't drift edits to the wrong target. When a component
+          // is open, the agent is told to edit it.
           const editorState = useEditorStore.getState();
           const pinnedPageId = editorState.currentPageId ?? null;
           const pinnedComponentId = editorState.editingComponentId ?? null;
           const pinnedVariantId = editorState.editingComponentVariantId ?? null;
-          turnEditedPageIds.clear();
           turnTouchedLayerIds.clear();
           turnTouchedCollectionIds.clear();
           turnTouchedItemIds.clear();
 
           set({ status: 'streaming', error: null });
           try {
-            await runTurn(text, attachment, 0, pinnedPageId, pinnedComponentId, pinnedVariantId);
+            await runTurn(text, attachment, pinnedPageId, pinnedComponentId, pinnedVariantId);
           } finally {
             abortController = null;
             // Pull any CMS changes into the store before clearing the shimmer so
@@ -968,7 +843,6 @@ export const useAiChatStore = create<AiChatStore>()(
       // ai_chats table — team-visible and wiped by a project reset.
       partialize: (state) => ({
         isOpen: state.isOpen,
-        autoReview: state.autoReview,
         model: state.model,
         currentChatId: state.currentChatId,
       }),
@@ -1238,14 +1112,8 @@ function applyEvent(
           }
         }
       }
-      // Remember which page(s) the agent edited so the visual self-review targets
-      // the right page instead of whatever is currently open on the canvas. The
-      // authoritative Changes-card counts come later from page_changed events.
       if (isVisualMutation(event.name)) {
         const editedPageIds = collectPageIds(event.input);
-        for (const pageId of editedPageIds) {
-          turnEditedPageIds.add(pageId);
-        }
         // First visual edit of the turn: flag the page being built so the canvas
         // shows an instant skeleton placeholder (until real layers stream in).
         // Prefer the open page when the agent is editing it.
@@ -1283,9 +1151,8 @@ function applyEvent(
       break;
     case 'page_changed': {
       // Authoritative post-turn snapshot from the server. Force the client draft
-      // in sync so the canvas and the review screenshot reflect the edit without
-      // waiting on the realtime broadcast. Record the per-page affected layer
-      // count for the card.
+      // in sync so the canvas reflects the edit without waiting on the realtime
+      // broadcast. Record the per-page affected layer count for the card.
       const pagesStore = usePagesStore.getState();
       const existingDraft = pagesStore.draftsByPageId[event.pageId];
 
@@ -1303,9 +1170,6 @@ function applyEvent(
         if (addedIds.length > 0) {
           useEditorStore.getState().markLayersEntering(addedIds);
         }
-        // Draft + compiled CSS are in sync now, so start the review screenshot
-        // early to overlap its render with the rest of the stream.
-        maybeStartReviewCapture(event.pageId);
       } else {
         // The agent edited a page the user hasn't opened, so there's no draft to
         // update yet. Load it first (the auto-switch effect triggers this too;
@@ -1324,7 +1188,6 @@ function applyEvent(
       // Load any assets these layers reference that aren't cached yet (e.g.
       // images the AI just uploaded) so they show without a manual refresh.
       void syncLayerAssets(event.layers);
-      turnEditedPageIds.add(event.pageId);
       if (event.layerCount > 0) {
         const pageName = pagesStore.pages.find((p) => p.id === event.pageId)?.name ?? 'Page';
         turnChanges.set(event.pageId, { pageId: event.pageId, pageName, layerCount: event.layerCount });
@@ -1376,6 +1239,10 @@ function applyEvent(
       }));
       break;
     case 'error':
+      // Record the failure on the turn itself (persisted with the chat) so
+      // reloaded transcripts explain why an assistant turn is empty, and keep
+      // the store-level error for the live banner.
+      patchAssistant((m) => ({ ...m, error: event.message }));
       set({ error: event.message });
       break;
     case 'done':
@@ -1415,6 +1282,12 @@ async function consumeSse(
 }
 
 async function safeErrorMessage(response: Response): Promise<string> {
+  // 413 comes from the platform's request-body limit before our code runs
+  // (no JSON body to parse), and in practice means the attached images are
+  // too large — say that instead of a bare status code.
+  if (response.status === 413) {
+    return 'Your message is too large to send — try smaller or fewer images.';
+  }
   try {
     const data = await response.json();
     return typeof data?.error === 'string' ? data.error : `Request failed (${response.status})`;

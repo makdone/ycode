@@ -1007,8 +1007,12 @@ const LayerItem: React.FC<{
       }
     }
 
-    // Hide elements with hiddenGenerated: true by default (in all modes)
-    if (layer.hiddenGenerated) {
+    // Hide elements with hiddenGenerated: true by default (in all modes).
+    // Scoped to alerts only: the flag is meant for form success/error alerts,
+    // whose reveal path clears inline display. Non-alert layers (e.g. animated
+    // dropdowns) manage visibility via data-gsap-hidden and must not be pinned
+    // to display:none here.
+    if (layer.hiddenGenerated && layer.alertType) {
       const existingStyle = typeof elementProps.style === 'object' ? elementProps.style : {};
       elementProps.style = { ...existingStyle, display: 'none' };
     }

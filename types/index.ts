@@ -1279,7 +1279,7 @@ export interface Setting {
 }
 
 // Agent (AI builder) Settings
-export type AgentProviderId = 'anthropic' | 'openai' | 'google';
+export type AgentProviderId = 'anthropic' | 'openai' | 'google' | 'xai';
 
 /** Who a configured provider key is available to. */
 export type AgentKeyScope = 'all' | 'personal';

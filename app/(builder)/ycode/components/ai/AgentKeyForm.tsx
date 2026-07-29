@@ -2,8 +2,10 @@
 
 import { useState } from 'react';
 
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
+import { Icon } from '@/components/ui/icon';
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
 import { agentSettingsApi } from '@/lib/api';
@@ -123,19 +125,23 @@ export default function AgentKeyForm({ provider, submitLabel, keyScope, onDone, 
         )}
       </div>
       {error && (
-        <div className="flex items-center gap-2">
-          <p className="text-xs text-destructive">{error}</p>
-          {allowUnverified && (
-            <button
-              type="button"
-              className="text-xs underline text-muted-foreground hover:text-foreground"
-              onClick={() => handleSubmit(true)}
-              disabled={isSubmitting}
-            >
-              Save anyway
-            </button>
-          )}
-        </div>
+        <Alert variant="destructive">
+          <Icon name="info" />
+          <AlertDescription>
+            <p>{error}</p>
+            {allowUnverified && (
+              <Button
+                variant="secondary"
+                size="xs"
+                className="mt-1"
+                onClick={() => handleSubmit(true)}
+                disabled={isSubmitting}
+              >
+                Save anyway
+              </Button>
+            )}
+          </AlertDescription>
+        </Alert>
       )}
     </Field>
   );

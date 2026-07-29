@@ -29,6 +29,15 @@ const DEFAULT_IMAGE_PLACEHOLDER = DEFAULT_ASSETS.IMAGE;
 /** Viewport width for the thumbnail render */
 const THUMBNAIL_VIEWPORT_WIDTH = 1280;
 
+/**
+ * Max output dimension (px) for captured images. Vision models reject overly
+ * large images — Anthropic errors on any side over 8000px — and a full-page
+ * capture of a long landing page easily exceeds that, which used to surface a
+ * raw provider error during the AI self-review. Tall captures are scaled down
+ * to fit instead (with margin for safety); smaller captures are unaffected.
+ */
+const MAX_CAPTURE_DIMENSION = 7500;
+
 /** Time to wait for Tailwind CDN to process styles (ms) */
 const TAILWIND_INIT_DELAY = 1500;
 
@@ -213,9 +222,14 @@ async function captureLayersAsBlob(
     const target = doc.getElementById('component-preview');
     if (!target) throw new Error('Component preview element not found');
 
+    // Scale tall pages down so no output dimension exceeds the vision-model
+    // limit (width is fixed at the viewport size and always fits).
+    const captureHeight = Math.max(target.scrollHeight, Math.ceil(target.getBoundingClientRect().height));
+    const pixelRatio = captureHeight > MAX_CAPTURE_DIMENSION ? MAX_CAPTURE_DIMENSION / captureHeight : 1;
+
     const blob = await toBlob(target, {
       backgroundColor: '#ffffff',
-      pixelRatio: 1,
+      pixelRatio,
       skipFonts: false,
       imagePlaceholder: DEFAULT_IMAGE_PLACEHOLDER,
       filter: (node: HTMLElement) => {

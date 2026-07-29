@@ -439,11 +439,16 @@ export function applyDesignToLayer(
   // Normalize CSS values (flex-start→start, Flex→flex, etc.) before processing
   design = normalizeDesignValues(design);
 
-  // Extract bgGradientVars before processing — it's not a simple design property
+  // Extract bgGradientVars/bgImageVars before processing — they hold raw CSS
+  // values (not simple design properties) and need the backgroundImage design
+  // property + bg-[image:var(--bg-img)] class wired up to actually render.
   const bgGradientVars = (design.backgrounds as Record<string, unknown>)?.bgGradientVars as Record<string, string> | undefined;
+  const bgImageVars = normalizeBgImageVars(
+    (design.backgrounds as Record<string, unknown>)?.bgImageVars as Record<string, string> | undefined,
+  );
   const inputDesign = { ...design };
   if (inputDesign.backgrounds) {
-    const { bgGradientVars: _, ...restBg } = inputDesign.backgrounds as Record<string, unknown>;
+    const { bgGradientVars: _, bgImageVars: __, ...restBg } = inputDesign.backgrounds as Record<string, unknown>;
     inputDesign.backgrounds = restBg;
   }
 
@@ -459,12 +464,13 @@ export function applyDesignToLayer(
       }
     }
 
-    // Handle gradient vars
-    if (bgGradientVars) {
+    // Handle gradient/image vars
+    if (bgGradientVars || bgImageVars) {
       const bgDesign = mergedDesign.backgrounds || {};
-      bgDesign.bgGradientVars = { ...bgDesign.bgGradientVars, ...bgGradientVars };
+      if (bgGradientVars) bgDesign.bgGradientVars = { ...bgDesign.bgGradientVars, ...bgGradientVars };
+      if (bgImageVars) bgDesign.bgImageVars = { ...bgDesign.bgImageVars, ...bgImageVars };
       const varName = buildBgImgVarName('desktop', 'neutral');
-      if (bgGradientVars[varName]) {
+      if (bgGradientVars?.[varName] || bgImageVars?.[varName]) {
         bgDesign.backgroundImage = varName;
       }
       mergedDesign.backgrounds = bgDesign;
@@ -496,12 +502,13 @@ export function applyDesignToLayer(
     }
   }
 
-  // Handle gradient vars for non-neutral states
-  if (bgGradientVars) {
+  // Handle gradient/image vars for non-neutral states
+  if (bgGradientVars || bgImageVars) {
     const bgDesign = { ...(layer.design?.backgrounds || {}) };
-    bgDesign.bgGradientVars = { ...bgDesign.bgGradientVars, ...bgGradientVars };
+    if (bgGradientVars) bgDesign.bgGradientVars = { ...bgDesign.bgGradientVars, ...bgGradientVars };
+    if (bgImageVars) bgDesign.bgImageVars = { ...bgDesign.bgImageVars, ...bgImageVars };
     const varName = buildBgImgVarName(breakpoint, uiState);
-    if (bgGradientVars[varName]) {
+    if (bgGradientVars?.[varName] || bgImageVars?.[varName]) {
       bgDesign.backgroundImage = bgDesign.backgroundImage || buildBgImgVarName('desktop', 'neutral');
       const bgImgClass = buildBgImgClass(varName);
       classes = setBreakpointClass(classes, 'backgroundImage', bgImgClass, breakpoint, uiState);
@@ -511,6 +518,41 @@ export function applyDesignToLayer(
   }
 
   return { ...layer, classes: classes.join(' ') };
+}
+
+/**
+ * Wrap bare image URLs in `url(...)` so bgImageVars values are always valid
+ * CSS background-image values (gradients and already-wrapped values pass through).
+ */
+function normalizeBgImageVars(vars?: Record<string, string>): Record<string, string> | undefined {
+  if (!vars) return vars;
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(vars)) {
+    const needsWrap = typeof value === 'string' && !value.startsWith('url(') && !value.includes('gradient(');
+    result[key] = needsWrap ? `url(${value})` : value;
+  }
+  return result;
+}
+
+/**
+ * Ensure a layer's design + classes actually render its `variables.backgroundImage`.
+ *
+ * Setting the variable alone only provides the `--bg-img` CSS value at render time —
+ * nothing consumes it until the layer also has `design.backgrounds.backgroundImage`
+ * pointing at the var (which generates the `bg-[image:var(--bg-img)]` class).
+ * Mirrors what the builder's BackgroundsControls does when picking an image.
+ * Cover/center/no-repeat defaults are only applied when not already set.
+ */
+export function applyBackgroundImageDesign(layer: Layer): Layer {
+  const bg = layer.design?.backgrounds || {};
+  const patch: Record<string, unknown> = {
+    isActive: true,
+    backgroundImage: buildBgImgVarName('desktop', 'neutral'),
+  };
+  if (!bg.backgroundSize) patch.backgroundSize = 'cover';
+  if (!bg.backgroundPosition) patch.backgroundPosition = 'center';
+  if (!bg.backgroundRepeat) patch.backgroundRepeat = 'no-repeat';
+  return applyDesignToLayer(layer, { backgrounds: patch });
 }
 
 // ── Element Templates ────────────────────────────────────────────────────────

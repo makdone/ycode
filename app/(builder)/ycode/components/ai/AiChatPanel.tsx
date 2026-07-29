@@ -337,10 +337,8 @@ export default function AiChatPanel({ embedded = false }: AiChatPanelProps) {
   const messages = useAiChatStore((s) => s.messages);
   const status = useAiChatStore((s) => s.status);
   const error = useAiChatStore((s) => s.error);
-  const autoReview = useAiChatStore((s) => s.autoReview);
   const model = useAiChatStore((s) => s.model);
   const sendMessage = useAiChatStore((s) => s.sendMessage);
-  const setAutoReview = useAiChatStore((s) => s.setAutoReview);
   const setModel = useAiChatStore((s) => s.setModel);
   const revertTurn = useAiChatStore((s) => s.revertTurn);
   const redoTurn = useAiChatStore((s) => s.redoTurn);
@@ -621,7 +619,12 @@ export default function AiChatPanel({ embedded = false }: AiChatPanelProps) {
                 />
               ))}
 
-              {error && <ErrorNotice message={error} />}
+              {/* Turn failures render inside their own bubble (message.error),
+                  so the trailing banner only shows errors that never attached
+                  to a message (e.g. a failed chat load). */}
+              {error && messages[messages.length - 1]?.error !== error && (
+                <ErrorNotice message={error} />
+              )}
             </div>
 
             {showJumpToLatest && (
@@ -752,6 +755,7 @@ const PROVIDER_SHORT_LABELS: Record<AgentProviderId, string> = {
   anthropic: 'Claude',
   openai: 'OpenAI',
   google: 'Google Gemini',
+  xai: 'Grok',
 };
 
 /** Brand icons keyed by provider (registered in the Icon component). */
@@ -759,6 +763,7 @@ const PROVIDER_ICONS: Record<AgentProviderId, IconProps['name']> = {
   anthropic: 'claude',
   openai: 'openai',
   google: 'gemini',
+  xai: 'grok',
 };
 
 /** Shown when no AI provider is configured: offers a one-click setup dialog for
@@ -959,6 +964,8 @@ const MessageBubble = memo(function MessageBubble({
       {!isActivelyStreaming && shortSummary && <MarkdownText text={shortSummary} />}
 
       {!isActivelyStreaming && plainText && <MarkdownText text={plainText} />}
+
+      {!isActivelyStreaming && message.error && <ErrorNotice message={message.error} />}
     </div>
   );
 });
@@ -1092,6 +1099,50 @@ function formatDuration(ms?: number): string {
 }
 
 /**
+ * Rotating header phrases for the stretches where the model is working but
+ * nothing visible streams (reasoning models can think silently for tens of
+ * seconds). Generic on purpose — real actions are narrated by the tool rows
+ * underneath; these just keep the header alive between them.
+ */
+const WORKING_PHRASES = [
+  'Working…',
+  'Thinking it through…',
+  'Planning the changes…',
+  'Working out the details…',
+  'Putting it together…',
+  'Still on it…',
+];
+
+/** Seconds each working phrase stays up before rotating to the next. */
+const WORKING_PHRASE_SECONDS = 5;
+
+/** Live turn header: rotates through working phrases and ticks the elapsed
+ * time every second, so the status visibly moves even while the model is
+ * silent. Mounted fresh for each streaming turn (unmounts when it ends). */
+function LiveWorkingLabel() {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      setElapsed(Math.round((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const phrase = WORKING_PHRASES[
+    Math.floor(elapsed / WORKING_PHRASE_SECONDS) % WORKING_PHRASES.length
+  ];
+
+  return (
+    <span>
+      {phrase}
+      {elapsed > 0 && <span className="tabular-nums text-muted-foreground/70"> {elapsed}s</span>}
+    </span>
+  );
+}
+
+/**
  * Collapsible "Thought for Ns" header wrapping a turn's narration and tool
  * steps. While streaming it stays expanded with a live spinner; once done it
  * collapses by default so only the summary + Changes card remain visible.
@@ -1123,7 +1174,7 @@ function ThoughtDisclosure({
         ) : (
           <Icon name="chevronRight" className={cn('size-3 transition-transform', open && 'rotate-90')} />
         )}
-        <span>{streaming ? 'Working…' : `Thought for ${formatDuration(thinkingMs)}`}</span>
+        {streaming ? <LiveWorkingLabel /> : <span>{`Thought for ${formatDuration(thinkingMs)}`}</span>}
       </button>
       {expanded && (
         <div className="ml-1 border-l border-border pl-2.5">

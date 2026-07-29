@@ -14,11 +14,40 @@ import type { AgentProviderId } from '@/lib/agent/models';
 /** Default model when nothing is configured. Overridable via ANTHROPIC_MODEL or settings. */
 export const DEFAULT_ANTHROPIC_MODEL = DEFAULT_AGENT_MODEL;
 
-/** Max tokens per assistant turn. */
-export const DEFAULT_MAX_TOKENS = 8192;
+/**
+ * Max tokens per request within a turn. On adaptive-thinking models
+ * (Sonnet 5 / Opus 5 / Fable 5, Grok, Gemini) reasoning bills as output and
+ * counts against this cap, so 8192 — sized for text + tool calls alone — got
+ * whole build turns truncated mid-thought. Every supported model allows at
+ * least 64K output, so 16384 is safe across providers.
+ */
+export const DEFAULT_MAX_TOKENS = 16384;
 
 /** Hard ceiling on tool-calling round trips per user message, to bound runaway loops. */
 export const MAX_TOOL_TURNS = 24;
+
+/**
+ * Wall-clock budget for one agent run. Vercel's `maxDuration` for the chat
+ * route (set in vercel.json, not in the route file) hard-kills the function
+ * without streaming anything, leaving the turn silently truncated. The agent
+ * loop stops starting new turns once this budget is spent, so long runs end
+ * gracefully: page/component snapshots and usage are emitted, and the user
+ * gets a resumable "ran out of time" error instead of a silent cut.
+ *
+ * The default matches vercel.json's 300s (the Vercel hobby-plan ceiling).
+ * Deployments that raise maxDuration in their own vercel.json (e.g. Ycode
+ * Cloud at 800s) must set AI_CHAT_MAX_DURATION (seconds) to the same value.
+ * The 60s buffer below `maxDuration` must cover one full provider turn plus
+ * its tool calls and the end-of-run snapshot/CSS work.
+ */
+const DEFAULT_AI_CHAT_MAX_DURATION_SECONDS = 300;
+const RUN_BUFFER_MS = 60_000;
+const configuredMaxDurationSeconds = Number(process.env.AI_CHAT_MAX_DURATION);
+
+export const MAX_RUN_MS =
+  (Number.isFinite(configuredMaxDurationSeconds) && configuredMaxDurationSeconds > 60
+    ? configuredMaxDurationSeconds
+    : DEFAULT_AI_CHAT_MAX_DURATION_SECONDS) * 1000 - RUN_BUFFER_MS;
 
 /**
  * Cross-turn conversation history budget, applied before the agent runs so a long
@@ -36,6 +65,7 @@ export const PROVIDER_KEY_SETTINGS: Record<AgentProviderId, string> = {
   anthropic: 'ai_anthropic_api_key',
   openai: 'ai_openai_api_key',
   google: 'ai_google_api_key',
+  xai: 'ai_xai_api_key',
 };
 
 export const SETTING_MODEL = 'ai_model';
@@ -101,6 +131,7 @@ const PROVIDER_ENV_KEYS: Record<AgentProviderId, string[]> = {
   openai: ['OPENAI_API_KEY'],
   // GOOGLE_API_KEY is the older alias the Google SDK also honors.
   google: ['GEMINI_API_KEY', 'GOOGLE_API_KEY'],
+  xai: ['XAI_API_KEY'],
 };
 
 /**
@@ -167,12 +198,18 @@ export async function resolveAgentConfig(userId?: string | null): Promise<Resolv
   return { providers, configured, agentEnabled, model, enabledModels };
 }
 
-/** Coerce a stored enabled-models value into a valid non-empty allowlist subset. */
+/**
+ * Coerce a stored enabled-models value into a valid non-empty allowlist subset.
+ * Legacy models stay valid when a stored list already includes them, but the
+ * default (nothing stored / nothing valid) excludes them so no new project
+ * picks up a superseded model.
+ */
 export function sanitizeEnabledModels(value: unknown): string[] {
   const allIds = AGENT_MODELS.map((option) => option.id);
-  if (!Array.isArray(value)) return allIds;
+  const defaultIds = AGENT_MODELS.filter((option) => !option.legacy).map((option) => option.id);
+  if (!Array.isArray(value)) return defaultIds;
   const valid = allIds.filter((id) => value.includes(id));
-  return valid.length > 0 ? valid : allIds;
+  return valid.length > 0 ? valid : defaultIds;
 }
 
 function isAllowedModelId(id: string): boolean {

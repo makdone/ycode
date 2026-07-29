@@ -52,6 +52,7 @@ export function createAnthropicProvider(apiKey: string): AgentProvider {
     async *streamMessage(options: ProviderStreamOptions): AsyncIterable<ProviderStreamEvent> {
       const tools = getAnthropicTools(options.tools);
       const messages = withConversationCaching(toAnthropicMessages(options.messages));
+      const effort = effortFor(options.model);
 
       for (let attempt = 1; ; attempt += 1) {
         // Only safe to retry while we haven't emitted anything for this turn —
@@ -63,6 +64,7 @@ export function createAnthropicProvider(apiKey: string): AgentProvider {
             {
               model: options.model,
               max_tokens: options.maxTokens,
+              ...(effort ? { output_config: { effort } } : {}),
               system: [
                 { type: 'text', text: options.system, cache_control: { type: 'ephemeral' } },
               ],
@@ -163,6 +165,23 @@ export function createAnthropicProvider(apiKey: string): AgentProvider {
       }
     },
   };
+}
+
+/**
+ * Effort level per model, or null for models that don't accept `output_config`
+ * (Haiku 4.5 and older are extended-thinking-only and reject it).
+ *
+ * Current Claude models (Sonnet 5 / Opus 5 / Fable 5) run adaptive thinking at
+ * "high" effort by default, which spends most of a turn — and most of
+ * `max_tokens`, since thinking bills as output — reasoning silently while the
+ * builder UI sits on "Working…" with nothing streaming. Visual building
+ * doesn't benefit from deep reasoning the way hard code does (same rationale
+ * as the OpenAI provider's low reasoning_effort), so run at "medium":
+ * comparable to the previous generation's default output quality at a
+ * fraction of the thinking latency and cost.
+ */
+function effortFor(model: string): 'medium' | null {
+  return /^claude-(fable-5|opus-5|sonnet-5|opus-4-8)/.test(model) ? 'medium' : null;
 }
 
 /** Transient errors worth retrying: overloaded, rate limit, 5xx, connection. */

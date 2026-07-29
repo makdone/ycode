@@ -38,7 +38,7 @@ export async function GET() {
   }
 }
 
-const providerIds = ['anthropic', 'openai', 'google'] as const;
+const providerIds = ['anthropic', 'openai', 'google', 'xai'] as const;
 
 const scopeSchema = z.enum(['all', 'personal']);
 
@@ -49,6 +49,7 @@ const putSchema = z.object({
       anthropic: z.string().nullish(),
       openai: z.string().nullish(),
       google: z.string().nullish(),
+      xai: z.string().nullish(),
     })
     .partial()
     .optional(),
@@ -59,6 +60,7 @@ const putSchema = z.object({
       anthropic: scopeSchema.optional(),
       openai: scopeSchema.optional(),
       google: scopeSchema.optional(),
+      xai: scopeSchema.optional(),
     })
     .partial()
     .optional(),

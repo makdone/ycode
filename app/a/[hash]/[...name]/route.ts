@@ -38,6 +38,18 @@ function parseTransformParams(searchParams: URLSearchParams) {
   };
 }
 
+/**
+ * Whether a mime type can be safely resized in-process. SVGs are vector (no
+ * point) and GIFs would lose animation when flattened — both fall through to
+ * the original passthrough instead.
+ */
+function isResizableBitmap(mimeType: string | null | undefined): boolean {
+  if (!mimeType || !mimeType.startsWith('image/')) return false;
+  if (mimeType === 'image/svg+xml') return false;
+  if (mimeType === 'image/gif') return false;
+  return true;
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ hash: string; name: string[] }> }
@@ -96,27 +108,31 @@ export async function GET(
     }
 
     const transform = parseTransformParams(url.searchParams);
-    // Never run Sharp on GIFs — it flattens animated frames into a single
-    // static image, killing the animation. Serve the raw bytes instead.
-    const isGif = asset.mime_type === 'image/gif';
-    const isAvif = asset.mime_type === 'image/avif';
-    const canResize = transform && isImage && !isGif;
-
-    if (canResize) {
+    // Resize the fetched original in-process with sharp. GIFs are excluded via
+    // isResizableBitmap — Sharp flattens animated frames into a single static
+    // image, so they fall through and stream as raw bytes below.
+    if (transform && isImage && isResizableBitmap(asset.mime_type)) {
       const buffer = Buffer.from(await response.arrayBuffer());
+
+      // Preserve AVIF on output (already highly compressed); re-encoding to WebP
+      // would inflate size and lose quality.
+      const isAvif = asset.mime_type === 'image/avif';
 
       try {
         let pipeline = sharp(buffer);
 
         if (transform.width || transform.height) {
+          // `fit: 'inside'` scales down within the requested bounds while
+          // preserving aspect ratio — it never crops. Cropping is a display
+          // concern handled by CSS `object-fit` on the rendered element; using
+          // `fit: 'cover'` here crops the sides whenever both dimensions are
+          // present, silently fighting the element's own `object-fit`.
           pipeline = pipeline.resize(transform.width, transform.height, {
-            fit: 'cover',
+            fit: 'inside',
             withoutEnlargement: true,
           });
         }
 
-        // Preserve AVIF on output (already highly compressed); normalize every
-        // other raster format to WebP.
         pipeline = isAvif
           ? pipeline.avif({ quality: transform.quality })
           : pipeline.webp({ quality: transform.quality });

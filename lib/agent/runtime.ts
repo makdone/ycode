@@ -1,5 +1,5 @@
 import { DEFERRED_GROUP_GUIDES, SYSTEM_INSTRUCTIONS } from '@/lib/mcp/instructions';
-import { DEFAULT_MAX_TOKENS, MAX_HISTORY_CHARS, MAX_HISTORY_MESSAGES, MAX_TOOL_TURNS } from '@/lib/agent/config';
+import { DEFAULT_MAX_TOKENS, MAX_HISTORY_CHARS, MAX_HISTORY_MESSAGES, MAX_RUN_MS, MAX_TOOL_TURNS } from '@/lib/agent/config';
 import { pickCreativeSeeds } from '@/lib/agent/creative-seeds';
 import { compactToolResult } from '@/lib/agent/tools/compact-result';
 import { buildDesignBriefTool, DESIGN_BRIEF_NAME } from '@/lib/agent/tools/design-brief';
@@ -82,6 +82,7 @@ export type RuntimeEvent =
  */
 export async function* runAgent(options: RunAgentOptions): AsyncIterable<RuntimeEvent> {
   const { provider, model, signal } = options;
+  const startedAt = Date.now();
   const maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
   const system = buildSystemPrompt(options.context);
   const allTools = getAgentTools();
@@ -220,6 +221,18 @@ export async function* runAgent(options: RunAgentOptions): AsyncIterable<Runtime
   }
 
   for (let turn = 0; turn < MAX_TOOL_TURNS; turn += 1) {
+    // Soft deadline: stop before Vercel's maxDuration hard-kills the function
+    // (which would cut the stream with no error and no snapshots). Edits made
+    // so far are already persisted by the tools, so the run is resumable.
+    if (Date.now() - startedAt > MAX_RUN_MS) {
+      usage.log(model, turn);
+      yield* emitPageChanges();
+      yield* emitComponentChanges();
+      yield usage.toEvent(model);
+      yield { type: 'error', message: TIME_LIMIT_MESSAGE };
+      return;
+    }
+
     const assistantBlocks: AgentContentBlock[] = [];
     const toolUses: AgentToolUseBlock[] = [];
     let text = '';
@@ -591,6 +604,11 @@ function isReadOnlyTool(name: string): boolean {
  * after an aggressive trim — their pages are untouched; a new chat resets it. */
 const OVERFLOW_MESSAGE =
   'This chat got too long for the model. Start a new chat to keep going — your pages are unchanged.';
+
+/** Shown when the run hits the wall-clock budget (MAX_RUN_MS). Edits made so
+ * far are already saved, so the user can simply ask the agent to continue. */
+const TIME_LIMIT_MESSAGE =
+  'This ran out of time before finishing. Everything done so far is saved — send "continue" to pick up where it left off.';
 
 /** Rough char-count proxy for a message's token cost (estimated ~chars/4). */
 function estimateMessageChars(message: AgentMessage): number {

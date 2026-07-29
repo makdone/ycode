@@ -42,6 +42,16 @@ interface KeyFeedback {
   message: string;
 }
 
+/** A provider's picker models. Legacy models only show for projects that
+ * already have them enabled — new projects can't adopt a superseded model. */
+function visibleProviderModels(providerId: AgentProviderId, enabledModels: string[]) {
+  return AGENT_MODELS.filter(
+    (option) =>
+      option.provider === providerId &&
+      (!option.legacy || enabledModels.includes(option.id)),
+  );
+}
+
 export default function AgentSettingsPage() {
   const status = useAgentSettingsStore((s) => s.status);
   const isLoading = useAgentSettingsStore((s) => s.isLoading);
@@ -201,6 +211,7 @@ export default function AgentSettingsPage() {
                 <ProviderCard
                   key={provider.id}
                   provider={provider}
+                  enabledModels={enabledModels}
                   isConnected={status?.providers[provider.id]?.configured ?? false}
                   scope={status?.providers[provider.id]?.scope ?? null}
                   onOpenSettings={() => setSelectedProviderId(provider.id)}
@@ -340,13 +351,14 @@ function ProviderScopeBadge({ scope, className }: ProviderScopeBadgeProps) {
 
 interface ProviderCardProps {
   provider: AgentProviderOption;
+  enabledModels: string[];
   isConnected: boolean;
   scope: AgentKeyScope | null;
   onOpenSettings: () => void;
 }
 
-function ProviderCard({ provider, isConnected, scope, onOpenSettings }: ProviderCardProps) {
-  const models = AGENT_MODELS.filter((option) => option.provider === provider.id);
+function ProviderCard({ provider, enabledModels, isConnected, scope, onOpenSettings }: ProviderCardProps) {
+  const models = visibleProviderModels(provider.id, enabledModels);
 
   return (
     <button
@@ -405,7 +417,7 @@ function ProviderSheetContent({
   const isConnected = keyStatus?.configured ?? false;
   const usesEnvKey = keyStatus?.source === 'env';
   const scope = keyStatus?.scope ?? null;
-  const models = AGENT_MODELS.filter((option) => option.provider === provider.id);
+  const models = visibleProviderModels(provider.id, enabledModels);
 
   const handleScopeChange = async (forAllUsers: boolean) => {
     try {

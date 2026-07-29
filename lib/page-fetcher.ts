@@ -4788,8 +4788,11 @@ export function layerToHtml(
     attrs.push(`id="${escapeHtml(layer.attributes.id)}"`);
   }
 
-  // Hide elements marked as hiddenGenerated (e.g. alerts, slider fraction placeholder)
-  if (layer.hiddenGenerated) {
+  // Hide elements marked as hiddenGenerated. Scoped to alerts only: the flag is
+  // meant for form success/error alerts, whose reveal path clears inline display.
+  // Non-alert layers (e.g. animated dropdowns) manage visibility via
+  // data-gsap-hidden and must not be pinned to display:none here.
+  if (layer.hiddenGenerated && layer.alertType) {
     const existingDynamic = layer._dynamicStyles || {};
     layer = { ...layer, _dynamicStyles: { ...existingDynamic, display: 'none' } };
   }
