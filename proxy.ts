@@ -142,8 +142,10 @@ export async function proxy(request: NextRequest) {
   const skipPreviewAuth = process.env.DISABLE_PREVIEW_AUTH === 'true'
     && pathname.startsWith('/ycode/preview');
 
-  // Protect API and preview routes with auth
-  if (!skipPreviewAuth && (pathname.startsWith('/ycode/api') || pathname.startsWith('/ycode/preview'))) {
+  // Protect API and preview routes with auth. `/api/templates` lives outside the
+  // `/ycode` tree (public site route group) but exposes destructive builder-only
+  // operations (apply/export), so it must be gated here too.
+  if (!skipPreviewAuth && (pathname.startsWith('/ycode/api') || pathname.startsWith('/ycode/preview') || pathname.startsWith('/api/templates'))) {
     const authResponse = await verifyApiAuth(request);
     if (authResponse) {
       if (authResponse.status === 401) {
