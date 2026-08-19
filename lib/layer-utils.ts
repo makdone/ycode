@@ -666,6 +666,36 @@ export function isTextContentLayer(layer: Layer | null | undefined): boolean {
 }
 
 /**
+ * Build the props to convert a text layer into a heading (or the reverse).
+ * Switches the element `name` and its default HTML tag while preserving
+ * content, classes, and design.
+ *
+ * Only genuine block-level text and headings qualify: inline text used as
+ * button captions, alert messages, or labels (tag `span`/`label`) is excluded
+ * so conversion never emits an `<h2>` inside a `<button>` or `<p>`.
+ */
+export function getTextHeadingConversion(
+  layer: Layer | null | undefined
+): Pick<Layer, 'name' | 'settings'> | null {
+  if (!layer) return null;
+
+  // Heading (incl. legacy text with an h1-h6 tag) → paragraph text.
+  if (isHeadingLayer(layer)) {
+    return { name: 'text', settings: { ...layer.settings, tag: 'p' } };
+  }
+
+  // Block-level paragraph text → heading (skip inline span/label variants).
+  if (layer.name === 'text') {
+    const tag = layer.settings?.tag;
+    if (!tag || tag === 'p') {
+      return { name: 'heading', settings: { ...layer.settings, tag: 'h2' } };
+    }
+  }
+
+  return null;
+}
+
+/**
  * Check if a layer is a rich text element (block-level text with full formatting).
  */
 export function isRichTextLayer(layer: Layer | null | undefined): boolean {

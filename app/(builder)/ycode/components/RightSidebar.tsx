@@ -900,9 +900,19 @@ const RightSidebar = React.memo(function RightSidebar({
 
   // Update local state when selected layer changes (for settings fields)
   const [prevSelectedLayerId, setPrevSelectedLayerId] = useState<string | null>(null);
+  // Track element name + tag so the tag selectors resync when the layer's type
+  // changes in place (e.g. converting a heading to text via the context menu),
+  // where the selection id stays the same.
+  const layerTagSignature = `${selectedLayer?.name ?? ''}:${selectedLayer?.settings?.tag ?? ''}`;
+  const [prevLayerTagSignature, setPrevLayerTagSignature] = useState<string>('');
   if (selectedLayerId !== prevSelectedLayerId) {
     setPrevSelectedLayerId(selectedLayerId);
+    setPrevLayerTagSignature(layerTagSignature);
     setCustomId(sanitizeHtmlId(selectedLayer?.settings?.id || selectedLayer?.attributes?.id || ''));
+    setContainerTag(selectedLayer?.settings?.tag || getDefaultContainerTag(selectedLayer));
+    setTextTag(selectedLayer?.settings?.tag || getDefaultTextTag(selectedLayer));
+  } else if (layerTagSignature !== prevLayerTagSignature) {
+    setPrevLayerTagSignature(layerTagSignature);
     setContainerTag(selectedLayer?.settings?.tag || getDefaultContainerTag(selectedLayer));
     setTextTag(selectedLayer?.settings?.tag || getDefaultTextTag(selectedLayer));
   }
