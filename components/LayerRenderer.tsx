@@ -2880,7 +2880,7 @@ const LayerItemImpl: React.FC<{
           data-layer-id={layer.id}
           data-layer-type="htmlEmbed"
           data-html-embed="true"
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals"
           className={fullClassName}
           style={{
             width: '100%',

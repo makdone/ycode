@@ -1056,9 +1056,16 @@ const RightSidebar = React.memo(function RightSidebar({
     setTextTag(tag);
     if (selectedLayerId) {
       const currentSettings = selectedLayer?.settings || {};
-      handleLayerUpdate(selectedLayerId, {
-        settings: { ...currentSettings, tag }
-      });
+      // Normalize the element name to match the tag family so legacy headings
+      // (stored as text with an h1-h6 tag) migrate to a proper heading.
+      const name = headingTagOptions.some(opt => opt.value === tag) ? 'heading' : 'text';
+      const updates: Partial<Layer> = { name, settings: { ...currentSettings, tag } };
+      // Drop an auto-assigned "Text"/"Heading" label so the layer shows its
+      // content again (a user's custom layer name is left untouched).
+      if (selectedLayer?.customName === 'Text' || selectedLayer?.customName === 'Heading') {
+        updates.customName = undefined;
+      }
+      handleLayerUpdate(selectedLayerId, updates);
     }
   };
 
@@ -2356,7 +2363,11 @@ const RightSidebar = React.memo(function RightSidebar({
 
               {/* Tag Selector - For heading and text layers */}
               {(selectedLayer?.name === 'heading' || (selectedLayer?.name === 'text' && !isContainerLayer(selectedLayer))) && (() => {
-                const tagOptions = selectedLayer?.name === 'heading' ? headingTagOptions : textTagOptions;
+                // Use isHeadingLayer (not name === 'heading') so legacy headings
+                // stored as text with an h1-h6 tag still get heading tag options
+                // instead of p/span/label — otherwise changing the tag demotes
+                // them to a paragraph.
+                const tagOptions = isHeadingLayer(selectedLayer) ? headingTagOptions : textTagOptions;
                 return (
                   <div className="grid grid-cols-3">
                     <Label variant="muted">Tag</Label>
