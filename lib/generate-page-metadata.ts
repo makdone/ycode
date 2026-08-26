@@ -230,7 +230,6 @@ export async function buildPageHreflangAlternatesForPage(
   const dynamicSlug = page.is_dynamic && collectionItem && slugFieldId
     ? {
       itemId: collectionItem.id,
-      fieldId: slugFieldId,
       defaultValue: collectionItem.values?.[slugFieldId] || '',
     }
     : null;
