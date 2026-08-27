@@ -2317,6 +2317,10 @@ const RightSidebar = React.memo(function RightSidebar({
                             onExpand={isRichTextElementContent && selectedLayerId
                               ? () => openRichTextSheet(selectedLayerId)
                               : undefined}
+                            fieldGroups={fieldGroups}
+                            allFields={fields}
+                            collections={collections}
+                            layer={selectedLayer}
                           />
                         );
                       })}
