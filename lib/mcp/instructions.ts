@@ -678,8 +678,19 @@ same condition model as set_collection_filters.
 - Call list_translatable_content FIRST to discover exactly what can be translated and the
   precise source_type/source_id/content_key — never guess content keys. It also surfaces
   per-page component instance overrides, which are easy to miss.
-- set_translation for plain text; batch_set_translations for bulk; set_rich_text_translation
-  (structured blocks) for rich_text fields — plain text sent to a rich_text key will not render.
+
+Translating a lot of content efficiently (avoid token waste and many round-trips):
+- Pass locale_id + untranslated_only:true to list_translatable_content so it returns ONLY the
+  items still missing a completed translation. This skips already-done work — essential when
+  resuming or adding a new locale, so you never re-read content you already translated.
+- For big CMS collections, paginate discovery with limit + offset instead of one huge call.
+- Write with batch_set_translations (up to 1000 items per call). Set the top-level locale_id
+  ONCE and omit locale_id on each item — do not repeat it 1000 times. Prefer one large batch
+  over many small set_translation calls.
+- Rich text in a batch: set content_type "richtext" with content_value as a JSON-stringified
+  Tiptap doc. Use set_rich_text_translation (structured blocks) only for a single field.
+  Plain text sent to a rich_text key will not render.
+
 - Translations are marked complete by default. Only pass is_completed: false for drafts —
   incomplete translations NEVER appear on the live site. Translations stay drafts until published.`,
 };
