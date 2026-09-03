@@ -8,7 +8,7 @@ import { getValuesByItemIds } from '@/lib/repositories/collectionItemValueReposi
 import { getFieldsByCollectionId } from '@/lib/repositories/collectionFieldRepository';
 import { enrichItemsWithCountValues } from '@/lib/repositories/collectionCountRepository';
 import { getLocaleScaffoldTranslations, getCmsTranslationsForItems } from '@/lib/repositories/translationRepository';
-import { getTranslatableKey } from '@/lib/locale-runtime';
+import { getTranslatableKey, slimTranslations } from '@/lib/locale-runtime';
 import type { Page, PageFolder, PageLayers, Component, ComponentVariable, CollectionItemWithValues, CollectionField, Layer, CollectionPaginationMeta, Translation, Locale } from '@/types';
 import { getCollectionVariable, resolveFieldValue, evaluateVisibility, evaluateCondition, getLayerHtmlTag, filterDisabledSliderLayers } from '@/lib/layer-utils';
 import { isFieldVariable, isAssetVariable, createDynamicTextVariable, createDynamicRichTextVariable, createAssetVariable, getDynamicTextContent, getVariableStringValue, getAssetId, resolveDesignStyles } from '@/lib/variable-utils';
@@ -887,13 +887,25 @@ async function fetchPageByPathInternal(
   }
 }
 
+/**
+ * Strip the bulk translation catalog from resolved page data, keeping only the
+ * slug + seo rows still consumed downstream (localized URLs and metadata). Text
+ * and media are already injected into the layer tree, so keeping the full
+ * catalog would only bloat caches and the serialized RSC payload.
+ */
+function withSlimTranslations(data: PageData | null): PageData | null {
+  if (!data?.translations) return data;
+  return { ...data, translations: slimTranslations(data.translations, { includeSeo: true }) };
+}
+
 export const fetchPageByPath = cache(async function fetchPageByPath(
   slugPath: string,
   isPublished: boolean,
   paginationContext?: PaginationContext,
   tenantId?: string,
 ): Promise<PageData | null> {
-  return fetchPageByPathInternal(slugPath, isPublished, paginationContext, tenantId, { resolveLayers: true });
+  const data = await fetchPageByPathInternal(slugPath, isPublished, paginationContext, tenantId, { resolveLayers: true });
+  return withSlimTranslations(data);
 });
 
 export async function fetchPageByPathForMetadata(
@@ -902,7 +914,8 @@ export async function fetchPageByPathForMetadata(
   paginationContext?: PaginationContext,
   tenantId?: string,
 ): Promise<PageData | null> {
-  return fetchPageByPathInternal(slugPath, isPublished, paginationContext, tenantId, { resolveLayers: false });
+  const data = await fetchPageByPathInternal(slugPath, isPublished, paginationContext, tenantId, { resolveLayers: false });
+  return withSlimTranslations(data);
 }
 
 /**
