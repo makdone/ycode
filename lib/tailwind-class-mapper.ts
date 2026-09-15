@@ -265,6 +265,11 @@ const CLASS_PROPERTY_MAP: Record<string, RegExp> = {
   alignItems: /^items-(start|end|center|baseline|stretch)$/,
   alignSelf: /^self-(auto|start|end|center|baseline|stretch)$/,
   alignContent: /^content-(start|end|center|between|around|evenly|stretch)$/,
+  // Flex child
+  flex: /^flex-(1|auto|initial|none)$/,
+  flexGrow: /^(flex-)?grow(-0)?$/,
+  flexShrink: /^(flex-)?shrink(-0)?$/,
+  order: /^order-(first|last|none|\d+)$/,
   gap: /^gap-(\[.+\]|\d+|px|0\.5|1\.5|2\.5|3\.5)$/,
   columnGap: /^gap-x-(\[.+\]|\d+|px|0\.5|1\.5|2\.5|3\.5)$/,
   rowGap: /^gap-y-(\[.+\]|\d+|px|0\.5|1\.5|2\.5|3\.5)$/,
@@ -754,6 +759,15 @@ export function propertyToClass(
         };
         return `content-${contentMap[value] || value}`;
       }
+      // Flex child
+      case 'flex':
+        return ['1', 'auto', 'initial', 'none'].includes(value) ? `flex-${value}` : null;
+      case 'flexGrow':
+        return value === '0' ? 'grow-0' : 'grow';
+      case 'flexShrink':
+        return value === '0' ? 'shrink-0' : 'shrink';
+      case 'order':
+        return /^(first|last|none|\d+)$/.test(value) ? `order-${value}` : null;
       case 'gap':
         return formatMeasurementClass(value, 'gap');
       case 'columnGap':
@@ -1500,6 +1514,19 @@ export function classesToDesign(classes: string | string[]): Layer['design'] {
       if (['auto', 'start', 'end', 'center', 'baseline', 'stretch'].includes(value)) {
         design.layout!.alignSelf = value;
       }
+    }
+
+    // Flex child
+    if (cls === 'flex-1' || cls === 'flex-auto' || cls === 'flex-initial' || cls === 'flex-none') {
+      design.layout!.flex = cls.replace('flex-', '');
+    }
+    if (cls === 'grow' || cls === 'flex-grow') design.layout!.flexGrow = '1';
+    if (cls === 'grow-0' || cls === 'flex-grow-0') design.layout!.flexGrow = '0';
+    if (cls === 'shrink' || cls === 'flex-shrink') design.layout!.flexShrink = '1';
+    if (cls === 'shrink-0' || cls === 'flex-shrink-0') design.layout!.flexShrink = '0';
+    if (cls.startsWith('order-')) {
+      const value = cls.replace('order-', '');
+      if (/^(first|last|none|\d+)$/.test(value)) design.layout!.order = value;
     }
 
     // Gap

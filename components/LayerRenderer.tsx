@@ -17,7 +17,7 @@ import { SWIPER_CLASS_MAP, SWIPER_DATA_ATTR_MAP, SLIDER_BUTTON_ARIA_LABELS, isSl
 import { getSliderPresizeVars } from '@/lib/slider-utils';
 import { useCanvasSlider } from '@/hooks/use-canvas-slider';
 import { resolveFieldFromSources } from '@/lib/cms-variables-utils';
-import { getDynamicTextContent, getImageUrlFromVariable, getVideoUrlFromVariable, getIframeUrlFromVariable, isFieldVariable, isAssetVariable, isStaticTextVariable, isDynamicTextVariable, getAssetId, getStaticTextContent, createAssetVariable, createDynamicTextVariable, resolveDesignStyles } from '@/lib/variable-utils';
+import { getDynamicTextContent, getImageUrlFromVariable, getVideoUrlFromVariable, getIframeUrlFromVariable, isFieldVariable, isAssetVariable, isStaticTextVariable, isDynamicTextVariable, getAssetId, getStaticTextContent, createAssetVariable, createDynamicTextVariable, resolveDesignStyles, getEffectiveHidden } from '@/lib/variable-utils';
 import { getTranslatedAssetId, getTranslatedText, applyCmsTranslations, injectTranslatedText } from '@/lib/localisation-utils';
 import { isValidLinkSettings } from '@/lib/link-utils';
 import { DEFAULT_ASSETS, ASSET_CATEGORIES, isAssetOfType } from '@/lib/asset-utils';
@@ -51,7 +51,7 @@ import LocaleSelector from '@/components/layers/LocaleSelector';
 import { usePagesStore } from '@/stores/usePagesStore';
 import { useSettingsStore } from '@/stores/useSettingsStore';
 import { generateLinkHref, resolveLinkAttrs, isLinkAtCollectionBoundary, isLinkToCurrentPage, type LinkResolutionContext } from '@/lib/link-utils';
-import { collectEditorHiddenLayerIds, type HiddenLayerInfo } from '@/lib/animation-utils';
+import { collectEditorHiddenLayerIds, collectKeptHiddenLayerIds, type HiddenLayerInfo } from '@/lib/animation-utils';
 import AnimationInitializer from '@/components/AnimationInitializer';
 import { transformLayerIdsForInstance, resolveVariableLinks } from '@/lib/resolve-components';
 
@@ -493,9 +493,22 @@ const LayerItemImpl: React.FC<{
   // descendant is selected. Subscribed reactively so a hidden ancestor updates
   // when a descendant is selected — its own `isSelected` wouldn't change then.
   // Returns a stable `false` for non-hidden layers, so it never re-renders them.
+  // Layers hidden explicitly via Visibility (`settings.hidden`) are exempt:
+  // the user asked for them to be hidden, so toggling visibility must take
+  // effect at once even while the layer is selected. They still show while
+  // their interaction is open (force-visible removes them from the map).
   const isEditorHidden = isEditMode && !!editorHiddenLayerIds?.has(layer.id);
+  // Visibility may be driven by a component variable (per-instance override or
+  // the variable's default while editing the component); SSR bakes this into
+  // `settings.hidden`, the canvas resolves it live here.
+  const isHidden = getEffectiveHidden(
+    layer,
+    parentComponentVariables || editingComponentVariables,
+    parentComponentOverrides,
+  );
+  const canRevealFromSelection = isEditorHidden && !isHidden;
   const revealFromSelection = useEditorStore((state) => {
-    if (!isEditorHidden) return false;
+    if (!canRevealFromSelection) return false;
     const sel = state.selectedLayerId;
     return sel ? containsLayerId(layer, sel) : false;
   });
@@ -1399,6 +1412,22 @@ const LayerItemImpl: React.FC<{
     return merged;
   }, [transformedComponentLayers, editorHiddenLayerIds]);
 
+  // Same for kept-hidden layers inside the instance: the keep-in-DOM
+  // check reads `hiddenLayerInfo`, which was computed with the page-level ID
+  // transform, so add entries for the instance's transformed IDs.
+  const componentHiddenLayerInfo = useMemo(() => {
+    if (!transformedComponentLayers) return hiddenLayerInfo;
+    const kept = collectKeptHiddenLayerIds(transformedComponentLayers);
+    if (kept.size === 0) return hiddenLayerInfo;
+    const merged: HiddenLayerInfo[] = hiddenLayerInfo ? [...hiddenLayerInfo] : [];
+    kept.forEach((layerId) => {
+      if (!merged.some((info) => info.layerId === layerId)) {
+        merged.push({ layerId, breakpoints: null });
+      }
+    });
+    return merged;
+  }, [transformedComponentLayers, hiddenLayerInfo]);
+
   const collectionVariable = getCollectionVariable(layer);
   const isCollectionLayer = !!collectionVariable;
   const collectionId = collectionVariable?.id;
@@ -1966,8 +1995,10 @@ const LayerItemImpl: React.FC<{
     'ycode-layer'
   ) : clsx(classesString, paragraphClasses, SWIPER_CLASS_MAP[layer.name], isSlideChild && 'swiper-slide', buttonNeedsFit && 'w-fit', buttonNeedsTextCenter && 'text-center');
 
-  // Check if layer should be hidden (hide completely in both edit mode and public pages)
-  if (layer.settings?.hidden) {
+  // Hidden layers are omitted entirely (edit mode and public pages) unless kept
+  // in HTML (reveal interaction or settings.keepInHtml) — those are in
+  // `hiddenLayerInfo` and render collapsed instead.
+  if (isHidden && !hiddenLayerInfo?.some((info) => info.layerId === layer.id)) {
     return null;
   }
 
@@ -2072,6 +2103,7 @@ const LayerItemImpl: React.FC<{
           layers={layersWithInstanceId}
           {...sharedRendererProps}
           editorHiddenLayerIds={componentEditorHiddenLayerIds}
+          hiddenLayerInfo={componentHiddenLayerInfo}
           enableDragDrop={enableDragDrop}
           activeLayerId={activeLayerId}
           projected={projected}
@@ -2230,8 +2262,10 @@ const LayerItemImpl: React.FC<{
       }
     }
 
-    // Add data-gsap-hidden attribute for elements that should start hidden
-    const hiddenInfo = hiddenLayerInfo?.find(info => info.layerId === layer.id);
+    // Add data-gsap-hidden attribute for elements that should start hidden.
+    // Not in edit mode: canvas.css hides the attribute with !important, which
+    // would defeat the reveal-on-select handled via `editorHiddenLayerIds` below.
+    const hiddenInfo = isEditMode ? undefined : hiddenLayerInfo?.find(info => info.layerId === layer.id);
     if (hiddenInfo) {
       // Set breakpoints as value (e.g., "mobile" or "mobile tablet") or empty for all
       elementProps['data-gsap-hidden'] = hiddenInfo.breakpoints || '';

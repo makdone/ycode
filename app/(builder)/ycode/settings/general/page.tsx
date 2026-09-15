@@ -658,7 +658,7 @@ export default function GeneralSettingsPage() {
 
                     <TabsContent value="ycode-sitemap" className="mt-4 space-y-6">
                       <p className="text-sm text-muted-foreground">
-                        The sitemap automatically includes localized URLs with hreflang alternates and excludes pages marked with noindex.
+                        The sitemap lists each localized URL as its own entry with reciprocal hreflang alternates and excludes pages marked with noindex.
                       </p>
 
                       <Field>

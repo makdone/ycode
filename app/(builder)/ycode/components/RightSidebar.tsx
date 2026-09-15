@@ -33,6 +33,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
 // 4. Internal components
 import AddAttributeModal from './AddAttributeModal';
+import AdvancedSettings from './AdvancedSettings';
 import BackgroundsControls from './BackgroundsControls';
 import CustomAttributeRow from './CustomAttributeRow';
 import BorderControls from './BorderControls';
@@ -62,8 +63,8 @@ import ExpandableRichTextEditor from './ExpandableRichTextEditor';
 import RichTextEditor from './RichTextEditor';
 import ComponentVariableLabel, { VARIABLE_TYPE_ICONS } from './ComponentVariableLabel';
 import InteractionsPanel from './InteractionsPanel';
+import FlexChildControls from './FlexChildControls';
 import LayoutControls from './LayoutControls';
-import SelfLayoutControls from './SelfLayoutControls';
 import LayerStylesPanel from './LayerStylesPanel';
 import PositionControls from './PositionControls';
 import TransformControls from './TransformControls';
@@ -72,6 +73,7 @@ import SettingsPanel from './SettingsPanel';
 import SizingControls from './SizingControls';
 import SpacingControls from './SpacingControls';
 import ToggleGroup from './ToggleGroup';
+import VisibilitySetting from './VisibilitySetting';
 import TypographyControls from './TypographyControls';
 import UIStateSelector from './UIStateSelector';
 
@@ -584,9 +586,9 @@ const RightSidebar = React.memo(function RightSidebar({
       case 'layout':
         // In text style mode, hide layout controls
         if (showTextStyleControls) return false;
-        // Layout controls: show for containers, hide for text-only and image elements
-        if (isImageLayer(layer)) return false;
-        return !isTextLayer(layer) || isButtonLayer(layer);
+        // Layout controls: every element gets a Type row; LayoutControls
+        // narrows the options for leaf elements (no flex/grid, inline block)
+        return true;
 
       case 'spacing':
         // Spacing controls (padding/margin): show for all elements
@@ -2048,12 +2050,17 @@ const RightSidebar = React.memo(function RightSidebar({
           <div className="overflow-y-auto no-scrollbar overflow-x-hidden divide-y ">
 
           {shouldShowControl('layout', selectedLayer) && !showTextStyleControls && (
-            <LayoutControls layer={controlLayer} onLayerUpdate={controlUpdate} />
+            <LayoutControls
+              layer={controlLayer}
+              onLayerUpdate={controlUpdate}
+            />
           )}
 
+          {/* How this layer behaves inside a flex parent (renders nothing otherwise) */}
           {!showTextStyleControls && (
-            <SelfLayoutControls
-              layer={controlLayer} parentLayer={selectedLayerParent}
+            <FlexChildControls
+              layer={controlLayer}
+              parentLayer={selectedLayerParent}
               onLayerUpdate={controlUpdate}
             />
           )}
@@ -2067,7 +2074,11 @@ const RightSidebar = React.memo(function RightSidebar({
           )}
 
           {shouldShowControl('sizing', selectedLayer) && !showTextStyleControls && (
-            <SizingControls layer={controlLayer} onLayerUpdate={controlUpdate} />
+            <SizingControls
+              layer={controlLayer}
+              parentLayer={selectedLayerParent}
+              onLayerUpdate={controlUpdate}
+            />
           )}
 
           {shouldShowControl('position', selectedLayer) && !showTextStyleControls && (
@@ -2414,6 +2425,15 @@ const RightSidebar = React.memo(function RightSidebar({
                   </div>
                 );
               })()}
+
+              {selectedLayer && (
+                <VisibilitySetting
+                  layer={selectedLayer}
+                  onLayerUpdate={handleLayerUpdate}
+                  disabled={isLockedByOther}
+                  onOpenVariablesDialog={openVariablesDialog}
+                />
+              )}
             </div>
 
             {/* Content Panel - show for text-editable layers */}
@@ -3201,6 +3221,15 @@ const RightSidebar = React.memo(function RightSidebar({
                 </div>
               )}
             </SettingsPanel>
+            )}
+
+            {/* Advanced — hide while translating and for body */}
+            {!isLocalizing && selectedLayer && selectedLayerId !== 'body' && (
+              <AdvancedSettings
+                layer={selectedLayer}
+                onLayerUpdate={handleLayerUpdate}
+                disabled={isLockedByOther}
+              />
             )}
           </div>
         </TabsContent>

@@ -17,6 +17,7 @@ import LinkSettings from './LinkSettings';
 import AudioSettings from './AudioSettings';
 import VideoSettings from './VideoSettings';
 import IconSettings from './IconSettings';
+import VisibilityToggle from './VisibilityToggle';
 import {
   Select,
   SelectContent,
@@ -29,6 +30,7 @@ import {
   createTextComponentVariableValue,
   tiptapEqual,
   EMPTY_OVERRIDES,
+  isVisibilityValue,
 } from '@/lib/variable-utils';
 import type {
   ComponentVariable,
@@ -38,6 +40,7 @@ import type {
   VideoSettingsValue,
   IconSettingsValue,
   VariantSettingsValue,
+  VisibilitySettingsValue,
   Layer,
   CollectionField,
   Collection,
@@ -167,7 +170,7 @@ export default function ComponentVariableOverrides({
   );
 
   const getTypedValue = useCallback(
-    (category: 'image' | 'link' | 'audio' | 'video' | 'icon', variableId: string) => {
+    (category: 'image' | 'link' | 'audio' | 'video' | 'icon' | 'variant' | 'visibility', variableId: string) => {
       const override = componentOverrides?.[category]?.[variableId];
       const def = variables.find(v => v.id === variableId)?.default_value;
       return override !== undefined ? override : def;
@@ -387,7 +390,7 @@ export default function ComponentVariableOverrides({
         );
       case 'variant': {
         const options = getVariantVariableOptions?.(variable.id) ?? [];
-        const currentValue = getTypedValue('variant' as 'icon', variable.id) as VariantSettingsValue | undefined;
+        const currentValue = getTypedValue('variant', variable.id) as VariantSettingsValue | undefined;
         const componentIds = Array.from(new Set(options.map(o => o.component_id)));
         const showComponentName = componentIds.length > 1;
         const variantLabel = renderLabel(variable, { centered: true });
@@ -403,7 +406,7 @@ export default function ComponentVariableOverrides({
               ) : (
                 <Select
                   value={currentValue?.variant_id ?? ''}
-                  onValueChange={(val) => handleTypedChange('variant' as 'icon', variable.id, { variant_id: val })}
+                  onValueChange={(val) => handleTypedChange('variant', variable.id, { variant_id: val })}
                 >
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="Variant" />
@@ -419,6 +422,23 @@ export default function ComponentVariableOverrides({
                   </SelectContent>
                 </Select>
               )}
+            </div>
+          </div>
+        );
+      }
+      case 'visibility': {
+        const currentValue = getTypedValue('visibility', variable.id);
+        const visible = isVisibilityValue(currentValue) ? currentValue.visible : true;
+        const visibilityLabel = renderLabel(variable, { centered: true });
+
+        return (
+          <div key={variable.id} className="grid grid-cols-3 gap-2 items-center">
+            {visibilityLabel}
+            <div className="col-span-2 *:w-full">
+              <VisibilityToggle
+                visible={visible}
+                onChange={(next) => handleTypedChange('visibility', variable.id, { visible: next } satisfies VisibilitySettingsValue)}
+              />
             </div>
           </div>
         );

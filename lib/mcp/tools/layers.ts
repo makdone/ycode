@@ -503,7 +503,8 @@ COMMON USES:
       html_embed_code: z.string().optional().describe('For htmlEmbed layers: the HTML/CSS/JS code to embed. Runs in a sandboxed iframe on the published site — it cannot overlay the page or access the parent DOM'),
       custom_attributes: z.record(z.string(), z.string()).optional().describe('Custom HTML attributes as { name: value } pairs'),
       custom_name: z.string().optional().describe('Display name for the layer in the builder'),
-      hidden: z.boolean().optional().describe('Hide the layer on the canvas (still renders on the published site).'),
+      hidden: z.boolean().optional().describe('Hide the layer everywhere (canvas and published site — not rendered). If an interaction targets it with display "visible", or keep_in_html is set, it is instead rendered collapsed so it can be revealed.'),
+      keep_in_html: z.boolean().optional().describe('When hidden, keep the element in the HTML collapsed (display: none) instead of omitting it, so custom code can reveal it. Interaction reveal targets are kept automatically.'),
       filter_on_change: z.boolean().optional().describe('For filter layers: trigger filtering on every input change (debounced).'),
       is_placeholder: z.boolean().optional().describe('For <option> children of <select>: mark this option as the disabled placeholder.'),
       slider: z.object({
@@ -564,7 +565,7 @@ COMMON USES:
     },
     async ({
       page_id, layer_id, tag, html_id, html_embed_code, custom_attributes, custom_name,
-      hidden, filter_on_change, is_placeholder, slider, lightbox, map, options_source,
+      hidden, keep_in_html, filter_on_change, is_placeholder, slider, lightbox, map, options_source,
     }) => {
       const layers = await getPageLayers(page_id);
       const layer = findLayerById(layers, layer_id);
@@ -577,6 +578,7 @@ COMMON USES:
         if (tag) settings.tag = tag;
         if (html_id) settings.id = html_id;
         if (hidden !== undefined) settings.hidden = hidden;
+        if (keep_in_html !== undefined) settings.keepInHtml = keep_in_html;
         if (filter_on_change !== undefined) settings.filterOnChange = filter_on_change;
         if (is_placeholder !== undefined) settings.isPlaceholder = is_placeholder;
         if (custom_attributes) settings.customAttributes = { ...settings.customAttributes, ...custom_attributes };

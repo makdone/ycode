@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, memo } from 'react';
+import { useState, useEffect, memo } from 'react';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup, ButtonGroupSeparator } from '@/components/ui/button-group';
 import {
@@ -16,17 +16,19 @@ import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import GridSpanRow from './GridSpanRow';
 import SettingsPanel from './SettingsPanel';
 import { useDesignSync } from '@/hooks/use-design-sync';
 import { useControlledInputs } from '@/hooks/use-controlled-input';
+import { useParentLayout } from '@/hooks/use-parent-layout';
 import { useEditorStore } from '@/stores/useEditorStore';
-import { usePagesStore } from '@/stores/usePagesStore';
-import { useComponentsStore } from '@/stores/useComponentsStore';
 import { extractMeasurementValue, formatMeasurementValue } from '@/lib/measurement-utils';
 import type { Layer } from '@/types';
 
 interface SizingControlsProps {
   layer: Layer | null;
+  /** Needed to show the grid Span row, which only applies inside a grid parent */
+  parentLayer?: Layer | null;
   onLayerUpdate: (layerId: string, updates: Partial<Layer>) => void;
 }
 
@@ -51,7 +53,7 @@ const OBJECT_POSITIONS: { value: string; label: string; icon: React.ComponentPro
   { value: 'right-bottom', label: 'Bottom right', icon: 'arrow-right-down' },
 ];
 
-const SizingControls = memo(function SizingControls({ layer, onLayerUpdate }: SizingControlsProps) {
+const SizingControls = memo(function SizingControls({ layer, parentLayer = null, onLayerUpdate }: SizingControlsProps) {
   const activeBreakpoint = useEditorStore((s) => s.activeBreakpoint);
   const activeUIState = useEditorStore((s) => s.activeUIState);
   const { updateDesignProperty, debouncedUpdateDesignProperty, getDesignProperty } = useDesignSync({
@@ -60,6 +62,7 @@ const SizingControls = memo(function SizingControls({ layer, onLayerUpdate }: Si
     activeBreakpoint,
     activeUIState,
   });
+  const { isGrid: parentIsGrid } = useParentLayout(parentLayer);
 
   const [isOpen, setIsOpen] = useState(true);
 
@@ -322,61 +325,6 @@ const SizingControls = memo(function SizingControls({ layer, onLayerUpdate }: Si
     updateDesignProperty('sizing', 'objectPosition', value === 'center' ? null : value);
   };
 
-  // Handle grid column span change
-  const handleGridColumnSpanChange = (value: string) => {
-    updateDesignProperty('sizing', 'gridColumnSpan', value || null);
-  };
-
-  // Handle grid row span change
-  const handleGridRowSpanChange = (value: string) => {
-    updateDesignProperty('sizing', 'gridRowSpan', value || null);
-  };
-
-  // Get store values
-  const currentPageId = useEditorStore((s) => s.currentPageId);
-  const editingComponentId = useEditorStore((s) => s.editingComponentId);
-  const editingComponentVariantId = useEditorStore((s) => s.editingComponentVariantId);
-  const draftsByPageId = usePagesStore((s) => s.draftsByPageId);
-  const componentDrafts = useComponentsStore((s) => s.componentDrafts);
-
-  // Check if parent layer has grid display
-  const parentHasGrid = useMemo(() => {
-    if (!layer) return false;
-
-    let layers: Layer[] = [];
-    if (editingComponentId) {
-      const variantDrafts = componentDrafts[editingComponentId];
-      const variantId = (editingComponentVariantId && variantDrafts?.[editingComponentVariantId])
-        ? editingComponentVariantId
-        : (variantDrafts ? Object.keys(variantDrafts)[0] : null);
-      layers = (variantId && variantDrafts) ? variantDrafts[variantId] || [] : [];
-    } else if (currentPageId) {
-      const draft = draftsByPageId[currentPageId];
-      layers = draft ? draft.layers : [];
-    }
-
-    if (!layers.length) return false;
-
-    // Find parent layer
-    const findParent = (tree: Layer[], targetId: string, parent: Layer | null = null): Layer | null => {
-      for (const node of tree) {
-        if (node.id === targetId) return parent;
-        if (node.children) {
-          const found = findParent(node.children, targetId, node);
-          if (found !== null) return found;
-        }
-      }
-      return null;
-    };
-
-    const parent = findParent(layers, layer.id);
-    if (!parent) return false;
-
-    // Check if parent has grid display
-    const parentDisplay = parent.design?.layout?.display;
-    return parentDisplay === 'Grid';
-  }, [layer, currentPageId, editingComponentId, draftsByPageId, componentDrafts]);
-
   return (
     <SettingsPanel
       title="Sizing" isOpen={isOpen}
@@ -399,313 +347,23 @@ const SizingControls = memo(function SizingControls({ layer, onLayerUpdate }: Si
         </DropdownMenu>
       }
     >
-
-{parentHasGrid && (
-        <div className="grid grid-cols-3 items-start">
-          <Label variant="muted" className="h-8">Span</Label>
-          <div className="col-span-2 grid grid-cols-2 gap-2">
-            <Select value={gridColumnSpan} onValueChange={handleGridColumnSpanChange}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem value="1">1</SelectItem>
-                  <SelectItem value="2">2</SelectItem>
-                  <SelectItem value="3">3</SelectItem>
-                  <SelectItem value="4">4</SelectItem>
-                  <SelectItem value="5">5</SelectItem>
-                  <SelectItem value="6">6</SelectItem>
-                  <SelectItem value="7">7</SelectItem>
-                  <SelectItem value="8">8</SelectItem>
-                  <SelectItem value="9">9</SelectItem>
-                  <SelectItem value="10">10</SelectItem>
-                  <SelectItem value="11">11</SelectItem>
-                  <SelectItem value="12">12</SelectItem>
-                  <SelectItem value="full">Full</SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-            <Select value={gridRowSpan} onValueChange={handleGridRowSpanChange}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem value="1">1</SelectItem>
-                  <SelectItem value="2">2</SelectItem>
-                  <SelectItem value="3">3</SelectItem>
-                  <SelectItem value="4">4</SelectItem>
-                  <SelectItem value="5">5</SelectItem>
-                  <SelectItem value="6">6</SelectItem>
-                  <SelectItem value="7">7</SelectItem>
-                  <SelectItem value="8">8</SelectItem>
-                  <SelectItem value="9">9</SelectItem>
-                  <SelectItem value="10">10</SelectItem>
-                  <SelectItem value="11">11</SelectItem>
-                  <SelectItem value="12">12</SelectItem>
-                  <SelectItem value="full">Full</SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-)}
-
-      <div className="grid grid-cols-3 items-start">
-        <Label variant="muted" className="h-8">Width</Label>
-        <div className="col-span-2 flex flex-col gap-2">
-          <ButtonGroup>
-            <Input
-              value={widthInput} onChange={(e) => handleWidthChange(e.target.value)}
-            />
-            <ButtonGroupSeparator />
-            <Select value={getWidthPresetValue()} onValueChange={handleWidthPresetChange}>
-              <SelectTrigger />
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem value="w-[100%]">Fill</SelectItem>
-                  <SelectItem value="w-fit-content">Fit</SelectItem>
-                  <SelectItem value="w-[100vw]">Screen</SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </ButtonGroup>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="w-full group relative">
-              <ButtonGroup className="w-full">
-                <InputGroup>
-                  <InputGroupAddon>
-                    <div className="flex">
-                      <Tooltip>
-                        <TooltipTrigger>
-                          <Icon name="minSize" className="size-3" />
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Min width</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </div>
-                  </InputGroupAddon>
-                  <InputGroupInput
-                    placeholder="Min" value={minWidthInput}
-                    onChange={(e) => handleMinWidthChange(e.target.value)}
-                  />
-                </InputGroup>
-              </ButtonGroup>
-              <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 z-100">
-                <Select value={getMinWidthPresetValue()} onValueChange={handleMinWidthPresetChange}>
-                  <SelectTrigger size="xs" variant="ghost" />
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectItem value="w-[100%]">Fill</SelectItem>
-                      <SelectItem value="w-fit-content">Fit</SelectItem>
-                      <SelectItem value="w-[100vw]">Screen</SelectItem>
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="w-full group relative">
-              <ButtonGroup className="w-full">
-                <InputGroup>
-                  <InputGroupAddon>
-                    <div className="flex">
-                      <Tooltip>
-                        <TooltipTrigger>
-                          <Icon name="maxSize" className="size-3" />
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Max width</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </div>
-                  </InputGroupAddon>
-                  <InputGroupInput
-                    placeholder="Max" value={maxWidthInput}
-                    onChange={(e) => handleMaxWidthChange(e.target.value)}
-                  />
-                </InputGroup>
-              </ButtonGroup>
-              <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 z-100">
-                <Select value={getMaxWidthPresetValue()} onValueChange={handleMaxWidthPresetChange}>
-                  <SelectTrigger size="xs" variant="ghost" />
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectItem value="w-[100%]">Fill</SelectItem>
-                      <SelectItem value="w-fit-content">Fit</SelectItem>
-                      <SelectItem value="w-[100vw]">Screen</SelectItem>
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-3 items-start">
-        <Label variant="muted" className="h-8">Height</Label>
-        <div className="col-span-2 flex flex-col gap-2">
-          <ButtonGroup>
-            <Input
-              value={heightInput} onChange={(e) => handleHeightChange(e.target.value)}
-            />
-            <ButtonGroupSeparator />
-            <Select value={getHeightPresetValue()} onValueChange={handleHeightPresetChange}>
-              <SelectTrigger />
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem value="h-[100%]">Fill</SelectItem>
-                  <SelectItem value="h-[100svh]">Screen</SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </ButtonGroup>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="w-full group relative">
-              <ButtonGroup className="w-full">
-                <InputGroup>
-                  <InputGroupAddon>
-                    <div className="flex">
-                      <Tooltip>
-                        <TooltipTrigger>
-                          <Icon name="minSize" className="size-3 rotate-90" />
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Min height</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </div>
-                  </InputGroupAddon>
-                  <InputGroupInput
-                    placeholder="Min" value={minHeightInput}
-                    onChange={(e) => handleMinHeightChange(e.target.value)}
-                  />
-                </InputGroup>
-              </ButtonGroup>
-              <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 z-100">
-                <Select value={getMinHeightPresetValue()} onValueChange={handleMinHeightPresetChange}>
-                  <SelectTrigger size="xs" variant="ghost" />
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectItem value="h-[100%]">Fill</SelectItem>
-                      <SelectItem value="h-[100svh]">Screen</SelectItem>
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="w-full group relative">
-              <ButtonGroup className="w-full">
-                <InputGroup>
-                  <InputGroupAddon>
-                    <div className="flex">
-                      <Tooltip>
-                        <TooltipTrigger>
-                          <Icon name="maxSize" className="size-3 rotate-90" />
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Max height</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </div>
-                  </InputGroupAddon>
-                  <InputGroupInput
-                    placeholder="Max" value={maxHeightInput}
-                    onChange={(e) => handleMaxHeightChange(e.target.value)}
-                  />
-                </InputGroup>
-              </ButtonGroup>
-              <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 z-100">
-                <Select value={getMaxHeightPresetValue()} onValueChange={handleMaxHeightPresetChange}>
-                  <SelectTrigger size="xs" variant="ghost" />
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectItem value="h-[100%]">Fill</SelectItem>
-                      <SelectItem value="h-[100svh]">Screen</SelectItem>
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-3">
-        <Label variant="muted">Overflow</Label>
-        <div className="col-span-2 *:w-full">
-          <Select value={overflow} onValueChange={handleOverflowChange}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectItem value="visible">Visible</SelectItem>
-                <SelectItem value="hidden">Hidden</SelectItem>
-                <SelectItem value="scroll">Scroll</SelectItem>
-                <SelectItem value="ellipsis">Ellipsis</SelectItem>
-                <SelectItem value="auto">Auto</SelectItem>
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      {(['image', 'video'].includes(layer?.name || '')) && (
-        <div className="grid grid-cols-3 items-center">
-          <Label variant="muted">Object fit</Label>
-          <div className="col-span-2 flex items-center gap-1">
-            <Select value={objectFit} onValueChange={handleObjectFitChange}>
-              <SelectTrigger className="flex-1">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem value="contain">Contain</SelectItem>
-                  <SelectItem value="cover">Cover</SelectItem>
-                  <SelectItem value="fill">Fill</SelectItem>
-                  <SelectItem value="none">None</SelectItem>
-                  <SelectItem value="scale-down">Scale down</SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="input"
-                  size="icon-sm"
-                  className="rounded-lg"
-                  aria-label="Object position"
-                  title="Object position"
-                >
-                  <Icon name={(OBJECT_POSITIONS.find((p) => p.value === (objectPosition || 'center'))?.icon) || 'circle'} />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-2 my-0.5" align="end">
-                <div className="grid grid-cols-3 gap-1">
-                  {OBJECT_POSITIONS.map((position) => {
-                    const isActive = (objectPosition || 'center') === position.value;
-                    return (
-                      <Button
-                        key={position.value}
-                        variant={isActive ? 'secondary' : 'outline'}
-                        size="icon-sm"
-                        className={`rounded-none ${OBJECT_POSITION_CORNERS[position.value] || ''}`}
-                        aria-label={position.label}
-                        title={position.label}
-                        onClick={() => handleObjectPositionChange(position.value)}
-                      >
-                        <Icon name={position.icon} className={isActive ? 'text-foreground' : 'opacity-40'} />
-                      </Button>
-                    );
-                  })}
-                </div>
-              </PopoverContent>
-            </Popover>
-          </div>
-        </div>
+      {parentIsGrid && layer && (
+        <>
+          <GridSpanRow
+            label="Columns"
+            layer={layer}
+            property="gridColumnSpan"
+            value={gridColumnSpan}
+            onChange={(property, value) => updateDesignProperty('sizing', property, value)}
+          />
+          <GridSpanRow
+            label="Rows"
+            layer={layer}
+            property="gridRowSpan"
+            value={gridRowSpan}
+            onChange={(property, value) => updateDesignProperty('sizing', property, value)}
+          />
+        </>
       )}
 
       {aspectRatio && (

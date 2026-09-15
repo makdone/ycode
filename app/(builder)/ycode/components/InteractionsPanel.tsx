@@ -42,6 +42,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Empty, EmptyDescription } from '@/components/ui/empty';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Slider } from '@/components/ui/slider';
@@ -51,6 +52,7 @@ import { Separator } from '@/components/ui/separator';
 import ColorPicker from './ColorPicker';
 
 // 3. Utils
+import { hideGsapElement, resetGsapDisplay, showGsapElement } from '@/lib/animation-display';
 import { cn, generateId } from '@/lib/utils';
 import { findLayerById } from '@/lib/layer-utils';
 import { getLayerName, getLayerIcon } from '@/lib/layer-display-utils';
@@ -320,11 +322,11 @@ export default function InteractionsPanel({
       // Use GSAP to clear transforms
       gsap.set(element, { clearProps: 'all' });
       element.setAttribute('style', originalStyle);
-      // Restore original hidden state
+      // Restore original hidden state (attribute and any stripped `hidden` classes)
       if (wasHidden) {
-        element.setAttribute('data-gsap-hidden', '');
+        hideGsapElement(element);
       } else {
-        element.removeAttribute('data-gsap-hidden');
+        resetGsapDisplay(element);
       }
       previewedElementRef.current = null;
     }
@@ -429,11 +431,11 @@ export default function InteractionsPanel({
     previewedElementsRef.current.forEach(({ element, originalStyle, wasHidden }) => {
       gsap.set(element, { clearProps: 'all' });
       element.setAttribute('style', originalStyle);
-      // Restore original hidden state
+      // Restore original hidden state (attribute and any stripped `hidden` classes)
       if (wasHidden) {
-        element.setAttribute('data-gsap-hidden', '');
+        hideGsapElement(element);
       } else {
-        element.removeAttribute('data-gsap-hidden');
+        resetGsapDisplay(element);
       }
     });
     previewedElementsRef.current.clear();
@@ -529,14 +531,14 @@ export default function InteractionsPanel({
     // Handle display via data-gsap-hidden attribute (same as AnimationInitializer)
     // 'visible' = remove attribute, 'hidden' = add attribute
     if (displayStart === 'visible') {
-      element.removeAttribute('data-gsap-hidden');
+      showGsapElement(element);
     }
 
     // Play the animation using iframe's GSAP (same context as SplitText)
     const tl = iframeGsap.timeline({
       onComplete: () => {
         if (displayEnd === 'hidden') {
-          element.setAttribute('data-gsap-hidden', '');
+          hideGsapElement(element);
         }
       },
     });
@@ -776,7 +778,7 @@ export default function InteractionsPanel({
       }
       // Handle display via data-gsap-hidden attribute (same as AnimationInitializer)
       if (displayStart === 'visible') {
-        timeline.call(() => element.removeAttribute('data-gsap-hidden'), undefined, position);
+        timeline.call(() => showGsapElement(element), undefined, position);
       }
 
       // Add tween to timeline using shared utility
@@ -790,7 +792,7 @@ export default function InteractionsPanel({
         splitText: effectiveSplitText,
         splitElements,
         onComplete: displayEnd === 'hidden'
-          ? () => element.setAttribute('data-gsap-hidden', '')
+          ? () => hideGsapElement(element)
           : undefined,
       });
     });
@@ -1846,6 +1848,29 @@ export default function InteractionsPanel({
           </header>
 
           <div className="flex flex-col gap-2 pb-4">
+            {(() => {
+              // A layer hidden via Visibility is normally left out of the page.
+              // A tween ending in Display: Visible (or "Keep in HTML when hidden")
+              // keeps it in the DOM collapsed so the interaction has a target.
+              const targetLayer = findLayerById(allLayers, selectedTween.layer_id);
+              if (!targetLayer?.settings?.hidden) return null;
+              const revealsTarget = selectedTween.to?.display === 'visible';
+              const keptInHtml = !!targetLayer.settings?.keepInHtml;
+              let message: string;
+              if (revealsTarget) {
+                message = 'This layer is hidden. It stays in the page collapsed and is shown by this animation.';
+              } else if (keptInHtml) {
+                message = 'This layer is hidden and kept in HTML collapsed. Set Display to Visible in this animation to show it.';
+              } else {
+                message = 'This layer is hidden and is not rendered, so this animation has no effect. Set Display to Visible in this animation, or make the layer visible.';
+              }
+              return (
+                <Alert variant={revealsTarget ? 'default' : 'warning'}>
+                  <AlertDescription>{message}</AlertDescription>
+                </Alert>
+              );
+            })()}
+
             {(() => {
               const isAtMode = typeof selectedTween.position === 'number';
               const selectValue = isAtMode ? 'at' : String(selectedTween.position);

@@ -79,6 +79,7 @@ export default function ComponentInstanceSidebar({
   const addVideoVariable = useComponentsStore((state) => state.addVideoVariable);
   const addIconVariable = useComponentsStore((state) => state.addIconVariable);
   const addVariantVariable = useComponentsStore((state) => state.addVariantVariable);
+  const addVisibilityVariable = useComponentsStore((state) => state.addVisibilityVariable);
   const updateTextVariable = useComponentsStore((state) => state.updateTextVariable);
 
   const setDraftLayers = usePagesStore((state) => state.setDraftLayers);
@@ -96,7 +97,7 @@ export default function ComponentInstanceSidebar({
 
   const allVariables = component.variables || [];
   const overrides = selectedLayer.componentOverrides;
-  const hasOverrides = ['text', 'rich_text', 'image', 'link', 'audio', 'video', 'icon', 'variant']
+  const hasOverrides = ['text', 'rich_text', 'image', 'link', 'audio', 'video', 'icon', 'variant', 'visibility']
     .some(cat => Object.keys(overrides?.[cat as keyof typeof overrides] || {}).length > 0);
 
   const handleEditMasterComponent = useCallback(async () => {
@@ -167,6 +168,7 @@ export default function ComponentInstanceSidebar({
     audio: addAudioVariable,
     video: addVideoVariable,
     icon: addIconVariable,
+    visibility: addVisibilityVariable,
   };
 
   const handleCreateOverrideVariable = useCallback(async (childVariable: ComponentVariable) => {

@@ -1372,6 +1372,24 @@ export function canPasteIntoParent(layers: Layer[], parentId: string, childToPas
 /**
  * Check if a layer can have children based on its name/type
  */
+/** Layer types that never contain child layers (media, text, form controls, embeds). */
+const LEAF_LAYER_NAMES = new Set([
+  'icon', 'image', 'audio', 'video', 'iframe',
+  'heading', 'text', 'richText', 'span', 'label', 'hr',
+  'input', 'textarea', 'select', 'checkbox', 'radio',
+  'htmlEmbed', 'map',
+]);
+
+/**
+ * Whether a layer is a leaf element by type (cannot contain children).
+ * Unlike canHaveChildren this ignores component instances, so it describes
+ * the element itself rather than whether the editor allows nesting into it.
+ */
+export function isLeafLayer(layer: Layer | null | undefined): boolean {
+  if (!layer) return false;
+  return LEAF_LAYER_NAMES.has(layer.name ?? '');
+}
+
 export function canHaveChildren(layer: Layer, childLayerType?: string): boolean {
   // Component instances cannot have children added to them
   // Children can only be edited in the master component
@@ -1379,19 +1397,12 @@ export function canHaveChildren(layer: Layer, childLayerType?: string): boolean 
     return false;
   }
 
-  const blocksWithoutChildren = [
-    'icon', 'image', 'audio', 'video', 'iframe',
-    'heading', 'text', 'richText', 'span', 'label', 'hr',
-    'input', 'textarea', 'select', 'checkbox', 'radio',
-    'htmlEmbed', 'map',
-  ];
-
   // Sections cannot contain other sections
   if (layer.name === 'section' && childLayerType === 'section') {
     return false;
   }
 
-  return !blocksWithoutChildren.includes(layer.name ?? '');
+  return !isLeafLayer(layer);
 }
 
 /**

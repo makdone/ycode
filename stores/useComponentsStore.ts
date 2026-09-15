@@ -16,7 +16,7 @@ import {
 import { detachStyleFromLayers, updateLayersWithStyle } from '@/lib/layer-style-utils';
 import { scheduleIdle } from '@/lib/schedule-idle';
 import { generateId } from '@/lib/utils';
-import type { Component, ComponentVariant, Layer, LayerStyle } from '@/types';
+import type { Component, ComponentVariable, ComponentVariant, Layer, LayerStyle } from '@/types';
 
 /**
  * Per-component, per-variant working copy of layers used while editing a
@@ -205,6 +205,10 @@ interface ComponentsActions {
    *  variable that drives the `componentVariantId` of any nested-instance layer
    *  whose `componentVariantVariableId` points at it. */
   addVariantVariable: (componentId: string, name: string) => Promise<string | null>;
+  /** Add a `'visibility'` typed variable (defaults to visible). Drives
+   *  `settings.hidden` of any layer whose `settings.visibilityVariableId`
+   *  points at it, so instances can show or hide parts of the component. */
+  addVisibilityVariable: (componentId: string, name: string) => Promise<string | null>;
   updateTextVariable: (componentId: string, variableId: string, updates: { name?: string; placeholder?: string; default_value?: any }) => Promise<void>;
   reorderVariables: (componentId: string, orderedIds: string[]) => Promise<void>;
   deleteTextVariable: (componentId: string, variableId: string) => Promise<void>;
@@ -1235,6 +1239,45 @@ export const useComponentsStore = create<ComponentsStore>((set, get) => {
       }
     },
 
+    addVisibilityVariable: async (componentId, name) => {
+      const component = get().getComponentById(componentId);
+      if (!component) return null;
+
+      const variableId = generateId('cpv');
+      const newVariable: ComponentVariable = {
+        id: variableId,
+        name,
+        type: 'visibility',
+        default_value: { visible: true },
+      };
+      const updatedVariables = [...(component.variables || []), newVariable];
+
+      try {
+        const response = await fetch(`/ycode/api/components/${componentId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ variables: updatedVariables }),
+        });
+
+        const result = await response.json();
+        if (result.error) {
+          console.error('Failed to add visibility variable:', result.error);
+          return null;
+        }
+
+        set((state) => ({
+          components: state.components.map((c) =>
+            c.id === componentId ? { ...c, variables: updatedVariables } : c
+          ),
+        }));
+
+        return variableId;
+      } catch (error) {
+        console.error('Failed to add visibility variable:', error);
+        return null;
+      }
+    },
+
     // Update a text variable's name and/or default value
     updateTextVariable: async (componentId, variableId, updates) => {
       const component = get().getComponentById(componentId);
@@ -1341,6 +1384,12 @@ export const useComponentsStore = create<ComponentsStore>((set, get) => {
           if (updatedLayer.componentVariantVariableId === variableId) {
             const { componentVariantVariableId: _, ...rest } = updatedLayer;
             updatedLayer = rest;
+          }
+
+          // Drop the visibility link; the layer falls back to its static `hidden` flag
+          if (updatedLayer.settings?.visibilityVariableId === variableId) {
+            const { visibilityVariableId: _, ...restSettings } = updatedLayer.settings;
+            updatedLayer = { ...updatedLayer, settings: restSettings };
           }
 
           updatedLayer = removeVariableLinksPointingTo(updatedLayer, variableId);

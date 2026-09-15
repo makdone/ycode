@@ -18,6 +18,11 @@ export interface LayoutDesign {
   justifyContent?: string;
   alignItems?: string;
   alignSelf?: string;
+  // Flex child (how this layer behaves inside a flex parent)
+  flex?: string; // '1' | 'auto' | 'initial' | 'none'
+  flexGrow?: string; // '1' | '0'
+  flexShrink?: string; // '1' | '0'
+  order?: string; // 'first' | 'last' | 'none' | '1'..'12'
   gap?: string;
   columnGap?: string;
   rowGap?: string;
@@ -252,7 +257,13 @@ export interface SliderSettings {
 export interface LayerSettings {
   id?: string; // Custom element ID
   tag?: string; // HTML tag override (e.g., 'h1', 'h2', etc.)
-  hidden?: boolean; // Element visibility in canvas
+  hidden?: boolean; // Hidden everywhere (canvas + published) — not rendered unless kept in HTML
+  // Inside a component: drive `hidden` from a 'visibility' component variable so
+  // each instance can show or hide this layer. Resolved during
+  // `applyComponentOverrides` (SSR) and live in the editor LayerRenderer; while
+  // linked, the stored `hidden` value is ignored.
+  visibilityVariableId?: string;
+  keepInHtml?: boolean; // When hidden, render collapsed (display: none) instead of omitting, so custom code / interactions can reveal it
   customAttributes?: Record<string, string>; // Custom HTML attributes { attributeName: attributeValue }
   locale?: {
     format?: 'locale' | 'code'; // Display format for `localeSelector` layers (locale => 'English', code => 'EN')
@@ -473,6 +484,7 @@ export interface Layer {
     video?: Record<string, ComponentVariableValue>; // ComponentVariable.id → override value (video)
     icon?: Record<string, ComponentVariableValue>; // ComponentVariable.id → override value (icon)
     variant?: Record<string, ComponentVariableValue>; // ComponentVariable.id → override value (variant)
+    visibility?: Record<string, ComponentVariableValue>; // ComponentVariable.id → override value (visibility)
     variableLinks?: Record<string, string>; // childVariableId → parentVariableId (pass-through from nested component to parent)
   };
 
@@ -696,7 +708,7 @@ export interface BlockTemplate {
 export interface ComponentVariable {
   id: string;        // Unique variable ID
   name: string;      // Display name (e.g., "Button title")
-  type?: 'text' | 'rich_text' | 'image' | 'link' | 'audio' | 'video' | 'icon' | 'variant'; // Variable type (defaults to 'text' for backwards compatibility)
+  type?: 'text' | 'rich_text' | 'image' | 'link' | 'audio' | 'video' | 'icon' | 'variant' | 'visibility'; // Variable type (defaults to 'text' for backwards compatibility)
   placeholder?: string; // Placeholder text shown in text override inputs
   default_value?: ComponentVariableValue; // Default value
 }
@@ -1472,8 +1484,16 @@ export interface VariantSettingsValue {
   variant_id: string;
 }
 
-// Component variable value type (text, image, link, audio, video, icon, and variant variables)
-export type ComponentVariableValue = DynamicTextVariable | DynamicRichTextVariable | ImageSettingsValue | LinkSettingsValue | AudioSettingsValue | VideoSettingsValue | IconSettingsValue | VariantSettingsValue;
+// Visibility value for component variables. Stored on
+// `componentOverrides.visibility[<variableId>]` and as `default_value` on a
+// `'visibility'`-typed ComponentVariable. Layers linked through
+// `settings.visibilityVariableId` render only when `visible` is true.
+export interface VisibilitySettingsValue {
+  visible: boolean;
+}
+
+// Component variable value type (text, image, link, audio, video, icon, variant, and visibility variables)
+export type ComponentVariableValue = DynamicTextVariable | DynamicRichTextVariable | ImageSettingsValue | LinkSettingsValue | AudioSettingsValue | VideoSettingsValue | IconSettingsValue | VariantSettingsValue | VisibilitySettingsValue;
 
 // Pagination Layer Definition (partial Layer for styling pagination controls)
 export interface PaginationLayerConfig {

@@ -14,7 +14,8 @@ import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { SplitText } from 'gsap/SplitText';
 
 import { ITEMS_INJECTED_EVENT, type ItemsInjectedDetail } from '@/components/FilterableCollection';
-import { buildGsapProps, addTweenToTimeline, createSplitTextAnimation, generateInitialAnimationCSS, getEffectiveApplyStyle, setColorVariableResolver } from '@/lib/animation-utils';
+import { hideGsapElement, resetGsapDisplay, showGsapElement } from '@/lib/animation-display';
+import { buildGsapProps, addTweenToTimeline, collectKeptHiddenLayerIds, createSplitTextAnimation, generateInitialAnimationCSS, getEffectiveApplyStyle, setColorVariableResolver } from '@/lib/animation-utils';
 import { BREAKPOINT_VALUES, getCurrentBreakpoint } from '@/lib/breakpoint-utils';
 import { remapLayerIdsForCollectionItem } from '@/lib/collection-utils';
 import { useColorVariablesStore } from '@/stores/useColorVariablesStore';
@@ -101,8 +102,14 @@ function applyInitialFromState(interaction: LayerInteraction): void {
  * Collect info about elements that should start hidden based on interactions
  * Returns a map of layerId -> breakpoints (null means all breakpoints)
  */
-function collectHiddenLayerInfo(interactions: CollectedInteraction[]): Map<string, string[] | null> {
+function collectHiddenLayerInfo(
+  interactions: CollectedInteraction[],
+  keptHiddenIds: Set<string>
+): Map<string, string[] | null> {
   const hiddenMap = new Map<string, string[] | null>();
+
+  // `settings.hidden` layers kept in the DOM are collapsed on every breakpoint
+  keptHiddenIds.forEach((layerId) => hiddenMap.set(layerId, null));
 
   interactions.forEach(({ interaction }) => {
     const breakpoints = interaction.timeline?.breakpoints || null;
@@ -112,7 +119,8 @@ function collectHiddenLayerInfo(interactions: CollectedInteraction[]): Map<strin
       // for intro triggers like load/scroll-into-view).
       if (
         tween.from?.display === 'hidden' &&
-        getEffectiveApplyStyle(interaction.trigger, 'display', tween.apply_styles) === 'on-load'
+        getEffectiveApplyStyle(interaction.trigger, 'display', tween.apply_styles) === 'on-load' &&
+        !keptHiddenIds.has(tween.layer_id)
       ) {
         hiddenMap.set(tween.layer_id, breakpoints);
       }
@@ -179,10 +187,10 @@ function resetAnimationStates(
 
       if (shouldBeHidden) {
         // Restore hidden state with breakpoint info
-        element.setAttribute('data-gsap-hidden', hiddenBreakpoints?.join(' ') || '');
+        hideGsapElement(element, hiddenBreakpoints?.join(' ') || '');
       } else {
-        // Remove hidden state - not applicable to this breakpoint
-        element.removeAttribute('data-gsap-hidden');
+        // Back to the authored state - not hidden at this breakpoint
+        resetGsapDisplay(element);
       }
     }
   });
@@ -314,7 +322,7 @@ function buildTimeline(interaction: LayerInteraction): gsap.core.Timeline | null
       splitText: splitTextConfig,
       splitElements,
       onComplete: displayEnd === 'hidden'
-        ? () => element.setAttribute('data-gsap-hidden', '')
+        ? () => hideGsapElement(element)
         : undefined,
     });
   });
@@ -325,7 +333,7 @@ function buildTimeline(interaction: LayerInteraction): gsap.core.Timeline | null
     timeline.eventCallback('onStart', () => {
       displayTransitions.forEach(({ element, displayEnd }) => {
         if (displayEnd === 'visible') {
-          element.removeAttribute('data-gsap-hidden');
+          showGsapElement(element);
         }
       });
     });
@@ -335,9 +343,9 @@ function buildTimeline(interaction: LayerInteraction): gsap.core.Timeline | null
       timeline.eventCallback('onReverseComplete', () => {
         displayTransitions.forEach(({ element, displayStart }) => {
           if (displayStart === 'hidden') {
-            element.setAttribute('data-gsap-hidden', '');
+            hideGsapElement(element);
           } else {
-            element.removeAttribute('data-gsap-hidden');
+            showGsapElement(element);
           }
         });
       });
@@ -443,7 +451,7 @@ export default function AnimationInitializer({ layers, injectInitialCSS }: Anima
       hiddenLayerInfo.forEach(({ layerId, breakpoints }) => {
         const el = getElement(layerId);
         if (el) {
-          el.setAttribute('data-gsap-hidden', breakpoints || '');
+          hideGsapElement(el, breakpoints || '');
         }
       });
     }
@@ -468,7 +476,7 @@ export default function AnimationInitializer({ layers, injectInitialCSS }: Anima
 
   useEffect(() => {
     const collectedInteractions = collectInteractions(effectiveLayers);
-    const hiddenLayerInfo = collectHiddenLayerInfo(collectedInteractions);
+    const hiddenLayerInfo = collectHiddenLayerInfo(collectedInteractions, collectKeptHiddenLayerIds(effectiveLayers));
     const isBreakpointChange = prevBreakpointRef.current !== null && prevBreakpointRef.current !== currentBreakpoint;
 
     // Reset animation states when breakpoint changes
@@ -492,9 +500,9 @@ export default function AnimationInitializer({ layers, injectInitialCSS }: Anima
         const el = getElement(layerId);
         if (!el) return;
         if (value === null) {
-          el.removeAttribute('data-gsap-hidden');
+          showGsapElement(el);
         } else {
-          el.setAttribute('data-gsap-hidden', value);
+          hideGsapElement(el, value);
         }
       });
 

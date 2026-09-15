@@ -805,7 +805,10 @@ const LayerItem: React.FC<{
 
   const fullClassName = clsx(classesString, paragraphClasses, SWIPER_CLASS_MAP[layer.name], isSlideChild && 'swiper-slide', buttonNeedsFit && 'w-fit', buttonNeedsTextCenter && 'text-center');
 
-  if (layer.settings?.hidden) {
+  // Hidden layers are omitted unless kept in HTML (reveal interaction or
+  // settings.keepInHtml) — those are in `hiddenLayerInfo` and render collapsed
+  // (data-gsap-hidden) instead.
+  if (layer.settings?.hidden && !hiddenLayerInfo?.some((info) => info.layerId === layer.id)) {
     return null;
   }
 

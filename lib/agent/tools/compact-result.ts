@@ -28,7 +28,7 @@ const BLOCK_NODE_TYPES = new Set([
 ]);
 
 /** Override buckets on a component instance, keyed by component-variable id. */
-const OVERRIDE_CATEGORIES = ['text', 'rich_text', 'image', 'link', 'audio', 'video', 'icon', 'variant'] as const;
+const OVERRIDE_CATEGORIES = ['text', 'rich_text', 'image', 'link', 'audio', 'video', 'icon', 'variant', 'visibility'] as const;
 
 interface RawLayer {
   id?: string;

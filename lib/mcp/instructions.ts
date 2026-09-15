@@ -115,6 +115,9 @@ Each layer's \`design\` object controls its appearance. Use update_layer_design 
 - justifyContent: "start" | "end" | "center" | "between" | "around" | "evenly"
 - alignItems: "start" | "end" | "center" | "baseline" | "stretch"
 - alignSelf: "auto" | "start" | "end" | "center" | "stretch" | "baseline" — overrides the parent's alignItems for one child. Flex children stretch full-width by default, so badges, pills, and buttons inside a flex column need alignSelf "start"/"center" (or alignItems on the parent) to hug their content
+- flex: "1" | "auto" | "initial" | "none" — flex child shorthand; "1" fills the remaining space of the flex parent
+- flexGrow / flexShrink: "1" | "0" — allow or prevent a flex child from growing / shrinking
+- order: "first" | "last" | "none" | "1".."12" — visual order of a flex child
 - gap: CSS value ("16px", "1rem")
 - gridTemplateColumns: "4" (bare integer count, normalized to repeat(N, 1fr)), "1fr 1fr 1fr", "repeat(3, 1fr)"
 
@@ -589,7 +592,7 @@ export const DEFERRED_GROUP_GUIDES: Record<string, string> = {
   components: `### Components — Detailed Guide
 
 Each instance shares the master's structure but can override content via **variables**
-(text, rich_text, image, link, audio/video, icon, variant).
+(text, rich_text, image, link, audio/video, icon, variant, visibility).
 
 Workflow: create_component (with variables) → update_component_layers to build the tree
 (works like batch_operations).
@@ -600,7 +603,9 @@ Link either at creation (pass variable_id on the add_layer operation) or afterwa
 link_variable operation. The link target is derived automatically from the variable's
 declared type — text/rich_text bind the text layer, image/icon/video/audio bind that
 media layer's source, link binds the layer's link, variant binds a nested component
-instance's variant. You do not pass the type; just the layer and variable_id.
+instance's variant, visibility binds the layer's Visibility (shown when { visible: true },
+omitted when false — use it for optional parts like badges, icons, or secondary buttons).
+You do not pass the type; just the layer and variable_id.
 
 Example: a "Feature Card" with title/description/image/button-link variables → add a
 heading (variable_id: title), a richText or text (variable_id: description), an image
@@ -625,7 +630,7 @@ set_component_instance to override the instance's variables and/or switch its va
 get_component on the instance's componentId first to read the variable ids and types
 (get_layers also shows each instance's componentId, componentVariantId, and overrideSummary).
 Each override targets one variable_id; pass only the field for its type (text, asset_id, url,
-variant_id, etc.). Overriding does NOT change the master or other instances.
+variant_id, visible, etc.). Overriding does NOT change the master or other instances.
 
 **Detaching:** detach_component_instance converts an instance back into plain, editable layers
 on that page (breaks the link to the master). Use only when the user wants to edit the copy freely.

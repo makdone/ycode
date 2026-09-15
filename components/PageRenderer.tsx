@@ -262,12 +262,15 @@ function stripSSROnlyData(layers: Layer[]): Layer[] {
 /** Extract minimal animation data from the layer tree for AnimationInitializer */
 function extractAnimationLayers(layers: Layer[]): Layer[] {
   return layers
-    .filter(layer => layer.interactions?.length || layer.children?.length)
+    // Keep `settings.hidden` layers: an interaction may reveal one, and the
+    // runtime needs the flag to keep it collapsed across breakpoint resets.
+    .filter(layer => layer.interactions?.length || layer.children?.length || layer.settings?.hidden)
     .map(layer => ({
       id: layer.id,
       name: layer.name,
       classes: '',
       interactions: layer.interactions,
+      ...(layer.settings?.hidden ? { settings: { hidden: true, keepInHtml: layer.settings.keepInHtml } } : {}),
       children: layer.children ? extractAnimationLayers(layer.children) : undefined,
     }));
 }

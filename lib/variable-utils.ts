@@ -8,7 +8,7 @@
  * - StaticTextVariable
  */
 
-import type { AssetVariable, FieldVariable, DynamicTextVariable, DynamicRichTextVariable, StaticTextVariable, ComponentVariableValue, Layer } from '@/types';
+import type { AssetVariable, FieldVariable, DynamicTextVariable, DynamicRichTextVariable, StaticTextVariable, ComponentVariable, ComponentVariableValue, Layer, VisibilitySettingsValue } from '@/types';
 import { resolveInlineVariablesFromData } from '@/lib/inline-variables';
 import { buildFieldVariablePath, resolveFieldFromSources } from '@/lib/cms-variables-utils';
 import { DEFAULT_ASSETS } from '@/lib/asset-constants';
@@ -26,8 +26,48 @@ export const EMPTY_OVERRIDES: NonNullable<Layer['componentOverrides']> = {
   video: {},
   icon: {},
   variant: {},
+  visibility: {},
   variableLinks: {},
 };
+
+/** Type guard for the `{ visible }` value of a 'visibility' component variable */
+export function isVisibilityValue(value: unknown): value is VisibilitySettingsValue {
+  return typeof value === 'object' && value !== null && typeof (value as VisibilitySettingsValue).visible === 'boolean';
+}
+
+/**
+ * Resolve the effective `hidden` flag for a layer whose visibility is driven by a
+ * component variable (`settings.visibilityVariableId`).
+ *
+ * Returns `undefined` when the layer is not linked, or when the variable is out of
+ * scope (no matching definition and no override) — e.g. an outer component pass
+ * over an already-resolved nested instance — so callers fall back to
+ * `settings.hidden`. An unset default counts as visible.
+ */
+export function resolveLinkedHidden(
+  layer: Layer,
+  componentVariables: ComponentVariable[] | undefined,
+  overrides: Layer['componentOverrides'] | undefined,
+): boolean | undefined {
+  const variableId = layer.settings?.visibilityVariableId;
+  if (!variableId) return undefined;
+
+  const variableDef = componentVariables?.find((v) => v.id === variableId);
+  const overrideValue = overrides?.visibility?.[variableId];
+  if (overrideValue === undefined && !variableDef) return undefined;
+
+  const value = overrideValue ?? variableDef?.default_value;
+  return isVisibilityValue(value) ? !value.visible : false;
+}
+
+/** Effective hidden flag: the linked variable when present, else the static setting */
+export function getEffectiveHidden(
+  layer: Layer,
+  componentVariables: ComponentVariable[] | undefined,
+  overrides: Layer['componentOverrides'] | undefined,
+): boolean {
+  return resolveLinkedHidden(layer, componentVariables, overrides) ?? layer.settings?.hidden ?? false;
+}
 
 /**
  * Create a DynamicTextVariable from a string (with or without inline variables)

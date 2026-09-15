@@ -19,7 +19,8 @@ export interface IconProps extends React.SVGProps<SVGSVGElement> {
     | 'slide-bullets' | 'slide-bullet' | 'slide-navigation' | 'slide-fraction' | 'loop-alternate' | 'loop-repeat' | 'listItem' | 'external-link'
     | 'settings' | 'center-block' | 'code-block' | 'table' | 'table-row' | 'table-cell' | 'add-column' | 'add-row' | 'delete-column' | 'delete-row' | 'delete-table' | 'header' | 'body'
     | 'webflow' | 'figma' | 'space' | 'sparkles'
-    | 'arrow-left-up' | 'arrow-up' | 'arrow-right-up' | 'arrow-left' | 'arrow-right' | 'arrow-left-down' | 'arrow-down' | 'arrow-right-down' | 'circle'
+    | 'arrow-left-up' | 'arrow-up' | 'arrow-right-up' | 'arrow-left' | 'arrow-right' | 'arrow-left-down' | 'arrow-down' | 'arrow-right-down' | 'circle' | 'square-dashed' | 'reverse-arrows' | 'arrow-horizontal' | 'arrow-vertical' | 'inline-block' | 'inline' | 'flex-fixed'
+    | 'lock' | 'unlock' | 'wrap'
     | 'claude' | 'openai' | 'gemini' | 'grok'
   );
 }
@@ -1108,6 +1109,85 @@ const ICONS: Record<IconProps['name'], React.ReactNode> = {
         d="M2 12a10 10 0 1 0 20 0 10 10 0 1 0-20 0ZM5.5 12a6.5 6.5 0 1 1 13 0 6.5 6.5 0 0 1-13 0Z"
       />
     </g>
+  ),
+  // Dashed 10x10 square (1px strokes): four corner L's plus a dash per edge.
+  'square-dashed': (
+    <>
+      <path d="M1,1 h2.5 v1 h-1.5 v1.5 h-1 z" />
+      <path d="M8.5,1 h2.5 v2.5 h-1 v-1.5 h-1.5 z" />
+      <path d="M10,8.5 h1 v2.5 h-2.5 v-1 h1.5 z" />
+      <path d="M1,8.5 h1 v1.5 h1.5 v1 h-2.5 z" />
+      <path d="M5,1 h2 v1 h-2 z" />
+      <path d="M5,10 h2 v1 h-2 z" />
+      <path d="M1,5 h1 v2 h-1 z" />
+      <path d="M10,5 h1 v2 h-1 z" />
+    </>
+  ),
+  // Inline block: a box sitting between neighbours on the same line (legacy display-inline-block).
+  'inline-block': (
+    <>
+      <path d="M0,0 L1.5,0 L1.5,12 L0,12 Z M10.5,0 L12,0 L12,12 L10.5,12 Z" />
+      <path d="M4,3 L8,3 C8.55228475,3 9,3.44771525 9,4 L9,8 C9,8.55228475 8.55228475,9 8,9 L4,9 C3.44771525,9 3,8.55228475 3,8 L3,4 C3,3.44771525 3.44771525,3 4,3 Z" />
+    </>
+  ),
+  // Inline: flows with its neighbours, taking the full line height (legacy display-inline).
+  inline: (
+    <>
+      <path d="M0,0 L1.5,0 L1.5,12 L0,12 Z M10.5,0 L12,0 L12,12 L10.5,12 Z" />
+      <path d="M4,0 L8,0 C8.55228475,0 9,0.44771525 9,1 L9,11 C9,11.5522847 8.55228475,12 8,12 L4,12 C3.44771525,12 3,11.5522847 3,11 L3,1 C3,0.44771525 3.44771525,0 4,0 Z" />
+    </>
+  ),
+  // Flex child that neither grows nor shrinks: bars with an x (pairs with minSize / maxSize).
+  'flex-fixed': (
+    <>
+      <path d="M0.5,0 C0.776,0 1,0.224 1,0.5 L1,11.5 C1,11.776 0.776,12 0.5,12 C0.224,12 0,11.776 0,11.5 L0,0.5 C0,0.224 0.224,0 0.5,0 Z M11.5,0 C11.776,0 12,0.224 12,0.5 L12,11.5 C12,11.776 11.776,12 11.5,12 C11.224,12 11,11.776 11,11.5 L11,0.5 C11,0.224 11.224,0 11.5,0 Z" />
+      <path d="M4.35,3.65 L8.35,7.65 L7.65,8.35 L3.65,4.35 Z M7.65,3.65 L8.35,4.35 L4.35,8.35 L3.65,7.65 Z" />
+    </>
+  ),
+  // Padlock, closed (outlined, 1px): linked values (e.g. one gap for rows and columns).
+  lock: (
+    <>
+      <path d="M3.25,5 L3.25,3.75 C3.25,2.23 4.48,1 6,1 C7.52,1 8.75,2.23 8.75,3.75 L8.75,5 L7.75,5 L7.75,3.75 C7.75,2.78 6.97,2 6,2 C5.03,2 4.25,2.78 4.25,3.75 L4.25,5 Z" />
+      <path
+        fillRule="evenodd"
+        d="M2.5,5 L9.5,5 C10.05,5 10.5,5.45 10.5,6 L10.5,10.5 C10.5,11.05 10.05,11.5 9.5,11.5 L2.5,11.5 C1.95,11.5 1.5,11.05 1.5,10.5 L1.5,6 C1.5,5.45 1.95,5 2.5,5 Z M2.5,6 L2.5,10.5 L9.5,10.5 L9.5,6 Z"
+      />
+    </>
+  ),
+  // Padlock, open (outlined, shackle lifted on the right): values edited independently.
+  unlock: (
+    <>
+      <path d="M3.25,5 L3.25,3.75 C3.25,2.23 4.48,1 6,1 C7.52,1 8.75,2.23 8.75,3.75 L7.75,3.75 C7.75,2.78 6.97,2 6,2 C5.03,2 4.25,2.78 4.25,3.75 L4.25,5 Z" />
+      <path
+        fillRule="evenodd"
+        d="M2.5,5 L9.5,5 C10.05,5 10.5,5.45 10.5,6 L10.5,10.5 C10.5,11.05 10.05,11.5 9.5,11.5 L2.5,11.5 C1.95,11.5 1.5,11.05 1.5,10.5 L1.5,6 C1.5,5.45 1.95,5 2.5,5 Z M2.5,6 L2.5,10.5 L9.5,10.5 L9.5,6 Z"
+      />
+    </>
+  ),
+  // Flex wrap: a line that runs right, turns down and returns to the next line with an arrow.
+  wrap: (
+    <>
+      <path d="M1,2 L11,2 L11,3 L1,3 Z" />
+      <path d="M1,5.5 L8,5.5 C9.38,5.5 10.5,6.62 10.5,8 C10.5,9.38 9.38,10.5 8,10.5 L4.5,10.5 L4.5,11.5 L1,10 L4.5,8.5 L4.5,9.5 L8,9.5 C8.83,9.5 9.5,8.83 9.5,8 C9.5,7.17 8.83,6.5 8,6.5 L1,6.5 Z" />
+    </>
+  ),
+  // Double-headed arrows (0 0 24 24 source, same stroke weight as 'arrow-left') — flex direction.
+  'arrow-horizontal': (
+    <g transform="scale(0.5)">
+      <path d="M4.83,11 L7.7,8.13 L6.29,6.71 L1,12 L6.29,17.29 L7.7,15.87 L4.83,13 L19.17,13 L16.3,15.87 L17.71,17.29 L23,12 L17.71,6.71 L16.3,8.13 L19.17,11 Z" />
+    </g>
+  ),
+  'arrow-vertical': (
+    <g transform="scale(0.5)">
+      <path d="M4.83,11 L7.7,8.13 L6.29,6.71 L1,12 L6.29,17.29 L7.7,15.87 L4.83,13 L19.17,13 L16.3,15.87 L17.71,17.29 L23,12 L17.71,6.71 L16.3,8.13 L19.17,11 Z" transform="rotate(90 12 12)" />
+    </g>
+  ),
+  // Two opposing arrows (ported from the legacy builder) — used for flex-direction reverse.
+  'reverse-arrows': (
+    <>
+      <path d="M5.99999547,-2.5 C6.24545536,-2.5 6.44960384,-2.24529977 6.4919398,-1.90942091 L6.49999547,-1.78 L6.49999547,7.793 L7.64644208,6.64644661 C7.82000843,6.47288026 8.08943283,6.45359511 8.28430097,6.58859116 L8.35354886,6.64644661 C8.52711521,6.82001296 8.54640036,7.08943736 8.41140431,7.2843055 L8.35354886,7.35355339 L6.35354886,9.35355339 C6.26063981,9.44646244 6.14026362,9.49516378 6.01855895,9.49965742 C6.01234918,9.49983802 6.00618546,9.5 5.99999547,9.5 L5.98444142,9.49975952 C5.89013815,9.49684272 5.79650293,9.4673925 5.71568996,9.41140884 L5.64644208,9.35355339 L3.64644208,7.35355339 C3.45117993,7.15829124 3.45117993,6.84170876 3.64644208,6.64644661 C3.82000843,6.47288026 4.08943283,6.45359511 4.28430097,6.58859116 L4.35354886,6.64644661 L5.49999547,7.793 L5.49999547,-1.78 C5.49999547,-2.17764502 5.72385309,-2.5 5.99999547,-2.5 Z" transform="translate(5.999995, 3.500000) rotate(90.000000) translate(-5.999995, -3.500000)" />
+      <path d="M5.99999547,2.5 C6.24545536,2.5 6.44960384,2.75470023 6.4919398,3.09057909 L6.49999547,3.22 L6.49999547,12.793 L7.64644208,11.6464466 C7.82000843,11.4728803 8.08943283,11.4535951 8.28430097,11.5885912 L8.35354886,11.6464466 C8.52711521,11.820013 8.54640036,12.0894374 8.41140431,12.2843055 L8.35354886,12.3535534 L6.35354886,14.3535534 C6.26063981,14.4464624 6.14026362,14.4951638 6.01855895,14.4996574 C6.01234918,14.499838 6.00618546,14.5 5.99999547,14.5 L5.98444142,14.4997595 C5.89013815,14.4968427 5.79650293,14.4673925 5.71568996,14.4114088 L5.64644208,14.3535534 L3.64644208,12.3535534 C3.45117993,12.1582912 3.45117993,11.8417088 3.64644208,11.6464466 C3.82000843,11.4728803 4.08943283,11.4535951 4.28430097,11.5885912 L4.35354886,11.6464466 L5.49999547,12.793 L5.49999547,3.22 C5.49999547,2.82235498 5.72385309,2.5 5.99999547,2.5 Z" transform="translate(5.999995, 8.500000) scale(-1, 1) rotate(90.000000) translate(-5.999995, -8.500000)" />
+    </>
   ),
   // Brand logos (0 0 24 24 source) scaled into the icon's 0 0 12 12 box.
   claude: (

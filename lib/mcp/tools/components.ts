@@ -41,8 +41,8 @@ import {
 } from '@/lib/mcp/broadcast';
 import { designSchema, richTextBlockSchema, templateEnum } from './shared-schemas';
 
-const variableTypeEnum = z.enum(['text', 'rich_text', 'image', 'link', 'audio', 'video', 'icon', 'variant'])
-  .describe('Variable type. "variant" lets instances pick which variant of a nested component is rendered.');
+const variableTypeEnum = z.enum(['text', 'rich_text', 'image', 'link', 'audio', 'video', 'icon', 'variant', 'visibility'])
+  .describe('Variable type. "variant" lets instances pick which variant of a nested component is rendered. "visibility" is a boolean ({ visible: true|false }) that shows/hides the linked layer per instance.');
 
 const variableSchema = z.object({
   name: z.string().describe('Display name (e.g. "Button label", "Hero image")'),
@@ -70,6 +70,9 @@ const variableUpdateSchema = z.object({
  * the component, so wrap it in the matching variable value here.
  */
 function normalizeDefaultValue(value: unknown, type: z.infer<typeof variableTypeEnum>): ComponentVariableValue {
+  if (type === 'visibility' && typeof value === 'boolean') {
+    return { visible: value };
+  }
   if (typeof value === 'string') {
     return type === 'rich_text'
       ? createTextComponentVariableValue(stringToTiptapContent(value))
@@ -249,6 +252,7 @@ variable's declared type, so you only pass the relevant field.`,
         url: z.string().optional().describe('For link variables: external URL'),
         link_page_id: z.string().optional().describe('For link variables: link to this page by ID (alternative to url)'),
         variant_id: z.string().optional().describe('For variant variables: the nested component variant ID to render'),
+        visible: z.boolean().optional().describe('For visibility variables: whether the linked layer is shown on this instance'),
       })).optional().describe('Per-variable content overrides for this instance'),
     },
     async ({ page_id, layer_id, variant_id, reset_overrides, overrides }) => {
@@ -286,6 +290,7 @@ variable's declared type, so you only pass the relevant field.`,
         video: { ...(base.video ?? {}) },
         icon: { ...(base.icon ?? {}) },
         variant: { ...(base.variant ?? {}) },
+        visibility: { ...(base.visibility ?? {}) },
         variableLinks: { ...(base.variableLinks ?? {}) },
       };
 
@@ -1206,6 +1211,11 @@ function unlinkVariableFromLayers(layers: Layer[], variableId: string): Layer[] 
       next = rest as Layer;
     }
 
+    if (next.settings?.visibilityVariableId === variableId) {
+      const { visibilityVariableId: _omitVisibility, ...restSettings } = next.settings;
+      next = { ...next, settings: restSettings };
+    }
+
     if (next.children && next.children.length > 0) {
       next = { ...next, children: unlinkVariableFromLayers(next.children, variableId) };
     }
@@ -1274,6 +1284,7 @@ interface OverrideEntryInput {
   url?: string;
   link_page_id?: string;
   variant_id?: string;
+  visible?: boolean;
 }
 
 /**
@@ -1319,6 +1330,10 @@ function buildOverrideValue(category: string, entry: OverrideEntryInput): Compon
       if (!entry.variant_id) return null;
       return { variant_id: entry.variant_id } as ComponentVariableValue;
 
+    case 'visibility':
+      if (entry.visible === undefined) return null;
+      return { visible: entry.visible };
+
     default:
       return null;
   }
@@ -1356,6 +1371,7 @@ function cloneLayerWithNewIds(layer: Layer): Layer {
  *   image/audio/video/icon -> variables.<type>.src.id
  *   link -> variables.link.variable_id (note: variable_id, not id)
  *   variant -> layer.componentVariantVariableId
+ *   visibility -> layer.settings.visibilityVariableId
  */
 function linkVariableToLayer(layer: Layer, variableId: string, variableType: string): Layer {
   const vars = { ...layer.variables };
@@ -1405,6 +1421,10 @@ function linkVariableToLayer(layer: Layer, variableId: string, variableType: str
       // Variant variables target the layer's nested-component variant override
       // via a top-level layer field (not inside variables).
       return { ...layer, componentVariantVariableId: variableId, variables: vars };
+
+    case 'visibility':
+      // Visibility drives `settings.hidden`, so the link lives in settings.
+      return { ...layer, settings: { ...layer.settings, visibilityVariableId: variableId }, variables: vars };
   }
 
   return { ...layer, variables: vars };
