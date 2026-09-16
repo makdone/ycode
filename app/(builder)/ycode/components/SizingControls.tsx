@@ -366,6 +366,262 @@ const SizingControls = memo(function SizingControls({ layer, parentLayer = null,
         </>
       )}
 
+      <div className="grid grid-cols-3 items-start">
+        <Label variant="muted" className="h-8">Width</Label>
+        <div className="col-span-2 flex flex-col gap-2">
+          <ButtonGroup>
+            <Input
+              value={widthInput} onChange={(e) => handleWidthChange(e.target.value)}
+            />
+            <ButtonGroupSeparator />
+            <Select value={getWidthPresetValue()} onValueChange={handleWidthPresetChange}>
+              <SelectTrigger />
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="w-[100%]">Fill</SelectItem>
+                  <SelectItem value="w-fit-content">Fit</SelectItem>
+                  <SelectItem value="w-[100vw]">Screen</SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </ButtonGroup>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="w-full group relative">
+              <ButtonGroup className="w-full">
+                <InputGroup>
+                  <InputGroupAddon>
+                    <div className="flex">
+                      <Tooltip>
+                        <TooltipTrigger>
+                          <Icon name="minSize" className="size-3" />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Min width</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </InputGroupAddon>
+                  <InputGroupInput
+                    placeholder="Min" value={minWidthInput}
+                    onChange={(e) => handleMinWidthChange(e.target.value)}
+                  />
+                </InputGroup>
+              </ButtonGroup>
+              <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 z-100">
+                <Select value={getMinWidthPresetValue()} onValueChange={handleMinWidthPresetChange}>
+                  <SelectTrigger size="xs" variant="ghost" />
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="w-[100%]">Fill</SelectItem>
+                      <SelectItem value="w-fit-content">Fit</SelectItem>
+                      <SelectItem value="w-[100vw]">Screen</SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="w-full group relative">
+              <ButtonGroup className="w-full">
+                <InputGroup>
+                  <InputGroupAddon>
+                    <div className="flex">
+                      <Tooltip>
+                        <TooltipTrigger>
+                          <Icon name="maxSize" className="size-3" />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Max width</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </InputGroupAddon>
+                  <InputGroupInput
+                    placeholder="Max" value={maxWidthInput}
+                    onChange={(e) => handleMaxWidthChange(e.target.value)}
+                  />
+                </InputGroup>
+              </ButtonGroup>
+              <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 z-100">
+                <Select value={getMaxWidthPresetValue()} onValueChange={handleMaxWidthPresetChange}>
+                  <SelectTrigger size="xs" variant="ghost" />
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="w-[100%]">Fill</SelectItem>
+                      <SelectItem value="w-fit-content">Fit</SelectItem>
+                      <SelectItem value="w-[100vw]">Screen</SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 items-start">
+        <Label variant="muted" className="h-8">Height</Label>
+        <div className="col-span-2 flex flex-col gap-2">
+          <ButtonGroup>
+            <Input
+              value={heightInput} onChange={(e) => handleHeightChange(e.target.value)}
+            />
+            <ButtonGroupSeparator />
+            <Select value={getHeightPresetValue()} onValueChange={handleHeightPresetChange}>
+              <SelectTrigger />
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="h-[100%]">Fill</SelectItem>
+                  <SelectItem value="h-[100svh]">Screen</SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </ButtonGroup>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="w-full group relative">
+              <ButtonGroup className="w-full">
+                <InputGroup>
+                  <InputGroupAddon>
+                    <div className="flex">
+                      <Tooltip>
+                        <TooltipTrigger>
+                          <Icon name="minSize" className="size-3 rotate-90" />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Min height</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </InputGroupAddon>
+                  <InputGroupInput
+                    placeholder="Min" value={minHeightInput}
+                    onChange={(e) => handleMinHeightChange(e.target.value)}
+                  />
+                </InputGroup>
+              </ButtonGroup>
+              <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 z-100">
+                <Select value={getMinHeightPresetValue()} onValueChange={handleMinHeightPresetChange}>
+                  <SelectTrigger size="xs" variant="ghost" />
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="h-[100%]">Fill</SelectItem>
+                      <SelectItem value="h-[100svh]">Screen</SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="w-full group relative">
+              <ButtonGroup className="w-full">
+                <InputGroup>
+                  <InputGroupAddon>
+                    <div className="flex">
+                      <Tooltip>
+                        <TooltipTrigger>
+                          <Icon name="maxSize" className="size-3 rotate-90" />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Max height</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </InputGroupAddon>
+                  <InputGroupInput
+                    placeholder="Max" value={maxHeightInput}
+                    onChange={(e) => handleMaxHeightChange(e.target.value)}
+                  />
+                </InputGroup>
+              </ButtonGroup>
+              <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 z-100">
+                <Select value={getMaxHeightPresetValue()} onValueChange={handleMaxHeightPresetChange}>
+                  <SelectTrigger size="xs" variant="ghost" />
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="h-[100%]">Fill</SelectItem>
+                      <SelectItem value="h-[100svh]">Screen</SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3">
+        <Label variant="muted">Overflow</Label>
+        <div className="col-span-2 *:w-full">
+          <Select value={overflow} onValueChange={handleOverflowChange}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="visible">Visible</SelectItem>
+                <SelectItem value="hidden">Hidden</SelectItem>
+                <SelectItem value="scroll">Scroll</SelectItem>
+                <SelectItem value="ellipsis">Ellipsis</SelectItem>
+                <SelectItem value="auto">Auto</SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {(['image', 'video'].includes(layer?.name || '')) && (
+        <div className="grid grid-cols-3 items-center">
+          <Label variant="muted">Object fit</Label>
+          <div className="col-span-2 flex items-center gap-1">
+            <Select value={objectFit} onValueChange={handleObjectFitChange}>
+              <SelectTrigger className="flex-1">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="contain">Contain</SelectItem>
+                  <SelectItem value="cover">Cover</SelectItem>
+                  <SelectItem value="fill">Fill</SelectItem>
+                  <SelectItem value="none">None</SelectItem>
+                  <SelectItem value="scale-down">Scale down</SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="input"
+                  size="icon-sm"
+                  className="rounded-lg"
+                  aria-label="Object position"
+                  title="Object position"
+                >
+                  <Icon name={(OBJECT_POSITIONS.find((p) => p.value === (objectPosition || 'center'))?.icon) || 'circle'} />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-2 my-0.5" align="end">
+                <div className="grid grid-cols-3 gap-1">
+                  {OBJECT_POSITIONS.map((position) => {
+                    const isActive = (objectPosition || 'center') === position.value;
+                    return (
+                      <Button
+                        key={position.value}
+                        variant={isActive ? 'secondary' : 'outline'}
+                        size="icon-sm"
+                        className={`rounded-none ${OBJECT_POSITION_CORNERS[position.value] || ''}`}
+                        aria-label={position.label}
+                        title={position.label}
+                        onClick={() => handleObjectPositionChange(position.value)}
+                      >
+                        <Icon name={position.icon} className={isActive ? 'text-foreground' : 'opacity-40'} />
+                      </Button>
+                    );
+                  })}
+                </div>
+              </PopoverContent>
+            </Popover>
+          </div>
+        </div>
+      )}
+
       {aspectRatio && (
         <div className="grid grid-cols-3 items-start">
           <Label variant="muted" className="h-8">Aspect ratio</Label>
