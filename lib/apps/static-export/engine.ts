@@ -18,6 +18,7 @@ import {
   getGoogleFontLinks,
 } from '@/lib/font-utils'
 import type { FontPreload } from '@/lib/font-utils'
+import { getLcpFontPreloads } from '@/lib/font-preload'
 import { generateColorVariablesCss } from '@/lib/repositories/colorVariableRepository'
 import { getAssetById } from '@/lib/repositories/assetRepository'
 import { getPublishedFonts } from '@/lib/repositories/fontRepository'
@@ -201,14 +202,13 @@ export async function exportSite(presetJobId?: string): Promise<ExportJob> {
 
     // ---- Font CSS (Google inlined @font-face + custom @font-face + class rules)
     let fontsCss = ''
+    let googleCss = ''
     let fontPreloads: FontPreload[] = []
     if (fonts.length > 0) {
       const googleLinks = getGoogleFontLinks(fonts)
-      const [googleCss] = await Promise.all([
-        googleLinks.length > 0
-          ? fetchGoogleFontsCss(googleLinks).catch(() => '')
-          : Promise.resolve(''),
-      ])
+      googleCss = googleLinks.length > 0
+        ? await fetchGoogleFontsCss(googleLinks).catch(() => '')
+        : ''
       fontsCss = [googleCss, buildCustomFontsCss(fonts), buildFontClassesCss(fonts)]
         .filter(Boolean)
         .join('\n')
@@ -243,7 +243,9 @@ export async function exportSite(presetJobId?: string): Promise<ExportJob> {
             publishedCss: publishedCss ?? null,
             colorVariablesCss: colorVariablesCss ?? null,
             fontsCss: fontsCss || null,
-            fontPreloads,
+            // Per page: the LCP heading's Google Font file, on top of the
+            // site-wide custom font preloads.
+            fontPreloads: fontPreloads.concat(getLcpFontPreloads(googleCss, resolved.lcpTextFont)),
             includeSwiper: resolved.hasSlider,
             interactions: resolved.interactions,
             globalCustomCodeHead: globalCustomCodeHead ?? null,

@@ -8,11 +8,11 @@
  * - StaticTextVariable
  */
 
-import type { AssetVariable, FieldVariable, DynamicTextVariable, DynamicRichTextVariable, StaticTextVariable, ComponentVariable, ComponentVariableValue, Layer, VisibilitySettingsValue } from '@/types';
+import type { AssetVariable, FieldVariable, DynamicTextVariable, DynamicRichTextVariable, StaticTextVariable, ComponentVariable, ComponentVariableValue, IdSettingsValue, Layer, VisibilitySettingsValue } from '@/types';
 import { resolveInlineVariablesFromData } from '@/lib/inline-variables';
 import { buildFieldVariablePath, resolveFieldFromSources } from '@/lib/cms-variables-utils';
 import { DEFAULT_ASSETS } from '@/lib/asset-constants';
-import { buildSvgDataUrl } from '@/lib/asset-utils';
+import { resolveInlineSvgAssetSrc, type InlineSvgAssetLike } from '@/lib/asset-utils';
 import { parseCollectionLinkValue } from '@/lib/link-utils';
 import { stringToTiptapContent } from '@/lib/text-format-utils';
 
@@ -27,6 +27,7 @@ export const EMPTY_OVERRIDES: NonNullable<Layer['componentOverrides']> = {
   icon: {},
   variant: {},
   visibility: {},
+  id: {},
   variableLinks: {},
 };
 
@@ -67,6 +68,46 @@ export function getEffectiveHidden(
   overrides: Layer['componentOverrides'] | undefined,
 ): boolean {
   return resolveLinkedHidden(layer, componentVariables, overrides) ?? layer.settings?.hidden ?? false;
+}
+
+/** Type guard for the `{ id }` value of an 'id' component variable */
+export function isIdValue(value: unknown): value is IdSettingsValue {
+  return typeof value === 'object' && value !== null && typeof (value as IdSettingsValue).id === 'string';
+}
+
+/**
+ * Resolve the effective HTML `id` for a layer whose element id is driven by a
+ * component variable (`settings.idVariableId`).
+ *
+ * Returns `undefined` when the layer is not linked, or when the variable is out of
+ * scope (no matching definition and no override) — e.g. an outer component pass
+ * over an already-resolved nested instance — so callers fall back to
+ * `settings.id`. A linked variable with an empty/unset value resolves to `''`
+ * (no id attribute), not the stored static id.
+ */
+export function resolveLinkedId(
+  layer: Layer,
+  componentVariables: ComponentVariable[] | undefined,
+  overrides: Layer['componentOverrides'] | undefined,
+): string | undefined {
+  const variableId = layer.settings?.idVariableId;
+  if (!variableId) return undefined;
+
+  const variableDef = componentVariables?.find((v) => v.id === variableId);
+  const overrideValue = overrides?.id?.[variableId];
+  if (overrideValue === undefined && !variableDef) return undefined;
+
+  const value = overrideValue ?? variableDef?.default_value;
+  return isIdValue(value) ? value.id : '';
+}
+
+/** Effective element id: the linked variable when present, else the static setting */
+export function getEffectiveId(
+  layer: Layer,
+  componentVariables: ComponentVariable[] | undefined,
+  overrides: Layer['componentOverrides'] | undefined,
+): string | undefined {
+  return resolveLinkedId(layer, componentVariables, overrides) ?? layer.settings?.id;
 }
 
 /**
@@ -343,6 +384,9 @@ function unwrapLinkFieldUrl(resolvedValue: string): string {
   return '';
 }
 
+/** Asset fields `getImageUrlFromVariable` needs to resolve an image source. */
+export type ImageAssetLike = InlineSvgAssetLike & { public_url: string | null };
+
 /**
  * Get image URL from image src variable
  * - AssetVariable -> gets asset URL from store
@@ -358,7 +402,7 @@ function unwrapLinkFieldUrl(resolvedValue: string): string {
  */
 export function getImageUrlFromVariable(
   src: AssetVariable | FieldVariable | DynamicTextVariable | undefined | null,
-  getAsset?: (id: string) => { public_url: string | null; content?: string | null; width?: number | null; height?: number | null } | null,
+  getAsset?: (id: string) => ImageAssetLike | null,
   collectionItemData?: Record<string, string>,
   pageCollectionItemData?: Record<string, string> | null,
   useDefault: boolean = true
@@ -375,14 +419,8 @@ export function getImageUrlFromVariable(
     }
     if (!getAsset) return undefined;
     const asset = getAsset(src.data.asset_id);
-    // Return public_url if available, otherwise convert SVG content to data URL
-    if (asset?.public_url) {
-      return asset.public_url;
-    }
-    if (asset?.content) {
-      return buildSvgDataUrl(asset.content, asset.width, asset.height);
-    }
-    return undefined;
+    // Prefer public_url; inline SVGs resolve to a data URI or the /a/ proxy by size
+    return asset ? (asset.public_url || resolveInlineSvgAssetSrc(asset) || undefined) : undefined;
   }
 
   if (isFieldVariable(src)) {
@@ -413,12 +451,8 @@ export function getImageUrlFromVariable(
     // The field value may be an asset ID - look up the asset to get the URL
     if (getAsset) {
       const asset = getAsset(unwrapped);
-      if (asset?.public_url) {
-        return asset.public_url;
-      }
-      if (asset?.content) {
-        return buildSvgDataUrl(asset.content, asset.width, asset.height);
-      }
+      const assetSrc = asset ? asset.public_url || resolveInlineSvgAssetSrc(asset) : null;
+      if (assetSrc) return assetSrc;
     }
 
     // If getAsset is not available or asset not found, return the raw value

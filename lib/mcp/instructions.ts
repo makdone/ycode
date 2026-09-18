@@ -592,7 +592,7 @@ export const DEFERRED_GROUP_GUIDES: Record<string, string> = {
   components: `### Components — Detailed Guide
 
 Each instance shares the master's structure but can override content via **variables**
-(text, rich_text, image, link, audio/video, icon, variant, visibility).
+(text, rich_text, image, link, audio/video, icon, variant, visibility, id).
 
 Workflow: create_component (with variables) → update_component_layers to build the tree
 (works like batch_operations).
@@ -604,7 +604,9 @@ link_variable operation. The link target is derived automatically from the varia
 declared type — text/rich_text bind the text layer, image/icon/video/audio bind that
 media layer's source, link binds the layer's link, variant binds a nested component
 instance's variant, visibility binds the layer's Visibility (shown when { visible: true },
-omitted when false — use it for optional parts like badges, icons, or secondary buttons).
+omitted when false — use it for optional parts like badges, icons, or secondary buttons),
+id binds the layer's HTML id attribute ({ id: "cta-pricing" } — use it when the same
+component needs a different element id per page, e.g. analytics/ad tracking ids on a button).
 You do not pass the type; just the layer and variable_id.
 
 Example: a "Feature Card" with title/description/image/button-link variables → add a

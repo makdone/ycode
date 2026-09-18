@@ -73,6 +73,7 @@ import SettingsPanel from './SettingsPanel';
 import SizingControls from './SizingControls';
 import SpacingControls from './SpacingControls';
 import ToggleGroup from './ToggleGroup';
+import IdSetting from './IdSetting';
 import VisibilitySetting from './VisibilitySetting';
 import TypographyControls from './TypographyControls';
 import UIStateSelector from './UIStateSelector';
@@ -100,7 +101,6 @@ import { getStyleIds } from '@/lib/layer-style-utils';
 import { resolveLayerClasses, chipClasses } from '@/lib/layer-style-resolve';
 import { buildDesign } from '@/lib/import/design';
 import { cn } from '@/lib/utils';
-import { sanitizeHtmlId } from '@/lib/html-utils';
 import { isFieldVariable, getCollectionVariable, findParentCollectionLayer, findAllParentCollectionLayers, isTextEditable, isTextContentLayer, isRichTextLayer, isHeadingLayer, findLayerWithParent, resetBindingsOnCollectionSourceChange, isInputInsideFilter, resolveFilterInputId, getLayerIndexes, indexedFindLayerById, indexedFindLayerWithParent, indexedFindParentCollectionLayer } from '@/lib/layer-utils';
 import { detachSpecificLayerFromComponent } from '@/lib/component-utils';
 import { convertContentToValue, parseValueToContent } from '@/lib/cms-variables-utils';
@@ -232,7 +232,6 @@ const RightSidebar = React.memo(function RightSidebar({
 
   const [currentClassInput, setCurrentClassInput] = useState<string>('');
   const classInputRef = useRef<HTMLInputElement>(null);
-  const [customId, setCustomId] = useState<string>('');
   const [containerTag, setContainerTag] = useState<string>('div');
   const [textTag, setTextTag] = useState<string>('p');
   const [showAddAttributePopover, setShowAddAttributePopover] = useState(false);
@@ -915,7 +914,6 @@ const RightSidebar = React.memo(function RightSidebar({
   if (selectedLayerId !== prevSelectedLayerId) {
     setPrevSelectedLayerId(selectedLayerId);
     setPrevLayerTagSignature(layerTagSignature);
-    setCustomId(sanitizeHtmlId(selectedLayer?.settings?.id || selectedLayer?.attributes?.id || ''));
     setContainerTag(selectedLayer?.settings?.tag || getDefaultContainerTag(selectedLayer));
     setTextTag(selectedLayer?.settings?.tag || getDefaultTextTag(selectedLayer));
   } else if (layerTagSignature !== prevLayerTagSignature) {
@@ -1034,18 +1032,6 @@ const RightSidebar = React.memo(function RightSidebar({
       addClass(currentClassInput);
     }
   }, [addClass, currentClassInput]);
-
-  // Handle custom ID change - store in settings.id (takes priority over attributes.id in renderer)
-  const handleIdChange = (value: string) => {
-    const sanitizedId = sanitizeHtmlId(value);
-    setCustomId(sanitizedId);
-    if (selectedLayerId) {
-      const currentSettings = selectedLayer?.settings || {};
-      handleLayerUpdate(selectedLayerId, {
-        settings: { ...currentSettings, id: sanitizedId }
-      });
-    }
-  };
 
   // Handle container tag change
   const handleContainerTagChange = (tag: string) => {
@@ -2344,18 +2330,14 @@ const RightSidebar = React.memo(function RightSidebar({
             {!isLocalizing && selectedLayerId !== 'body' && (<>
             {/* Attributes */}
             <div className="flex flex-col gap-2 pb-5 pt-5">
-              <div className="grid grid-cols-3">
-                <Label variant="muted">ID</Label>
-                <div className="col-span-2 *:w-full">
-                  <Input
-                    type="text"
-                    value={customId}
-                    onChange={(e) => handleIdChange(e.target.value)}
-                    placeholder="For in-page linking"
-                    disabled={isLockedByOther}
-                  />
-                </div>
-              </div>
+              {selectedLayer && (
+                <IdSetting
+                  layer={selectedLayer}
+                  onLayerUpdate={handleLayerUpdate}
+                  disabled={isLockedByOther}
+                  onOpenVariablesDialog={openVariablesDialog}
+                />
+              )}
 
               {/* Container Tag Selector - Only for containers/sections/blocks, hide for alerts */}
               {isContainerLayer(selectedLayer) && !isHeadingLayer(selectedLayer) && !isAlertLayer(selectedLayer) && (

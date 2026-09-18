@@ -12,6 +12,7 @@ import { resolveCustomCodePlaceholders } from '@/lib/resolve-cms-variables';
 import { generateInitialAnimationCSS, type HiddenLayerInfo } from '@/lib/animation-utils';
 import { buildCustomFontsCss, buildFontClassesCss, fetchGoogleFontsCss, getCustomFontPreloads, getGoogleFontLinks } from '@/lib/font-utils';
 import type { FontPreload } from '@/lib/font-utils';
+import { findLcpTextFont, getLcpFontPreloads } from '@/lib/font-preload';
 import { buildImageSizes, collectLayerAssetIds, findLcpCandidate, generateImageSrcset, getAssetProxyUrl, getOptimizedImageUrl } from '@/lib/asset-utils';
 import { getAllPages } from '@/lib/repositories/pageRepository';
 import { getAllPageFolders } from '@/lib/repositories/pageFolderRepository';
@@ -613,6 +614,14 @@ export default async function PageRenderer({
         [`google-fonts-css-${googleFontLinkUrls.join('|')}`],
         { tags: ['all-pages'], revalidate: false },
       )();
+
+      // Preload the one Google Font file the likely LCP text (first heading)
+      // renders in. Inlining the CSS above removes the stylesheet round-trip,
+      // but the browser still discovers the woff2 only after layout — on a
+      // text-hero page that discovery gap is the LCP.
+      fontPreloads = fontPreloads.concat(
+        getLcpFontPreloads(googleFontsInlinedCss, findLcpTextFont(rawChildLayers, bodyClasses)),
+      );
     }
   } catch (error) {
     console.error('[PageRenderer] Error loading fonts:', error);
@@ -816,9 +825,10 @@ export default async function PageRenderer({
         ))
       )}
 
-      {/* Preload uploaded custom font binaries so the browser fetches them from
-          <head> instead of after CSS parsing, shrinking the font swap window.
-          `crossOrigin` is required — fonts are always fetched in CORS mode. */}
+      {/* Preload uploaded custom font binaries plus the LCP heading's Google
+          Font file so the browser fetches them from <head> instead of after
+          CSS parsing, shrinking the font swap window. `crossOrigin` is
+          required — fonts are always fetched in CORS mode. */}
       {fontPreloads.map((font) => (
         <link
           key={`font-preload-${font.href}`}

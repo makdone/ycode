@@ -209,6 +209,10 @@ interface ComponentsActions {
    *  `settings.hidden` of any layer whose `settings.visibilityVariableId`
    *  points at it, so instances can show or hide parts of the component. */
   addVisibilityVariable: (componentId: string, name: string) => Promise<string | null>;
+  /** Add an `'id'` typed variable (defaults to an empty id). Drives
+   *  `settings.id` of any layer whose `settings.idVariableId` points at it, so
+   *  instances can carry their own HTML element id (e.g. tracking ids). */
+  addIdVariable: (componentId: string, name: string) => Promise<string | null>;
   updateTextVariable: (componentId: string, variableId: string, updates: { name?: string; placeholder?: string; default_value?: any }) => Promise<void>;
   reorderVariables: (componentId: string, orderedIds: string[]) => Promise<void>;
   deleteTextVariable: (componentId: string, variableId: string) => Promise<void>;
@@ -1278,6 +1282,45 @@ export const useComponentsStore = create<ComponentsStore>((set, get) => {
       }
     },
 
+    addIdVariable: async (componentId, name) => {
+      const component = get().getComponentById(componentId);
+      if (!component) return null;
+
+      const variableId = generateId('cpv');
+      const newVariable: ComponentVariable = {
+        id: variableId,
+        name,
+        type: 'id',
+        default_value: { id: '' },
+      };
+      const updatedVariables = [...(component.variables || []), newVariable];
+
+      try {
+        const response = await fetch(`/ycode/api/components/${componentId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ variables: updatedVariables }),
+        });
+
+        const result = await response.json();
+        if (result.error) {
+          console.error('Failed to add id variable:', result.error);
+          return null;
+        }
+
+        set((state) => ({
+          components: state.components.map((c) =>
+            c.id === componentId ? { ...c, variables: updatedVariables } : c
+          ),
+        }));
+
+        return variableId;
+      } catch (error) {
+        console.error('Failed to add id variable:', error);
+        return null;
+      }
+    },
+
     // Update a text variable's name and/or default value
     updateTextVariable: async (componentId, variableId, updates) => {
       const component = get().getComponentById(componentId);
@@ -1389,6 +1432,12 @@ export const useComponentsStore = create<ComponentsStore>((set, get) => {
           // Drop the visibility link; the layer falls back to its static `hidden` flag
           if (updatedLayer.settings?.visibilityVariableId === variableId) {
             const { visibilityVariableId: _, ...restSettings } = updatedLayer.settings;
+            updatedLayer = { ...updatedLayer, settings: restSettings };
+          }
+
+          // Drop the id link; the layer falls back to its static `settings.id`
+          if (updatedLayer.settings?.idVariableId === variableId) {
+            const { idVariableId: _, ...restSettings } = updatedLayer.settings;
             updatedLayer = { ...updatedLayer, settings: restSettings };
           }
 

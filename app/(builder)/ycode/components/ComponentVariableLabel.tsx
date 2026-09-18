@@ -31,6 +31,7 @@ export const VARIABLE_TYPE_ICONS: Record<string, IconProps['name']> = {
   icon: 'icon',
   variant: 'component',
   visibility: 'eye',
+  id: 'hash',
 };
 
 interface ComponentVariableLabelProps {

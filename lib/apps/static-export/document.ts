@@ -636,7 +636,7 @@ export interface BuildHtmlInput {
   colorVariablesCss: string | null
   /** Inlined @font-face + font class CSS for Google and custom fonts. */
   fontsCss?: string | null
-  /** Custom font binaries to hint via `<link rel="preload" as="font">`. */
+  /** Font binaries (custom uploads + LCP heading's Google file) to hint via `<link rel="preload" as="font">`. */
   fontPreloads?: FontPreload[]
   includeSwiper: boolean
   interactions: ExportedInteraction[]

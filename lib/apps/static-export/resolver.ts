@@ -16,6 +16,7 @@ import {
 import type { PageData } from '@/lib/page-fetcher'
 import { buildSlugPath, buildLocalizedSlugPath } from '@/lib/page-utils'
 import { getTranslatableKey } from '@/lib/locale-runtime'
+import { findLcpTextFont, type LcpTextFont } from '@/lib/font-preload'
 import type { DynamicSlugContext } from '@/lib/hreflang-utils'
 import { getValuesByFieldId } from '@/lib/repositories/collectionItemValueRepository'
 import { resolveCustomCodePlaceholders } from '@/lib/resolve-cms-variables'
@@ -50,6 +51,8 @@ export interface ResolvedPage {
   pageCustomCodeBody: string | null
   /** Default-locale CMS slug, used to build hreflang for dynamic pages. */
   dynamicSlug: DynamicSlugContext | null
+  /** Family + weight of the likely LCP text (first heading), for font preloading. */
+  lcpTextFont: LcpTextFont | null
 }
 
 interface PageCmsSettings {
@@ -217,5 +220,6 @@ async function renderResolved(
     pageCustomCodeHead: pageCustomCodeHead || null,
     pageCustomCodeBody: pageCustomCodeBody || null,
     dynamicSlug,
+    lcpTextFont: findLcpTextFont(layers),
   }
 }

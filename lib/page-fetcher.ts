@@ -12,7 +12,7 @@ import { getTranslatableKey, slimTranslations } from '@/lib/locale-runtime';
 import type { Page, PageFolder, PageLayers, Component, ComponentVariable, CollectionItemWithValues, CollectionField, Layer, CollectionPaginationMeta, Translation, Locale } from '@/types';
 import { getCollectionVariable, resolveFieldValue, evaluateVisibility, evaluateCondition, getLayerHtmlTag, filterDisabledSliderLayers } from '@/lib/layer-utils';
 import { isFieldVariable, isAssetVariable, createDynamicTextVariable, createDynamicRichTextVariable, createAssetVariable, getDynamicTextContent, getVariableStringValue, getAssetId, resolveDesignStyles } from '@/lib/variable-utils';
-import { buildImageSizes, generateImageSrcset, getOptimizedImageUrl, getAssetProxyUrl, DEFAULT_ASSETS, collectLayerAssetIds, buildSvgDataUrl, parseImageDimension, getSvgAspectRatioStyle } from '@/lib/asset-utils';
+import { buildImageSizes, generateImageSrcset, getOptimizedImageUrl, getAssetProxyUrl, DEFAULT_ASSETS, collectLayerAssetIds, resolveInlineSvgAssetSrc, parseImageDimension, getSvgAspectRatioStyle } from '@/lib/asset-utils';
 import { resolveComponents, applyComponentOverrides } from '@/lib/resolve-components';
 import { getComponentVariantLayers } from '@/lib/component-variant-utils';
 import { isTiptapDoc, hasBlockElementsWithResolver } from '@/lib/tiptap-utils';
@@ -4108,6 +4108,21 @@ async function injectCollectionDataForHtml(
 }
 
 /**
+ * Asset fields needed to resolve a layer's asset variables to URLs. `id`,
+ * `filename` and `content_hash` let inline-SVG assets route through the
+ * `/a/` proxy instead of being embedded as data URIs.
+ */
+export type AssetMapEntry = {
+  id?: string;
+  filename?: string;
+  public_url: string | null;
+  content?: string | null;
+  content_hash?: string | null;
+  width?: number | null;
+  height?: number | null;
+};
+
+/**
  * Resolve all AssetVariables in layer tree to DynamicTextVariables with public URLs
  * This ensures assets are resolved server-side before rendering
  * Should be called after all other layer processing (collections, components, etc.)
@@ -4118,7 +4133,7 @@ export async function resolveAllAssets(
   layers: Layer[],
   isPublished: boolean = true,
   components?: Component[],
-): Promise<{ layers: Layer[]; assetMap: Record<string, { public_url: string | null; content?: string | null; width?: number | null; height?: number | null }> }> {
+): Promise<{ layers: Layer[]; assetMap: Record<string, AssetMapEntry> }> {
   const { getAssetsByIds } = await import('@/lib/repositories/assetRepository');
 
   // Step 1: Collect all asset IDs from the layer tree
@@ -4146,7 +4161,7 @@ export async function resolveAllAssets(
  */
 function resolveLayerAssets(
   layer: Layer,
-  assetMap: Record<string, { public_url: string | null; content?: string | null; width?: number | null; height?: number | null }>,
+  assetMap: Record<string, AssetMapEntry>,
 ): Layer {
   const variableUpdates: Partial<Layer['variables']> = {};
 
@@ -4157,12 +4172,7 @@ function resolveLayerAssets(
     const assetId = getAssetId(imageSrc);
     if (assetId) {
       const asset = assetMap[assetId];
-      let resolvedUrl = '';
-      if (asset?.public_url) {
-        resolvedUrl = asset.public_url;
-      } else if (asset?.content) {
-        resolvedUrl = buildSvgDataUrl(asset.content, asset.width, asset.height);
-      }
+      const resolvedUrl = asset?.public_url || (asset && resolveInlineSvgAssetSrc(asset)) || '';
       variableUpdates.image = {
         src: createDynamicTextVariable(resolvedUrl),
         alt: layer.variables?.image?.alt || createDynamicTextVariable(''),
@@ -4215,11 +4225,7 @@ function resolveLayerAssets(
     let resolvedUrl = '';
     if (assetId) {
       const asset = assetMap[assetId];
-      if (asset?.public_url) {
-        resolvedUrl = asset.public_url;
-      } else if (asset?.content) {
-        resolvedUrl = buildSvgDataUrl(asset.content, asset.width, asset.height);
-      }
+      resolvedUrl = asset?.public_url || (asset && resolveInlineSvgAssetSrc(asset)) || '';
     } else {
       resolvedUrl = DEFAULT_ASSETS.IMAGE;
     }
@@ -4633,7 +4639,7 @@ export function layerToHtml(
   anchorMap?: Record<string, string>,
   collectionItemData?: Record<string, string>,
   pageCollectionItemData?: Record<string, string>,
-  assetMap?: Record<string, { public_url: string | null; content?: string | null; width?: number | null; height?: number | null }>,
+  assetMap?: Record<string, AssetMapEntry>,
   layerDataMap?: Record<string, Record<string, string>>,
   components?: Component[],
   ancestorComponentIds?: Set<string>,

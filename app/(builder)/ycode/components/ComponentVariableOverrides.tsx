@@ -8,8 +8,10 @@
 
 import React, { useCallback } from 'react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import Icon from '@/components/ui/icon';
+import { sanitizeHtmlId } from '@/lib/html-utils';
 import { cn } from '@/lib/utils';
 import ComponentVariableLabel, { VARIABLE_TYPE_ICONS } from './ComponentVariableLabel';
 import ImageSettings from './ImageSettings';
@@ -30,10 +32,12 @@ import {
   createTextComponentVariableValue,
   tiptapEqual,
   EMPTY_OVERRIDES,
+  isIdValue,
   isVisibilityValue,
 } from '@/lib/variable-utils';
 import type {
   ComponentVariable,
+  IdSettingsValue,
   ImageSettingsValue,
   LinkSettingsValue,
   AudioSettingsValue,
@@ -170,7 +174,7 @@ export default function ComponentVariableOverrides({
   );
 
   const getTypedValue = useCallback(
-    (category: 'image' | 'link' | 'audio' | 'video' | 'icon' | 'variant' | 'visibility', variableId: string) => {
+    (category: 'image' | 'link' | 'audio' | 'video' | 'icon' | 'variant' | 'visibility' | 'id', variableId: string) => {
       const override = componentOverrides?.[category]?.[variableId];
       const def = variables.find(v => v.id === variableId)?.default_value;
       return override !== undefined ? override : def;
@@ -438,6 +442,25 @@ export default function ComponentVariableOverrides({
               <VisibilityToggle
                 visible={visible}
                 onChange={(next) => handleTypedChange('visibility', variable.id, { visible: next } satisfies VisibilitySettingsValue)}
+              />
+            </div>
+          </div>
+        );
+      }
+      case 'id': {
+        const currentValue = getTypedValue('id', variable.id);
+        const idValue = isIdValue(currentValue) ? currentValue.id : '';
+        const idLabel = renderLabel(variable, { centered: true });
+
+        return (
+          <div key={variable.id} className="grid grid-cols-3 gap-2 items-center">
+            {idLabel}
+            <div className="col-span-2 *:w-full">
+              <Input
+                type="text"
+                value={idValue}
+                onChange={(e) => handleTypedChange('id', variable.id, { id: sanitizeHtmlId(e.target.value) } satisfies IdSettingsValue)}
+                placeholder="Element ID"
               />
             </div>
           </div>

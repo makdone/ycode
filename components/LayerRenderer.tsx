@@ -17,7 +17,7 @@ import { SWIPER_CLASS_MAP, SWIPER_DATA_ATTR_MAP, SLIDER_BUTTON_ARIA_LABELS, isSl
 import { getSliderPresizeVars } from '@/lib/slider-utils';
 import { useCanvasSlider } from '@/hooks/use-canvas-slider';
 import { resolveFieldFromSources } from '@/lib/cms-variables-utils';
-import { getDynamicTextContent, getImageUrlFromVariable, getVideoUrlFromVariable, getIframeUrlFromVariable, isFieldVariable, isAssetVariable, isStaticTextVariable, isDynamicTextVariable, getAssetId, getStaticTextContent, createAssetVariable, createDynamicTextVariable, resolveDesignStyles, getEffectiveHidden } from '@/lib/variable-utils';
+import { getDynamicTextContent, getImageUrlFromVariable, getVideoUrlFromVariable, getIframeUrlFromVariable, isFieldVariable, isAssetVariable, isStaticTextVariable, isDynamicTextVariable, getAssetId, getStaticTextContent, createAssetVariable, createDynamicTextVariable, resolveDesignStyles, getEffectiveHidden, getEffectiveId } from '@/lib/variable-utils';
 import { getTranslatedAssetId, getTranslatedText, applyCmsTranslations, injectTranslatedText } from '@/lib/localisation-utils';
 import { isValidLinkSettings } from '@/lib/link-utils';
 import { DEFAULT_ASSETS, ASSET_CATEGORIES, isAssetOfType } from '@/lib/asset-utils';
@@ -502,6 +502,13 @@ const LayerItemImpl: React.FC<{
   // the variable's default while editing the component); SSR bakes this into
   // `settings.hidden`, the canvas resolves it live here.
   const isHidden = getEffectiveHidden(
+    layer,
+    parentComponentVariables || editingComponentVariables,
+    parentComponentOverrides,
+  );
+  // Same for the HTML `id` attribute: an 'id' component variable can give each
+  // instance its own element id (SSR bakes it into `settings.id`).
+  const effectiveId = getEffectiveId(
     layer,
     parentComponentVariables || editingComponentVariables,
     parentComponentOverrides,
@@ -2364,9 +2371,9 @@ const LayerItemImpl: React.FC<{
       }
     }
 
-    // Apply custom ID from settings or attributes
-    if (layer.settings?.id) {
-      elementProps.id = layer.settings.id;
+    // Apply custom ID from settings (or a linked component variable) or attributes
+    if (effectiveId) {
+      elementProps.id = effectiveId;
     } else if (layer.attributes?.id) {
       elementProps.id = layer.attributes.id;
     }
@@ -2623,7 +2630,7 @@ const LayerItemImpl: React.FC<{
     if (htmlTag === 'input') {
       // Auto-set name attribute for form inputs if not already set
       if (isInsideForm && !elementProps.name) {
-        elementProps.name = layer.settings?.id || layer.id;
+        elementProps.name = effectiveId || layer.id;
       }
       // Checkbox/radio: set value="true" so FormData gets name=true when checked
       if (isInsideForm && (normalizedAttributes.type === 'checkbox' || normalizedAttributes.type === 'radio')) {
@@ -2655,7 +2662,7 @@ const LayerItemImpl: React.FC<{
     // Handle textarea - auto-set name for form submission and return early (no children)
     if (htmlTag === 'textarea') {
       if (isInsideForm && !elementProps.name) {
-        elementProps.name = layer.settings?.id || layer.id;
+        elementProps.name = effectiveId || layer.id;
       }
       // Use defaultValue instead of value to keep textareas uncontrolled
       if ('value' in elementProps) {
@@ -2668,7 +2675,7 @@ const LayerItemImpl: React.FC<{
     // Handle select - auto-set name for form submission
     if (htmlTag === 'select') {
       if (isInsideForm && !elementProps.name) {
-        elementProps.name = layer.settings?.id || layer.id;
+        elementProps.name = effectiveId || layer.id;
       }
 
       // Drop null/undefined value so the select can fall back to defaultValue
@@ -2724,7 +2731,7 @@ const LayerItemImpl: React.FC<{
 
     // Handle form submission when not in edit mode (preview and published)
     if (htmlTag === 'form' && !isEditMode) {
-      const formId = layer.settings?.id;
+      const formId = effectiveId;
       const formSettings = layer.settings?.form;
 
       elementProps.onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {

@@ -1,6 +1,7 @@
 import { getSupabaseAdmin } from '@/lib/supabase-server';
 import { SUPABASE_IN_FILTER_CHUNK_SIZE, SUPABASE_QUERY_LIMIT, SUPABASE_WRITE_BATCH_SIZE } from '@/lib/supabase-constants';
 import { STORAGE_BUCKET, STORAGE_FOLDERS } from '@/lib/asset-constants';
+import { getInlineSvgAssetVersion } from '@/lib/asset-utils';
 import { cleanupOrphanedStorageFiles } from '@/lib/storage-utils';
 import { chunk } from '@/lib/utils';
 import { generateAssetContentHash } from '../hash-utils';
@@ -207,11 +208,17 @@ export async function getAssetById(id: string, isPublished: boolean = false, ten
   return data;
 }
 
+export type ProxyAsset = Pick<Asset, 'id' | 'filename' | 'storage_path' | 'mime_type' | 'content' | 'width' | 'height' | 'is_published'>;
+
 /**
- * Get minimal asset info for proxy serving (ignores publish state)
- * Returns the first matching non-deleted record since both draft/published share the same storage_path
+ * Fetch the fields the `/a/` proxy needs to serve an asset.
+ *
+ * Draft and published rows share an id. Storage-backed assets point at the
+ * same file either way, but inline-SVG `content` can differ between them, so
+ * when the URL carries a `?v=` version (see getInlineSvgAssetVersion) the row
+ * whose bytes produce that version wins; otherwise the published row is preferred.
  */
-export async function getAssetForProxy(id: string): Promise<Pick<Asset, 'id' | 'filename' | 'storage_path' | 'mime_type'> | null> {
+export async function getAssetForProxy(id: string, version?: string | null): Promise<ProxyAsset | null> {
   const client = await getSupabaseAdmin();
 
   if (!client) {
@@ -220,16 +227,21 @@ export async function getAssetForProxy(id: string): Promise<Pick<Asset, 'id' | '
 
   const { data, error } = await client
     .from('assets')
-    .select('id, filename, storage_path, mime_type')
+    .select('id, filename, storage_path, mime_type, content, width, height, is_published')
     .eq('id', id)
     .is('deleted_at', null)
-    .limit(1);
+    .limit(2);
 
   if (error || !data?.length) {
     return null;
   }
 
-  return data[0];
+  const rows = data as ProxyAsset[];
+  const byVersion = version
+    ? rows.find((row) => getInlineSvgAssetVersion(row) === version)
+    : undefined;
+
+  return byVersion ?? rows.find((row) => row.is_published) ?? rows[0];
 }
 
 /**

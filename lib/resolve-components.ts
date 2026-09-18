@@ -6,7 +6,7 @@
 
 import type { Layer, Component, ComponentVariable, ComponentVariableValue, LayerVariables, VariantSettingsValue } from '@/types';
 import { getComponentVariantLayers } from './component-variant-utils';
-import { normalizeComponentVariableValue, resolveLinkedHidden } from './variable-utils';
+import { normalizeComponentVariableValue, resolveLinkedHidden, resolveLinkedId } from './variable-utils';
 
 /**
  * Remap collection_layer_id in a FieldVariable using the ID map.
@@ -293,6 +293,7 @@ const OVERRIDE_CATEGORIES: OverrideCategory[] = [
   'icon',
   'variant',
   'visibility',
+  'id',
 ];
 
 function findOverrideByVariableId(
@@ -390,6 +391,16 @@ export function applyComponentOverrides(
       updatedLayer = {
         ...updatedLayer,
         settings: { ...updatedLayer.settings, hidden: linkedHidden },
+      };
+    }
+
+    // Element id driven by a component variable: bake the resolved value into
+    // `settings.id` so the renderers emit the per-instance id attribute.
+    const linkedId = resolveLinkedId(layer, componentVariables, overrides);
+    if (linkedId !== undefined && linkedId !== (layer.settings?.id ?? '')) {
+      updatedLayer = {
+        ...updatedLayer,
+        settings: { ...updatedLayer.settings, id: linkedId },
       };
     }
 
