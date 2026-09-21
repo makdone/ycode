@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import ErrorFallback from '@/components/ErrorFallback';
 import LayerRendererPublic from '@/components/LayerRendererPublic';
 import YcodeBadge from '@/components/YcodeBadge';
 import type { PageData } from '@/lib/page-fetcher';
@@ -15,8 +16,8 @@ interface ErrorPageContentProps {
 /**
  * Shared custom-500 renderer for the published and preview error boundaries.
  * Isolated in its own module so the heavy LayerRendererPublic graph is loaded
- * lazily (via next/dynamic) only when an error renders — never shipped in
- * every route's error-boundary chunk.
+ * lazily (via a runtime import() from DeferredErrorPage) only when an error
+ * renders — never shipped in every route's error-boundary chunk.
  */
 export default function ErrorPageContent({ published, reset }: ErrorPageContentProps) {
   const [errorPageData, setErrorPageData] = useState<PageData | null>(null);
@@ -48,7 +49,7 @@ export default function ErrorPageContent({ published, reset }: ErrorPageContentP
     fetchErrorPage();
   }, [published]);
 
-  if (isLoading) return null;
+  if (isLoading) return <ErrorFallback published={published} reset={reset} />;
 
   if (errorPageData) {
     const customCodeHead = errorPageData.page.settings?.custom_code?.head || '';
@@ -87,26 +88,5 @@ export default function ErrorPageContent({ published, reset }: ErrorPageContentP
     );
   }
 
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-white">
-      <div className="text-center max-w-md px-4">
-        <h1 className="text-6xl font-bold text-gray-900 mb-4">500</h1>
-        <h2 className="text-2xl font-semibold text-gray-800 mb-4">
-          {published ? 'Server Error' : 'Preview Error'}
-        </h2>
-        <p className="text-gray-600 mb-8">
-          {published
-            ? 'Something went wrong on our end. Please try again later.'
-            : 'An error occurred while rendering the preview. Please check your page configuration.'}
-        </p>
-        <button
-          onClick={reset}
-          className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          Try Again
-        </button>
-      </div>
-      {showBadge && <YcodeBadge />}
-    </div>
-  );
+  return <ErrorFallback published={published} reset={reset} />;
 }

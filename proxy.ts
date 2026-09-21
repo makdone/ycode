@@ -74,9 +74,16 @@ function withPathname(response: NextResponse, request: NextRequest, pathname: st
   return next;
 }
 
-function isPublicApiRoute(pathname: string, method: string): boolean {
+function isPublicApiRoute(pathname: string, method: string, searchParams: URLSearchParams): boolean {
   // POST to form-submissions is public (website visitors submitting forms)
   if (pathname === '/ycode/api/form-submissions' && method === 'POST') {
+    return true;
+  }
+
+  // Published error pages are rendered for visitors by the error boundary, so the
+  // published variant must be readable anonymously. Drafts stay behind auth.
+  if (method === 'GET' && pathname === '/ycode/api/error-page'
+      && searchParams.get('published') === 'true') {
     return true;
   }
 
@@ -98,7 +105,7 @@ function isPublicApiRoute(pathname: string, method: string): boolean {
  * Returns a 401 response if not authenticated, or null to continue.
  */
 async function verifyApiAuth(request: NextRequest): Promise<NextResponse | null> {
-  if (isPublicApiRoute(request.nextUrl.pathname, request.method)) {
+  if (isPublicApiRoute(request.nextUrl.pathname, request.method, request.nextUrl.searchParams)) {
     return null;
   }
 
