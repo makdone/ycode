@@ -34,6 +34,7 @@ import { combineBgValues, mergeStaticBgVars } from '@/lib/tailwind-class-mapper'
 import { clsx } from 'clsx';
 import type { HiddenLayerInfo } from '@/lib/animation-utils';
 import { transformLayerIdsForInstance } from '@/lib/resolve-components';
+import { FormHoneypotField } from '@/components/FormHoneypotField';
 
 /**
  * Per-layer-type code splitting.
@@ -1843,6 +1844,10 @@ const LayerItem: React.FC<{
     return (
       <Tag {...elementProps}>
         {textContent && textContent}
+
+        {htmlTag === 'form' && layer.settings?.form?.form_type !== 'password_protected' && (
+          <FormHoneypotField />
+        )}
 
         {effectiveChildren && effectiveChildren.length > 0 && (
           <LayerRendererPublic

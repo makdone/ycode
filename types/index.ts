@@ -1805,6 +1805,7 @@ export interface CreateFormSubmissionData {
   form_id: string;
   payload: Record<string, any>;
   metadata?: FormSubmissionMetadata;
+  status?: FormSubmissionStatus;
 }
 
 export interface UpdateFormSubmissionData {

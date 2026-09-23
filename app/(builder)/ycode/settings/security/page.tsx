@@ -24,6 +24,12 @@ import { Switch } from '@/components/ui/switch';
 import { cn, isCloudVersion } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/useSettingsStore';
 import {
+  FORM_SPAM_SETTING_KEY,
+  RATE_LIMIT_WINDOW_MINUTES,
+  getDefaultFormSpamSettings,
+} from '@/lib/form-spam-settings';
+import type { FormSpamSettings } from '@/lib/form-spam-settings';
+import {
   REFERRER_POLICY_OPTIONS,
   SECURITY_HEADERS_SETTING_KEY,
   getDefaultSecurityHeadersSettings,
@@ -44,8 +50,18 @@ export default function SecuritySettingsPage() {
   });
   const [isSaving, setIsSaving] = useState(false);
 
+  const storedSpam = getSettingByKey(FORM_SPAM_SETTING_KEY) as Partial<FormSpamSettings> | null;
+  const [spamSettings, setSpamSettings] = useState<FormSpamSettings>({
+    ...getDefaultFormSpamSettings(),
+    ...(storedSpam || {}),
+  });
+  // Kept as text so the field can be cleared while typing.
+  const [rateLimitInput, setRateLimitInput] = useState(String(spamSettings.rateLimitMaxSubmissions));
+  const [isSavingSpam, setIsSavingSpam] = useState(false);
+
   // Individual header controls are gated on the master toggle.
   const disabled = !settings.enabled;
+  const spamDisabled = !spamSettings.enabled;
 
   // HSTS is a host/TLS concern already handled by the platform on cloud, so the
   // control is only useful for self-hosted installs.
@@ -75,6 +91,39 @@ export default function SecuritySettingsPage() {
       setIsSaving(false);
     }
   }, [saveSettings, settings]);
+
+  const updateSpamSetting = useCallback(<K extends keyof FormSpamSettings>(
+    key: K,
+    value: FormSpamSettings[K],
+  ) => {
+    setSpamSettings((prev) => ({ ...prev, [key]: value }));
+  }, []);
+
+  const handleSaveSpam = useCallback(async () => {
+    setIsSavingSpam(true);
+    try {
+      const parsedLimit = parseInt(rateLimitInput, 10);
+      const value: FormSpamSettings = {
+        ...spamSettings,
+        rateLimitMaxSubmissions: Number.isNaN(parsedLimit)
+          ? getDefaultFormSpamSettings().rateLimitMaxSubmissions
+          : parsedLimit,
+      };
+
+      const success = await saveSettings({ [FORM_SPAM_SETTING_KEY]: value });
+
+      if (!success) {
+        toast.error(useSettingsStore.getState().error || 'Settings could not be saved. Please try again.');
+        return;
+      }
+
+      setSpamSettings(value);
+      setRateLimitInput(String(value.rateLimitMaxSubmissions));
+      toast.success('Spam protection has been successfully saved');
+    } finally {
+      setIsSavingSpam(false);
+    }
+  }, [rateLimitInput, saveSettings, spamSettings]);
 
   return (
     <div className="p-8">
@@ -226,6 +275,91 @@ export default function SecuritySettingsPage() {
                 disabled={isSaving}
               >
                 {isSaving ? 'Saving...' : 'Save changes'}
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-10 bg-secondary/20 p-8 rounded-lg mt-6">
+          <div>
+            <FieldLegend>Form spam protection</FieldLegend>
+            <FieldDescription>
+              Active by default on every form. Bots are detected with a hidden decoy field and filed under Spam in your inbox without triggering notifications. The settings below only relax the protection.
+            </FieldDescription>
+          </div>
+
+          <div className="col-span-2 grid grid-cols-2 gap-8">
+            <Field orientation="horizontal" className="flex-row-reverse col-span-2">
+              <FieldContent>
+                <FieldLabel htmlFor="spam-enabled">Enable spam protection</FieldLabel>
+                <FieldDescription>
+                  Turn off to accept every submission without any checks.
+                </FieldDescription>
+              </FieldContent>
+              <Switch
+                id="spam-enabled"
+                checked={spamSettings.enabled}
+                onCheckedChange={(checked) => updateSpamSetting('enabled', checked)}
+              />
+            </Field>
+
+            <FieldSeparator className="col-span-2" />
+
+            <Field orientation="horizontal" className="flex-row-reverse col-span-2">
+              <FieldContent>
+                <FieldLabel htmlFor="spam-rate-limit-enabled">Limit submissions per visitor</FieldLabel>
+                <FieldDescription>
+                  Caps how often a single IP address can submit. Turn off if your visitors share one IP, such as an office network or an in-store kiosk.
+                </FieldDescription>
+              </FieldContent>
+              <Switch
+                id="spam-rate-limit-enabled"
+                checked={spamSettings.rateLimitEnabled}
+                onCheckedChange={(checked) => updateSpamSetting('rateLimitEnabled', checked)}
+                disabled={spamDisabled}
+              />
+            </Field>
+
+            <Field className="col-span-2">
+              <FieldLabel htmlFor="spam-rate-limit">
+                Maximum submissions per {RATE_LIMIT_WINDOW_MINUTES} minutes
+              </FieldLabel>
+              <FieldDescription>
+                Further submissions from the same IP address are refused until the window passes.
+              </FieldDescription>
+              <Input
+                id="spam-rate-limit"
+                type="number"
+                min={1}
+                value={rateLimitInput}
+                onChange={(e) => setRateLimitInput(e.target.value)}
+                disabled={spamDisabled || !spamSettings.rateLimitEnabled}
+              />
+            </Field>
+
+            <FieldSeparator className="col-span-2" />
+
+            <Field orientation="horizontal" className="flex-row-reverse col-span-2">
+              <FieldContent>
+                <FieldLabel htmlFor="spam-allow-external">Allow submissions from other sites</FieldLabel>
+                <FieldDescription>
+                  By default only forms served from your own domains may submit. Enable this if you post to the form API from a separate frontend or a mobile app.
+                </FieldDescription>
+              </FieldContent>
+              <Switch
+                id="spam-allow-external"
+                checked={spamSettings.allowExternalSubmissions}
+                onCheckedChange={(checked) => updateSpamSetting('allowExternalSubmissions', checked)}
+                disabled={spamDisabled}
+              />
+            </Field>
+
+            <div className="col-span-2 flex justify-end">
+              <Button
+                size="sm" onClick={handleSaveSpam}
+                disabled={isSavingSpam}
+              >
+                {isSavingSpam ? 'Saving...' : 'Save changes'}
               </Button>
             </div>
           </div>
