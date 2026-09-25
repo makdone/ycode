@@ -306,7 +306,7 @@ export default function GeneralSettingsPage() {
       setIsResetting(false);
       setShowResetDialog(false);
     }
-  }, [router]);
+  }, []);
 
   return (
     <div className="p-8">

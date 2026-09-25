@@ -960,7 +960,9 @@ export default function YCodeBuilder({ children }: YCodeBuilderProps = {} as YCo
       // navigateToLayers will automatically include view=desktop, tab=design, layer=body
       navigateToLayers(defaultPage.id);
     }
-  }, [migrationsComplete, pages.length, components.length, collections.length, routeType, resourceId, currentPageId, editingComponentId, pages, components, collections, setCurrentPageId, setSelectedLayerId, navigateToLayers, navigateToCollection, navigateToCollections, urlState.layerId]);
+    // `urlState.variantId` is read once at init; depending on it would fight the
+    // effect below that mirrors the active variant back into the URL.
+  }, [migrationsComplete, pages.length, components.length, collections.length, routeType, resourceId, currentPageId, editingComponentId, pages, components, collections, setCurrentPageId, setSelectedLayerId, navigateToLayers, navigateToCollection, navigateToCollections, urlState.layerId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Mirror the active component variant id into the URL while editing a
   // component, so reloads land back on the same variant. Uses

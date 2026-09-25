@@ -11,6 +11,9 @@ import { credentials } from '@/lib/credentials';
 import { getRequestOrigin, getSiteBaseUrl } from '@/lib/url-utils';
 import type { SitemapSettings } from '@/types';
 
+// Reads the request origin, so it can never be prerendered at build time
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   try {
     const requestOrigin = getRequestOrigin(await headers());

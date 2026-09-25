@@ -127,7 +127,7 @@ const LeftSidebar = React.memo(function LeftSidebar({
 
     window.addEventListener('toggleElementLibrary', handleToggleElementLibrary);
     return () => window.removeEventListener('toggleElementLibrary', handleToggleElementLibrary);
-  }, []);
+  }, [setActiveSidebarTab]);
 
   // Listen for close ElementLibrary event (e.g., when clicking on canvas)
   useEffect(() => {

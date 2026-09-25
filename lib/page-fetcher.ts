@@ -29,7 +29,7 @@ export interface PaginationContext {
 }
 
 import { resolveRefCollectionItemId, generateLinkHref, isLinkAtCollectionBoundary, isLinkToCurrentPage, parseCollectionLinkValue, extractCrossCollectionItemIds } from '@/lib/link-utils';
-import type { LinkResolutionContext } from '@/lib/link-utils';
+import type { LinkAssetLike, LinkResolutionContext } from '@/lib/link-utils';
 import { getLinkSettingsFromMark } from '@/lib/tiptap-extensions/link-settings';
 import { SWIPER_CLASS_MAP, SWIPER_DATA_ATTR_MAP, SLIDER_BUTTON_ARIA_LABELS, isSliderChromeButton } from '@/lib/slider-constants';
 import { resolveInlineVariables, resolveInlineVariablesFromData } from '@/lib/inline-variables';
@@ -4618,8 +4618,8 @@ export interface PageLinkContext {
 
 /** Build an `assetMap`-backed `getAsset` callback compatible with `generateLinkHref`. */
 function makeAssetMapResolver(
-  assetMap?: Record<string, { public_url: string | null; content?: string | null }>
-): ((id: string) => { public_url?: string | null; content?: string | null } | null) | undefined {
+  assetMap?: Record<string, AssetMapEntry>
+): ((id: string) => LinkAssetLike | null) | undefined {
   if (!assetMap) return undefined;
   return (id: string) => assetMap[id] ?? null;
 }

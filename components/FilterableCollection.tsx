@@ -591,7 +591,7 @@ export default function FilterableCollection({
       }
       loadMoreBtn.style.display = hasMore ? '' : 'none';
     }
-  }, [getSsrPaginationWrapper]);
+  }, [getSsrPaginationWrapper, toggleSsrWrapperHidden]);
 
   const restoreSsrPagination = useCallback(() => {
     const wrapper = getSsrPaginationWrapper();
@@ -928,7 +928,10 @@ export default function FilterableCollection({
 
     const startOffset = (startPage - 1) * (limit || 10);
     fetchFiltered(filterGroups, startOffset, false);
-  }, [filterValues, buildApiFilters, fetchFiltered, paginationMode, attachPaginationIntercept, detachPaginationIntercept, restoreSsrPagination, getSsrPaginationWrapper, updateEmptyStateElements, fpKey, pKey, limit, hasRuntimeSortOverride, hasDynamicDateFilter, effectiveSortBy, effectiveSortOrder, showSSR, clearFilteredDOM, removeLoadingSkeleton]);
+    // Runs on filter-value changes only. The layer/template/filter-group config is read
+    // at fetch time; adding it would refetch on every render since those are new
+    // object identities each pass.
+  }, [filterValues, buildApiFilters, fetchFiltered, paginationMode, attachPaginationIntercept, detachPaginationIntercept, restoreSsrPagination, getSsrPaginationWrapper, updateEmptyStateElements, fpKey, pKey, limit, hasRuntimeSortOverride, hasDynamicDateFilter, effectiveSortBy, effectiveSortOrder, showSSR, clearFilteredDOM, removeLoadingSkeleton]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!hasActiveFilters || paginationMode !== 'pages') return;

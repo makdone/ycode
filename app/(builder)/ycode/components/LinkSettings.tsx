@@ -571,7 +571,7 @@ export default function LinkSettings(props: LinkSettingsProps) {
         rel: newRel,
       });
     },
-    [isStandaloneMode, layer, linkSettings, updateLinkSettings]
+    [isStandaloneMode, layer, linkSettings, updateLinkSettings, rel]
   );
 
   // Handle download change

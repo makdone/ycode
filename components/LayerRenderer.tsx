@@ -50,7 +50,7 @@ import FilterableCollection from '@/components/FilterableCollection';
 import LocaleSelector from '@/components/layers/LocaleSelector';
 import { usePagesStore } from '@/stores/usePagesStore';
 import { useSettingsStore } from '@/stores/useSettingsStore';
-import { generateLinkHref, resolveLinkAttrs, isLinkAtCollectionBoundary, isLinkToCurrentPage, type LinkResolutionContext } from '@/lib/link-utils';
+import { generateLinkHref, resolveLinkAttrs, isLinkAtCollectionBoundary, isLinkToCurrentPage, type LinkResolutionContext, type ResolvedAsset } from '@/lib/link-utils';
 import { collectEditorHiddenLayerIds, collectKeptHiddenLayerIds, type HiddenLayerInfo } from '@/lib/animation-utils';
 import AnimationInitializer from '@/components/AnimationInitializer';
 import { transformLayerIdsForInstance, resolveVariableLinks } from '@/lib/resolve-components';
@@ -123,7 +123,7 @@ interface LayerRendererProps {
   translations?: Record<string, any> | null; // Translations for localized URL generation
   anchorMap?: Record<string, string>; // Pre-built map of layerId -> anchor value for O(1) lookups
   /** Pre-resolved assets (asset_id -> { url, width, height }) for SSR resolution */
-  resolvedAssets?: Record<string, { url: string; width?: number | null; height?: number | null }>;
+  resolvedAssets?: Record<string, ResolvedAsset>;
   /** Components for resolving embedded component nodes in rich-text (preview/published) */
   components?: Component[];
   /** Component IDs in the rendering chain, used to prevent circular loops through collection rich-text data */
@@ -410,7 +410,7 @@ const LayerItemImpl: React.FC<{
   isPreview?: boolean; // Whether we're in preview mode
   translations?: Record<string, any> | null; // Translations for localized URL generation
   anchorMap?: Record<string, string>; // Pre-built map of layerId -> anchor value
-  resolvedAssets?: Record<string, { url: string; width?: number | null; height?: number | null }>;
+  resolvedAssets?: Record<string, ResolvedAsset>;
   components?: Component[];
   ancestorComponentIds?: Set<string>;
   isSlideChild?: boolean;
@@ -572,11 +572,12 @@ const LayerItemImpl: React.FC<{
   // Create asset resolver that checks pre-resolved assets first (SSR), then falls back to store
   const getAsset = useCallback((id: string) => {
     if (resolvedAssets?.[id]) {
-      const { url, width, height } = resolvedAssets[id];
+      const { url, filename, width, height } = resolvedAssets[id];
       if (url.startsWith('<')) {
-        return { public_url: null, content: url };
+        // Inline SVG: id/filename let asset links build the `/a/` proxy URL.
+        return { id, filename, public_url: null, content: url, width, height };
       }
-      return { public_url: url, width, height };
+      return { id, filename, public_url: url, width, height };
     }
     return getAssetFromStore(id);
   }, [resolvedAssets, getAssetFromStore]);
@@ -1500,8 +1501,9 @@ const LayerItemImpl: React.FC<{
       // Build virtual collection items from assets
       items = assetIds.map(assetId => {
         const asset = getAsset(assetId);
-        // Check if it's a full Asset object or just a URL placeholder
-        const isFullAsset = asset && 'filename' in asset;
+        // Check if it's a full Asset object (from the store) or just the
+        // pre-resolved SSR shape, which never carries `mime_type`
+        const isFullAsset = asset && 'mime_type' in asset;
         const virtualValues = isFullAsset ? buildAssetVirtualValues(asset) : {};
         return {
           id: assetId,

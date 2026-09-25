@@ -564,8 +564,9 @@ export function useDesignSync({
 
   // Cleanup on unmount
   useEffect(() => {
+    const debouncedFns = debouncedFnMapRef.current;
     return () => {
-      debouncedFnMapRef.current.forEach(fn => fn.cancel());
+      debouncedFns.forEach(fn => fn.cancel());
     };
   }, []);
 

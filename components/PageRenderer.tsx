@@ -23,7 +23,7 @@ import { getSettingByKey } from '@/lib/repositories/settingsRepository';
 import { getItemsWithValues, getItemsWithValuesByIds } from '@/lib/repositories/collectionItemRepository';
 import { getValuesByItemIds } from '@/lib/repositories/collectionItemValueRepository';
 import { getFieldsByCollectionId } from '@/lib/repositories/collectionFieldRepository';
-import { REF_PAGE_PREFIX, REF_COLLECTION_PREFIX, isCollectionItemKeyword, parseCollectionLinkValue } from '@/lib/link-utils';
+import { REF_PAGE_PREFIX, REF_COLLECTION_PREFIX, isCollectionItemKeyword, parseCollectionLinkValue, type ResolvedAsset } from '@/lib/link-utils';
 import { getClassesString, hasPasswordFormLayer } from '@/lib/layer-utils';
 import { buildGlobalsMetaMap, buildGlobalsValueMap } from '@/lib/collection-field-utils';
 import { buildLocalizedPageUrls, type LocalizedDynamicSlug } from '@/lib/page-utils';
@@ -684,7 +684,7 @@ export default async function PageRenderer({
   // Use draft assets (isPublished=false) for preview mode, published assets otherwise
   // `mimeType` is tracked locally so the LCP heuristic can skip SVG logos;
   // it is stripped before passing the map across the client boundary.
-  type ResolvedAssetEntry = { url: string; width?: number | null; height?: number | null; mimeType?: string };
+  type ResolvedAssetEntry = ResolvedAsset & { mimeType?: string };
   let resolvedAssetsWithMime: Record<string, ResolvedAssetEntry> | undefined;
   if (layerAssetIds.size > 0) {
     try {
@@ -702,7 +702,8 @@ export default async function PageRenderer({
           url = asset.content;
         }
         if (url) {
-          resolvedAssetsWithMime[id] = { url, width: asset.width, height: asset.height, mimeType: asset.mime_type };
+          // `filename` lets links to inline-SVG assets build their `/a/` proxy URL.
+          resolvedAssetsWithMime[id] = { url, filename: asset.filename, width: asset.width, height: asset.height, mimeType: asset.mime_type };
         }
       }
     } catch (error) {
@@ -734,11 +735,11 @@ export default async function PageRenderer({
   }
 
   // Strip mimeType before crossing the client component boundary — only
-  // url/width/height are part of the shared `resolvedAssets` contract.
-  const resolvedAssets: Record<string, { url: string; width?: number | null; height?: number | null }> | undefined =
+  // url/filename/width/height are part of the shared `resolvedAssets` contract.
+  const resolvedAssets: Record<string, ResolvedAsset> | undefined =
     resolvedAssetsWithMime
       ? Object.fromEntries(
-        Object.entries(resolvedAssetsWithMime).map(([id, { url, width, height }]) => [id, { url, width, height }])
+        Object.entries(resolvedAssetsWithMime).map(([id, { url, filename, width, height }]) => [id, { url, filename, width, height }])
       )
       : undefined;
 

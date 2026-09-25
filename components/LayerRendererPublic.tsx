@@ -23,7 +23,7 @@ import { SWIPER_CLASS_MAP, SWIPER_DATA_ATTR_MAP, SLIDER_BUTTON_ARIA_LABELS, isSl
 import { getSliderPresizeVars } from '@/lib/slider-utils';
 import { getDynamicTextContent, getImageUrlFromVariable, getVideoUrlFromVariable, getIframeUrlFromVariable, isFieldVariable, isAssetVariable, isStaticTextVariable, isDynamicTextVariable, getStaticTextContent, getAssetId, resolveDesignStyles } from '@/lib/variable-utils';
 import { getTranslatedAssetId, getTranslatedText } from '@/lib/locale-runtime';
-import { isValidLinkSettings, generateLinkHref, resolveLinkAttrs, isLinkAtCollectionBoundary, isLinkToCurrentPage, type LinkResolutionContext } from '@/lib/link-utils';
+import { isValidLinkSettings, generateLinkHref, resolveLinkAttrs, isLinkAtCollectionBoundary, isLinkToCurrentPage, type LinkResolutionContext, type ResolvedAsset } from '@/lib/link-utils';
 import { DEFAULT_ASSETS, buildImageSizes, generateImageSrcset, getOptimizedImageUrl, getSvgAspectRatioStyle, parseImageDimension } from '@/lib/asset-utils';
 import { resolveInlineVariablesFromData } from '@/lib/inline-variables';
 import { getPaginationLayerKind, paginationTextVariableToTemplate, resolvePaginationTextVariable } from '@/lib/pagination-text-utils';
@@ -113,7 +113,7 @@ interface LayerRendererPublicProps {
   isPreview?: boolean;
   translations?: Record<string, any> | null;
   anchorMap?: Record<string, string>;
-  resolvedAssets?: Record<string, { url: string; width?: number | null; height?: number | null }>;
+  resolvedAssets?: Record<string, ResolvedAsset>;
   components?: Component[];
   ancestorComponentIds?: Set<string>;
   isSlideChild?: boolean;
@@ -327,7 +327,7 @@ const LayerItem: React.FC<{
   isPreview?: boolean;
   translations?: Record<string, any> | null;
   anchorMap?: Record<string, string>;
-  resolvedAssets?: Record<string, { url: string; width?: number | null; height?: number | null }>;
+  resolvedAssets?: Record<string, ResolvedAsset>;
   components?: Component[];
   ancestorComponentIds?: Set<string>;
   isSlideChild?: boolean;
@@ -400,11 +400,12 @@ const LayerItem: React.FC<{
   // No editor stores are consulted in public mode.
   const getAsset = useCallback((id: string) => {
     if (!resolvedAssets?.[id]) return null;
-    const { url, width, height } = resolvedAssets[id];
+    const { url, filename, width, height } = resolvedAssets[id];
     if (url.startsWith('<')) {
-      return { public_url: null, content: url };
+      // Inline SVG: id/filename let asset links build the `/a/` proxy URL.
+      return { id, filename, public_url: null, content: url, width, height };
     }
-    return { public_url: url, width, height };
+    return { id, filename, public_url: url, width, height };
   }, [resolvedAssets]);
 
   // Shared props passed to nested LayerRendererPublic calls (component instances & rich-text components)

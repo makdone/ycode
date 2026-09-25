@@ -23,6 +23,9 @@ import {
 import { getRequestOrigin, getSiteBaseUrl } from '@/lib/url-utils';
 import type { SitemapSettings, Translation, CollectionItem } from '@/types';
 
+// Reads the request origin, so it can never be prerendered at build time
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   try {
     const hasSupabaseCredentials = await credentials.exists();
