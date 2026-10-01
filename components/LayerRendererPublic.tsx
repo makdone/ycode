@@ -231,6 +231,7 @@ const LayerRendererPublic: React.FC<LayerRendererPublicProps> = ({
               limit={layer._filterConfig!.limit}
               maxTotal={layer._filterConfig!.maxTotal}
               paginationMode={layer._filterConfig!.paginationMode}
+              paginationParamName={layer._filterConfig!.paginationParamName}
               layerTemplate={layer._filterConfig!.layerTemplate}
               collectionLayerClasses={layer._filterConfig!.collectionLayerClasses}
               collectionLayerTag={layer._filterConfig!.collectionLayerTag}

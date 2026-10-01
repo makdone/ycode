@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import SettingsPanel from './SettingsPanel';
 import type { Layer, CollectionPaginationConfig } from '@/types';
 import { getCollectionVariable } from '@/lib/layer-utils';
+import { paginationParamKey, sanitizePaginationParamName, stripLayerPrefix } from '@/lib/pagination-url-utils';
 
 interface CollectionPaginationSettingsProps {
   layer: Layer | null;
@@ -40,15 +41,19 @@ export default function CollectionPaginationSettings({
   const isEnabled = pagination?.enabled ?? false;
   const mode = pagination?.mode ?? 'pages';
   const itemsPerPage = pagination?.items_per_page ?? 10;
+  const paramName = pagination?.param_name ?? '';
 
   // Update pagination config
   const updatePagination = useCallback((updates: Partial<CollectionPaginationConfig>) => {
     if (!layer || !collectionVariable) return;
 
+    // Spread the existing config so editing one field never drops the others
+    // (param name, stylable layer configs).
     const newPagination: CollectionPaginationConfig = {
-      enabled: pagination?.enabled ?? false,
-      mode: pagination?.mode ?? 'pages',
-      items_per_page: pagination?.items_per_page ?? 10,
+      enabled: false,
+      mode: 'pages',
+      items_per_page: 10,
+      ...pagination,
       ...updates,
     };
 
@@ -79,6 +84,13 @@ export default function CollectionPaginationSettings({
     if (!isNaN(value) && value > 0) {
       updatePagination({ items_per_page: value });
     }
+  };
+
+  // Readable page param. Stored without the fixed `p_` prefix, and sanitized
+  // here so an invalid name can never reach a URL.
+  const handleParamNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const sanitized = sanitizePaginationParamName(e.target.value);
+    updatePagination({ param_name: sanitized || undefined });
   };
 
   if (!layer || !collectionVariable) {
@@ -142,6 +154,22 @@ export default function CollectionPaginationSettings({
                 className="w-full"
               />
             </div>
+
+            {/* URL parameter name */}
+            {mode === 'pages' && (
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs text-muted-foreground">URL parameter</Label>
+                <Input
+                  value={paramName}
+                  onChange={handleParamNameChange}
+                  placeholder={stripLayerPrefix(layer.id)}
+                  className="w-full"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  {`Page 2 will be ?${paginationParamKey(layer.id, paramName)}=2`}
+                </p>
+              </div>
+            )}
           </>
         )}
       </div>

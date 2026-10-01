@@ -1,12 +1,17 @@
 import { notFound, redirect, permanentRedirect } from 'next/navigation';
 import { unstable_noStore } from 'next/cache';
-import { fetchPageByPath, fetchErrorPage, PaginationContext } from '@/lib/page-fetcher';
+import type { Metadata } from 'next';
+import { fetchPageByPath, fetchErrorPage } from '@/lib/page-fetcher';
 import PageRenderer from '@/components/PageRenderer';
+import PaginationSeoLinks from '@/components/PaginationSeoLinks';
 import PasswordForm from '@/components/PasswordForm';
-import { fetchGlobalPageSettings } from '@/lib/generate-page-metadata';
+import { fetchGlobalPageSettings, generatePageMetadata } from '@/lib/generate-page-metadata';
 import { getSettingByKey } from '@/lib/repositories/settingsRepository';
 import { parseAuthCookie, getPasswordProtection, fetchFoldersForAuth } from '@/lib/page-auth';
+import { getPaginationContext, toQueryString } from '@/lib/pagination-context';
+import { buildCanonicalPaginationQueryString } from '@/lib/pagination-url-utils';
 import { matchRedirect } from '@/lib/redirect-utils';
+import { getSiteBaseUrl } from '@/lib/url-utils';
 import type { Redirect as RedirectType } from '@/types';
 
 // Internal pagination path: always dynamic/no-store.
@@ -37,30 +42,10 @@ export default async function DynamicSlugPage({ params, searchParams }: DynamicS
     }
   }
 
-  const pageNumbers: Record<string, number> = {};
-  for (const [key, value] of Object.entries(resolvedSearchParams)) {
-    if (key.startsWith('p_') && typeof value === 'string') {
-      const pageNum = parseInt(value, 10);
-      if (!isNaN(pageNum) && pageNum >= 1) {
-        // The `p_` param carries the layer id with its `lyr-` prefix stripped.
-        // Native cloud layers are `lyr-`-prefixed, but migrated (legacy) layers
-        // use bare uids — register both forms so `resolveCollectionLayers`,
-        // which looks up `pageNumbers[layer.id]`, matches whichever the layer
-        // actually uses (otherwise the page number is dropped and the list
-        // always renders page 1).
-        const bareId = key.slice(2).replace(/^lyr-/, '');
-        pageNumbers[bareId] = pageNum;
-        pageNumbers[`lyr-${bareId}`] = pageNum;
-      }
-    }
-  }
-
   unstable_noStore();
 
-  const paginationContext: PaginationContext = {
-    pageNumbers,
-    defaultPage: 1,
-  };
+  const queryString = toQueryString(resolvedSearchParams);
+  const paginationContext = getPaginationContext(currentPath, queryString);
 
   const [data, globalSettings] = await Promise.all([
     fetchPageByPath(slugPath, true, paginationContext),
@@ -126,23 +111,84 @@ export default async function DynamicSlugPage({ params, searchParams }: DynamicS
   }
 
   return (
-    <PageRenderer
-      page={page}
-      layers={pageLayers.layers || []}
-      components={components}
-      generatedCss={globalSettings.publishedCss || undefined}
-      colorVariablesCss={globalSettings.colorVariablesCss || undefined}
-      collectionItem={collectionItem}
-      collectionFields={collectionFields}
-      pageCollectionSortedItemIds={pageCollectionSortedItemIds}
-      pageCollectionSortedItemSlugs={pageCollectionSortedItemSlugs}
-      locale={locale}
-      availableLocales={availableLocales}
-      translations={translations}
-      gaMeasurementId={globalSettings.gaMeasurementId}
-      globalCustomCodeHead={globalSettings.globalCustomCodeHead}
-      globalCustomCodeBody={globalSettings.globalCustomCodeBody}
-      ycodeBadge={globalSettings.ycodeBadge}
-    />
+    <>
+      <PaginationSeoLinks
+        layers={pageLayers.layers || []}
+        basePath={currentPath}
+        queryString={queryString}
+        baseUrl={getSiteBaseUrl({ globalCanonicalUrl: globalSettings.globalCanonicalUrl })}
+      />
+      <PageRenderer
+        page={page}
+        layers={pageLayers.layers || []}
+        components={components}
+        generatedCss={globalSettings.publishedCss || undefined}
+        colorVariablesCss={globalSettings.colorVariablesCss || undefined}
+        collectionItem={collectionItem}
+        collectionFields={collectionFields}
+        pageCollectionSortedItemIds={pageCollectionSortedItemIds}
+        pageCollectionSortedItemSlugs={pageCollectionSortedItemSlugs}
+        locale={locale}
+        availableLocales={availableLocales}
+        translations={translations}
+        gaMeasurementId={globalSettings.gaMeasurementId}
+        globalCustomCodeHead={globalSettings.globalCustomCodeHead}
+        globalCustomCodeBody={globalSettings.globalCustomCodeBody}
+        ycodeBadge={globalSettings.ycodeBadge}
+      />
+    </>
   );
+}
+
+/**
+ * Paginated pages are served from this route, so they need the same metadata as
+ * the statically rendered first page — without it pages 2+ fall back to the
+ * layout's generic title and carry no canonical. The canonical keeps the `p_*`
+ * params so each page self-canonicalizes.
+ */
+export async function generateMetadata({ params, searchParams }: DynamicSlugPageProps): Promise<Metadata> {
+  const { slug } = await params;
+  const resolvedSearchParams = await searchParams;
+
+  const slugPath = Array.isArray(slug) ? slug.join('/') : slug;
+  const queryString = toQueryString(resolvedSearchParams);
+  const paginationContext = getPaginationContext(`/${slugPath}`, queryString);
+
+  const [data, globalSettings] = await Promise.all([
+    fetchPageByPath(slugPath, true, paginationContext),
+    fetchGlobalPageSettings(),
+  ]);
+
+  if (!data) {
+    return {
+      title: 'Page Not Found',
+      robots: { index: false, follow: false },
+    };
+  }
+
+  // Don't leak metadata for protected pages — the page component gates access.
+  const folders = await fetchFoldersForAuth(true);
+  if (getPasswordProtection(data.page, folders, null).isProtected) {
+    return {
+      title: 'Password Protected',
+      description: 'This page is password protected.',
+      robots: { index: false, follow: false },
+    };
+  }
+
+  const metadata = await generatePageMetadata(data.page, {
+    fallbackTitle: slugPath.charAt(0).toUpperCase() + slugPath.slice(1),
+    collectionItem: data.collectionItem,
+    pagePath: `/${slugPath}`,
+    pageQuery: buildCanonicalPaginationQueryString(data.pageLayers.layers || [], queryString),
+    globalSeoSettings: globalSettings,
+    translations: data.translations,
+  });
+
+  const baseUrl = getSiteBaseUrl({ globalCanonicalUrl: globalSettings.globalCanonicalUrl });
+  if (baseUrl) {
+    try { metadata.metadataBase = new URL(baseUrl); } catch { /* invalid URL */ }
+  }
+
+  return metadata;
 }

@@ -26,6 +26,11 @@ export interface PaginationContext {
   pageNumbers?: Record<string, number>;
   // Default page number for all collection layers (from URL ?page=N)
   defaultPage?: number;
+  // Public path of the current request (`/news`). Required to server-render
+  // crawlable pagination links; omitted (e.g. in the editor) they stay buttons.
+  basePath?: string;
+  // Current query string, whose other params pagination links preserve
+  queryString?: string;
 }
 
 import { resolveRefCollectionItemId, generateLinkHref, isLinkAtCollectionBoundary, isLinkToCurrentPage, parseCollectionLinkValue, extractCrossCollectionItemIds } from '@/lib/link-utils';
@@ -34,6 +39,7 @@ import { getLinkSettingsFromMark } from '@/lib/tiptap-extensions/link-settings';
 import { SWIPER_CLASS_MAP, SWIPER_DATA_ATTR_MAP, SLIDER_BUTTON_ARIA_LABELS, isSliderChromeButton } from '@/lib/slider-constants';
 import { resolveInlineVariables, resolveInlineVariablesFromData } from '@/lib/inline-variables';
 import { buildPaginationNumbers, getPaginationLayerKind, hasPaginationVariables, paginationTextVariableToTemplate, resolvePaginationTextVariable } from '@/lib/pagination-text-utils';
+import { buildPaginationLinkAttrs, collectPaginationMeta, resolveCurrentPage } from '@/lib/pagination-url-utils';
 import { formatFieldValue, resolveFieldFromSources } from '@/lib/cms-variables-utils';
 import { buildLayerTranslationKey, getTranslationByKey, hasValidTranslationValue, getTranslationValue, injectTranslatedText, applyCmsTranslations, translateComponentOverrides } from '@/lib/localisation-utils';
 import { formatDateFieldsInItemValues } from '@/lib/date-format-utils';
@@ -2538,7 +2544,7 @@ export async function resolveCollectionLayers(
             let multiAssetCurrentPage = 1;
             if (isMultiAssetPaginated) {
               const itemsPerPage = multiAssetPagination!.items_per_page || 10;
-              multiAssetCurrentPage = paginationContext?.pageNumbers?.[layer.id]
+              multiAssetCurrentPage = resolveCurrentPage(paginationContext?.pageNumbers, layer.id, multiAssetPagination!.param_name)
                 ?? paginationContext?.defaultPage
                 ?? 1;
               multiAssetLimit = itemsPerPage;
@@ -2659,6 +2665,7 @@ export async function resolveCollectionLayers(
                 layerId: layer.id,
                 collectionId: collectionVariable.id,
                 mode: multiAssetPagination.mode,
+                paramName: multiAssetPagination.param_name,
                 itemIds: assetIds,
                 isPublished,
                 // No sort: multi-asset order is the image order in the field.
@@ -2704,7 +2711,7 @@ export async function resolveCollectionLayers(
           if (isPaginated) {
             const itemsPerPage = paginationConfig.items_per_page || 10;
             // Get page number from context (either specific to this layer or default)
-            currentPage = paginationContext?.pageNumbers?.[layer.id]
+            currentPage = resolveCurrentPage(paginationContext?.pageNumbers, layer.id, paginationConfig.param_name)
               ?? paginationContext?.defaultPage
               ?? 1;
             limit = itemsPerPage;
@@ -2941,6 +2948,7 @@ export async function resolveCollectionLayers(
               layerId: layer.id,
               collectionId: collectionVariable.id,
               mode: paginationConfig.mode, // 'pages' or 'load_more'
+              paramName: paginationConfig.param_name,
               itemIds: allowedItemIds, // For multi-reference filtering in load_more
               // Store the original layer template for load_more client-side rendering
               layerTemplate: paginationConfig.mode === 'load_more' ? layer.children : undefined,
@@ -2996,6 +3004,7 @@ export async function resolveCollectionLayers(
               maxTotal,
               baseOffset,
               paginationMode: isPaginated ? paginationConfig.mode : undefined,
+              paginationParamName: isPaginated ? paginationConfig.param_name : undefined,
               layerTemplate: layer.children || [],
               collectionLayerClasses: Array.isArray(layer.classes) ? layer.classes : (layer.classes ? [layer.classes] : []),
               collectionLayerTag: layer.name || 'div',
@@ -3217,19 +3226,7 @@ export async function resolveCollectionLayers(
   const result = await Promise.all(layers.map(layer => resolveLayer(layer, parentItemValues, initialLayerDataMap, parentCollectionItemId)));
 
   // Collect pagination metadata from all fragments
-  const paginationMetaMap: Record<string, CollectionPaginationMeta> = {};
-  function collectPaginationMeta(layerList: Layer[]) {
-    for (const layer of layerList) {
-      if (layer._paginationMeta) {
-        const originalId = layer.id.replace('-fragment', '');
-        paginationMetaMap[originalId] = layer._paginationMeta;
-      }
-      if (layer.children) {
-        collectPaginationMeta(layer.children);
-      }
-    }
-  }
-  collectPaginationMeta(result);
+  const paginationMetaMap = collectPaginationMeta(result);
 
   // Update pagination sibling layers with correct meta
   function updatePaginationSiblings(layerList: Layer[]): Layer[] {
@@ -3238,7 +3235,7 @@ export async function resolveCollectionLayers(
       const paginationFor = layer.attributes?.['data-pagination-for'];
       if (paginationFor && paginationMetaMap[paginationFor]) {
         // Update this pagination layer with the meta
-        return updatePaginationLayerWithMeta(layer, paginationMetaMap[paginationFor]);
+        return updatePaginationLayerWithMeta(layer, paginationMetaMap[paginationFor], String(paginationFor), paginationContext);
       }
 
       // Recursively update children
@@ -3491,9 +3488,16 @@ function filterByVisibility(
  * Update a pagination layer with dynamic meta (page info text, button states)
  * @param layer - The pagination layer to update
  * @param meta - Pagination metadata
+ * @param collectionLayerId - Collection the controls paginate
+ * @param paginationContext - Request context supplying the URL to link to
  * @returns Updated layer with dynamic content
  */
-function updatePaginationLayerWithMeta(layer: Layer, meta: CollectionPaginationMeta): Layer {
+function updatePaginationLayerWithMeta(
+  layer: Layer,
+  meta: CollectionPaginationMeta,
+  collectionLayerId: string,
+  paginationContext?: PaginationContext,
+): Layer {
   const { currentPage, totalPages, totalItems, itemsPerPage, mode } = meta;
 
   // Deep clone to avoid mutation
@@ -3508,6 +3512,27 @@ function updatePaginationLayerWithMeta(layer: Layer, meta: CollectionPaginationM
   }
 
   const numbers = buildPaginationNumbers(meta);
+
+  /**
+   * Render a prev/next control as a real `<a href>` so crawlers can follow it.
+   * The client runtime still intercepts plain clicks for the loading state.
+   */
+  function applyPaginationLink(l: Layer, direction: 'prev' | 'next'): void {
+    const link = buildPaginationLinkAttrs({
+      direction,
+      meta,
+      collectionLayerId,
+      basePath: paginationContext?.basePath,
+      queryString: paginationContext?.queryString,
+    });
+
+    if (!link) return;
+
+    l.settings = { ...l.settings, tag: link.tag };
+    l.attributes = l.attributes || {};
+    l.attributes.href = link.href;
+    l.attributes.rel = link.rel;
+  }
 
   // Helper to recursively update layers
   function updateLayerRecursive(l: Layer): void {
@@ -3547,6 +3572,8 @@ function updatePaginationLayerWithMeta(layer: Layer, meta: CollectionPaginationM
         l.classes = Array.isArray(l.classes)
           ? [...l.classes, 'opacity-50', 'cursor-not-allowed']
           : `${l.classes || ''} opacity-50 cursor-not-allowed`;
+      } else {
+        applyPaginationLink(l, 'prev');
       }
     }
 
@@ -3560,6 +3587,8 @@ function updatePaginationLayerWithMeta(layer: Layer, meta: CollectionPaginationM
         l.classes = Array.isArray(l.classes)
           ? [...l.classes, 'opacity-50', 'cursor-not-allowed']
           : `${l.classes || ''} opacity-50 cursor-not-allowed`;
+      } else {
+        applyPaginationLink(l, 'next');
       }
     }
 

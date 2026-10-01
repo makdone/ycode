@@ -59,6 +59,12 @@ export interface GenerateMetadataOptions {
   collectionItem?: CollectionItemWithValues;
   /** Current page path for canonical URL */
   pagePath?: string;
+  /**
+   * Query string appended to the canonical and og:url. Paginated collection
+   * pages pass their `p_*` params so each page self-canonicalizes instead of
+   * claiming page 1's URL.
+   */
+  pageQuery?: string;
   /** Pre-fetched global SEO settings (avoids duplicate fetches) */
   globalSeoSettings?: GlobalSeoSettings;
   /** Tenant ID for multi-tenant deployments */
@@ -267,7 +273,7 @@ export async function generatePageMetadata(
   page: Page,
   options: GenerateMetadataOptions = {}
 ): Promise<Metadata> {
-  const { isPreview = false, fallbackTitle, fallbackDescription, collectionItem, pagePath, primaryDomainUrl, translations } = options;
+  const { isPreview = false, fallbackTitle, fallbackDescription, collectionItem, pagePath, pageQuery, primaryDomainUrl, translations } = options;
 
   const seo = page.settings?.seo;
   const isErrorPage = page.error_page !== null;
@@ -320,11 +326,12 @@ export async function generatePageMetadata(
       primaryDomainUrl,
     });
 
+    const suffix = pageQuery ? `?${pageQuery}` : '';
     pageUrl = pagePath === undefined
       ? undefined
       : siteBaseUrl
-        ? buildAbsolutePageUrl(siteBaseUrl, pagePath)
-        : pagePath;
+        ? `${buildAbsolutePageUrl(siteBaseUrl, pagePath)}${suffix}`
+        : `${pagePath}${suffix}`;
 
     // Add Google Site Verification meta tag
     if (seoSettings.googleSiteVerification) {

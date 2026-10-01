@@ -9,6 +9,7 @@
 
 import type { Component, Layer } from '@/types';
 import { collectKeptHiddenLayerIds } from '@/lib/animation-utils';
+import { extractSafeTailwindCandidates } from '@/lib/tailwind-candidate-utils';
 import { DEFAULT_TEXT_STYLES } from '@/lib/text-format-utils';
 import { TAILWIND_CUSTOM_VARIANTS } from '@/lib/tailwind-custom-variants';
 
@@ -23,18 +24,19 @@ function extractClassesFromLayers(layers: Layer[]): Set<string> {
   // Hidden layers kept in HTML (reveal interaction / keepInHtml) render collapsed, so their classes are needed.
   const keptHidden = collectKeptHiddenLayerIds(layers);
 
-  // Helper to extract classes from a string or array
+  // Helper to extract classes from a string or array. Malformed tokens are
+  // dropped so they can't produce a stylesheet-truncating declaration.
   const extractClasses = (classValue: string | string[] | undefined) => {
     if (!classValue) return;
 
     if (Array.isArray(classValue)) {
       classValue.forEach(cls => {
         if (cls && typeof cls === 'string') {
-          cls.split(/\s+/).forEach(c => c.trim() && classes.add(c.trim()));
+          extractSafeTailwindCandidates(cls).forEach(c => classes.add(c));
         }
       });
     } else if (typeof classValue === 'string') {
-      classValue.split(/\s+/).forEach(cls => cls.trim() && classes.add(cls.trim()));
+      extractSafeTailwindCandidates(classValue).forEach(c => classes.add(c));
     }
   };
 

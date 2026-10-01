@@ -552,6 +552,7 @@ export interface Layer {
     // composes offset with pagination the same way SSR does.
     baseOffset?: number;
     paginationMode?: 'pages' | 'load_more';
+    paginationParamName?: string;
     layerTemplate: Layer[];
     collectionLayerClasses?: string[];
     collectionLayerTag?: string;
@@ -1521,6 +1522,9 @@ export interface CollectionPaginationConfig {
   enabled: boolean;
   mode: 'pages' | 'load_more';
   items_per_page: number;
+  // Readable suffix for the page query param (`p_news` instead of `p_{layerId}`).
+  // The `p_` prefix is fixed — the proxy detects paginated requests by it.
+  param_name?: string;
   // Stylable pagination layer configurations
   wrapperLayer?: PaginationLayerConfig;
   prevButtonLayer?: PaginationLayerConfig;
@@ -1552,6 +1556,8 @@ export interface CollectionPaginationMeta {
   layerId: string; // To identify which collection layer this belongs to
   collectionId: string; // Collection ID for fetching more pages
   mode?: 'pages' | 'load_more'; // Pagination mode
+  paramName?: string; // Configured query param suffix, if any
+
   itemIds?: string[]; // For multi-reference filtering in load_more mode
   layerTemplate?: Layer[]; // Layer template for rendering new items in load_more mode
   // Full collection layer (sans children) — used by load-more (and filter)

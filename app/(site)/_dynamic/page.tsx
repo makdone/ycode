@@ -1,12 +1,17 @@
 import { unstable_noStore } from 'next/cache';
 import Link from 'next/link';
-import { fetchHomepage, fetchErrorPage, PaginationContext } from '@/lib/page-fetcher';
+import type { Metadata } from 'next';
+import { fetchHomepage, fetchErrorPage } from '@/lib/page-fetcher';
 import PageRenderer from '@/components/PageRenderer';
+import PaginationSeoLinks from '@/components/PaginationSeoLinks';
 import PasswordForm from '@/components/PasswordForm';
-import { fetchGlobalPageSettings } from '@/lib/generate-page-metadata';
+import { fetchGlobalPageSettings, generatePageMetadata } from '@/lib/generate-page-metadata';
 import { parseAuthCookie, getPasswordProtection, fetchFoldersForAuth } from '@/lib/page-auth';
+import { getPaginationContext, toQueryString } from '@/lib/pagination-context';
+import { buildCanonicalPaginationQueryString } from '@/lib/pagination-url-utils';
 import { getSettingByKey } from '@/lib/repositories/settingsRepository';
 import { generateColorVariablesCss } from '@/lib/repositories/colorVariableRepository';
+import { getSiteBaseUrl } from '@/lib/url-utils';
 
 // Internal pagination path: always dynamic/no-store.
 export const dynamic = 'force-dynamic';
@@ -19,30 +24,10 @@ interface DynamicHomeProps {
 export default async function DynamicHome({ searchParams }: DynamicHomeProps) {
   const resolvedSearchParams = await searchParams;
 
-  const pageNumbers: Record<string, number> = {};
-  for (const [key, value] of Object.entries(resolvedSearchParams)) {
-    if (key.startsWith('p_') && typeof value === 'string') {
-      const pageNum = parseInt(value, 10);
-      if (!isNaN(pageNum) && pageNum >= 1) {
-        // The `p_` param carries the layer id with its `lyr-` prefix stripped.
-        // Native cloud layers are `lyr-`-prefixed, but migrated (legacy) layers
-        // use bare uids — register both forms so `resolveCollectionLayers`,
-        // which looks up `pageNumbers[layer.id]`, matches whichever the layer
-        // actually uses (otherwise the page number is dropped and the list
-        // always renders page 1).
-        const bareId = key.slice(2).replace(/^lyr-/, '');
-        pageNumbers[bareId] = pageNum;
-        pageNumbers[`lyr-${bareId}`] = pageNum;
-      }
-    }
-  }
-
   unstable_noStore();
 
-  const paginationContext: PaginationContext = {
-    pageNumbers,
-    defaultPage: 1,
-  };
+  const queryString = toQueryString(resolvedSearchParams);
+  const paginationContext = getPaginationContext('/', queryString);
 
   const data = await fetchHomepage(true, paginationContext);
 
@@ -119,19 +104,76 @@ export default async function DynamicHome({ searchParams }: DynamicHomeProps) {
   const globalSettings = await fetchGlobalPageSettings();
 
   return (
-    <PageRenderer
-      page={data.page}
-      layers={data.pageLayers.layers || []}
-      components={[]}
-      generatedCss={globalSettings.publishedCss || undefined}
-      colorVariablesCss={globalSettings.colorVariablesCss || undefined}
-      locale={data.locale}
-      availableLocales={data.availableLocales}
-      translations={data.translations}
-      gaMeasurementId={globalSettings.gaMeasurementId}
-      globalCustomCodeHead={globalSettings.globalCustomCodeHead}
-      globalCustomCodeBody={globalSettings.globalCustomCodeBody}
-      ycodeBadge={globalSettings.ycodeBadge}
-    />
+    <>
+      <PaginationSeoLinks
+        layers={data.pageLayers.layers || []}
+        basePath="/"
+        queryString={queryString}
+        baseUrl={getSiteBaseUrl({ globalCanonicalUrl: globalSettings.globalCanonicalUrl })}
+      />
+      <PageRenderer
+        page={data.page}
+        layers={data.pageLayers.layers || []}
+        components={[]}
+        generatedCss={globalSettings.publishedCss || undefined}
+        colorVariablesCss={globalSettings.colorVariablesCss || undefined}
+        locale={data.locale}
+        availableLocales={data.availableLocales}
+        translations={data.translations}
+        gaMeasurementId={globalSettings.gaMeasurementId}
+        globalCustomCodeHead={globalSettings.globalCustomCodeHead}
+        globalCustomCodeBody={globalSettings.globalCustomCodeBody}
+        ycodeBadge={globalSettings.ycodeBadge}
+      />
+    </>
   );
+}
+
+/**
+ * Paginated homepages are served from this route, so they need the same
+ * metadata as the statically rendered first page — without it pages 2+ fall
+ * back to the layout's generic title and carry no canonical. The canonical
+ * keeps the `p_*` params so each page self-canonicalizes.
+ */
+export async function generateMetadata({ searchParams }: DynamicHomeProps): Promise<Metadata> {
+  const resolvedSearchParams = await searchParams;
+  const queryString = toQueryString(resolvedSearchParams);
+  const paginationContext = getPaginationContext('/', queryString);
+
+  const [data, globalSettings] = await Promise.all([
+    fetchHomepage(true, paginationContext),
+    fetchGlobalPageSettings(),
+  ]);
+
+  if (!data) {
+    return {
+      title: 'Ycode',
+      description: 'Built with Ycode',
+    };
+  }
+
+  // Don't leak metadata for protected pages — the page component gates access.
+  const folders = await fetchFoldersForAuth(true);
+  if (getPasswordProtection(data.page, folders, null).isProtected) {
+    return {
+      title: 'Password Protected',
+      description: 'This page is password protected.',
+      robots: { index: false, follow: false },
+    };
+  }
+
+  const metadata = await generatePageMetadata(data.page, {
+    fallbackTitle: 'Home',
+    pagePath: '/',
+    pageQuery: buildCanonicalPaginationQueryString(data.pageLayers?.layers || [], queryString),
+    globalSeoSettings: globalSettings,
+    translations: data.translations,
+  });
+
+  const baseUrl = getSiteBaseUrl({ globalCanonicalUrl: globalSettings.globalCanonicalUrl });
+  if (baseUrl) {
+    try { metadata.metadataBase = new URL(baseUrl); } catch { /* invalid URL */ }
+  }
+
+  return metadata;
 }

@@ -9,8 +9,9 @@ import { GLOBAL_SETTINGS_TAG } from '@/lib/cache-tags';
 import { buildSlugPath } from '@/lib/page-utils';
 import { generatePageMetadata, fetchGlobalPageSettings } from '@/lib/generate-page-metadata';
 import { fetchHomepage, fetchPageByPath, fetchPageByPathForMetadata, fetchErrorPage, splitPageData, reassemblePageData, slimPageData } from '@/lib/page-fetcher';
-import type { PageData } from '@/lib/page-fetcher';
+import type { PageData, PaginationContext } from '@/lib/page-fetcher';
 import PageRenderer from '@/components/PageRenderer';
+import PaginationSeoLinks from '@/components/PaginationSeoLinks';
 import PasswordForm from '@/components/PasswordForm';
 import { getSettingByKey } from '@/lib/repositories/settingsRepository';
 import { parseAuthCookie, getPasswordProtection, fetchFoldersForAuth } from '@/lib/page-auth';
@@ -169,10 +170,15 @@ async function fetchPublishedPageWithLayers(slugPath: string) {
   const tags = [`route-/${slugPath}`, 'all-pages'];
   const opts = { tags, revalidate: false as const };
 
+  // `basePath` lets paginated collections server-render crawlable links to
+  // page 2 (this route only ever renders page 1 — `p_*` params are rewritten
+  // to the force-dynamic route by the proxy).
+  const paginationContext: PaginationContext = { basePath: `/${slugPath}` };
+
   const [core, layers] = await Promise.all([
     unstable_cache(
       async () => {
-        const data = await fetchPageByPath(slugPath, true);
+        const data = await fetchPageByPath(slugPath, true, paginationContext);
         if (!data) return null;
         return splitPageData(data).core;
       },
@@ -181,7 +187,7 @@ async function fetchPublishedPageWithLayers(slugPath: string) {
     )(),
     unstable_cache(
       async () => {
-        const data = await fetchPageByPath(slugPath, true);
+        const data = await fetchPageByPath(slugPath, true, paginationContext);
         if (!data) return null;
         return splitPageData(data).layers;
       },
@@ -197,11 +203,12 @@ async function fetchPublishedPageWithLayers(slugPath: string) {
 async function fetchPublishedHomepage() {
   const tags = ['route-/', 'all-pages'];
   const opts = { tags, revalidate: false as const };
+  const paginationContext: PaginationContext = { basePath: '/' };
 
   const [core, layers] = await Promise.all([
     unstable_cache(
       async () => {
-        const data = await fetchHomepage(true);
+        const data = await fetchHomepage(true, paginationContext);
         if (!data) return null;
         return splitPageData(data as PageData).core;
       },
@@ -210,7 +217,7 @@ async function fetchPublishedHomepage() {
     )(),
     unstable_cache(
       async () => {
-        const data = await fetchHomepage(true);
+        const data = await fetchHomepage(true, paginationContext);
         if (!data) return null;
         return splitPageData(data as PageData).layers;
       },
@@ -429,24 +436,31 @@ export default async function Page({ params }: PageProps) {
   }
 
   return (
-    <PageRenderer
-      page={page}
-      layers={pageLayers.layers || []}
-      components={components}
-      generatedCss={cssForPage}
-      colorVariablesCss={globalSettings.colorVariablesCss || undefined}
-      collectionItem={collectionItem}
-      collectionFields={collectionFields}
-      pageCollectionSortedItemIds={pageCollectionSortedItemIds}
-      pageCollectionSortedItemSlugs={pageCollectionSortedItemSlugs}
-      locale={locale}
-      availableLocales={availableLocales}
-      translations={translations}
-      gaMeasurementId={globalSettings.gaMeasurementId}
-      globalCustomCodeHead={globalSettings.globalCustomCodeHead}
-      globalCustomCodeBody={globalSettings.globalCustomCodeBody}
-      ycodeBadge={globalSettings.ycodeBadge}
-    />
+    <>
+      <PaginationSeoLinks
+        layers={pageLayers.layers || []}
+        basePath={currentPath}
+        baseUrl={getSiteBaseUrl({ globalCanonicalUrl: globalSettings.globalCanonicalUrl })}
+      />
+      <PageRenderer
+        page={page}
+        layers={pageLayers.layers || []}
+        components={components}
+        generatedCss={cssForPage}
+        colorVariablesCss={globalSettings.colorVariablesCss || undefined}
+        collectionItem={collectionItem}
+        collectionFields={collectionFields}
+        pageCollectionSortedItemIds={pageCollectionSortedItemIds}
+        pageCollectionSortedItemSlugs={pageCollectionSortedItemSlugs}
+        locale={locale}
+        availableLocales={availableLocales}
+        translations={translations}
+        gaMeasurementId={globalSettings.gaMeasurementId}
+        globalCustomCodeHead={globalSettings.globalCustomCodeHead}
+        globalCustomCodeBody={globalSettings.globalCustomCodeBody}
+        ycodeBadge={globalSettings.ycodeBadge}
+      />
+    </>
   );
 }
 

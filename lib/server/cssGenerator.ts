@@ -10,13 +10,11 @@
  * each page stores its own generated_css so design changes are page-scoped.
  */
 
-import { readFile } from 'node:fs/promises';
-import { join, dirname } from 'node:path';
-import { compile } from 'tailwindcss';
 import type { Layer, Component } from '@/types';
 import { collectKeptHiddenLayerIds } from '@/lib/animation-utils';
 import { DEFAULT_TEXT_STYLES } from '@/lib/text-format-utils';
-import { TAILWIND_CUSTOM_VARIANTS } from '@/lib/tailwind-custom-variants';
+import { extractSafeTailwindCandidates } from '@/lib/tailwind-candidate-utils';
+import { compileTailwindCss } from '@/lib/server/tailwind-compiler';
 import { getAllDraftLayers, getDraftLayers, getEmbeddedComponentIdsForCollections } from '@/lib/repositories/pageLayersRepository';
 import { getAllComponents } from '@/lib/repositories/componentRepository';
 import { collectComponentIds } from '@/lib/component-utils';
@@ -33,17 +31,20 @@ function extractClassesFromLayers(layers: Layer[]): Set<string> {
   // Hidden layers kept in HTML (reveal interaction / keepInHtml) render collapsed, so their classes are needed.
   const keptHidden = collectKeptHiddenLayerIds(layers);
 
+  // Malformed tokens (unbalanced brackets, embedded whitespace) are dropped
+  // here: Tailwind would compile them into a declaration that truncates the
+  // whole stylesheet in the browser.
   const extractClasses = (classValue: string | string[] | undefined) => {
     if (!classValue) return;
 
     if (Array.isArray(classValue)) {
       classValue.forEach(cls => {
         if (cls && typeof cls === 'string') {
-          cls.split(/\s+/).forEach(c => c.trim() && classes.add(c.trim()));
+          extractSafeTailwindCandidates(cls).forEach(c => classes.add(c));
         }
       });
     } else if (typeof classValue === 'string') {
-      classValue.split(/\s+/).forEach(cls => cls.trim() && classes.add(cls.trim()));
+      extractSafeTailwindCandidates(classValue).forEach(c => classes.add(c));
     }
   };
 
@@ -80,42 +81,15 @@ function extractClassesFromLayers(layers: Layer[]): Set<string> {
   return classes;
 }
 
-let compilerCache: { build: (candidates: string[]) => string } | null = null;
-
-/**
- * Get or create a cached Tailwind compiler instance.
- * The compiler only needs to be created once since we always
- * use the same Tailwind config (the default).
- */
-async function getCompiler() {
-  if (compilerCache) return compilerCache;
-
-  const twPath = join(process.cwd(), 'node_modules/tailwindcss/index.css');
-  const baseInput = await readFile(twPath, 'utf-8');
-  // Register custom variants (current:, disabled:) so user classes like
-  // `current:opacity-100` on slider bullets compile — mirrors the client
-  // generator and app/globals.css.
-  const input = `${baseInput}\n${TAILWIND_CUSTOM_VARIANTS}\n`;
-
-  compilerCache = await compile(input, {
-    base: process.cwd(),
-    async loadStylesheet(id: string, base: string) {
-      const fullPath = join(dirname(base), id);
-      const content = await readFile(fullPath, 'utf-8');
-      return { path: fullPath, content, base: dirname(fullPath) };
-    },
-  });
-
-  return compilerCache;
-}
-
 /**
  * Generate CSS from an array of Tailwind class names.
+ *
+ * Delegates to `compileTailwindCss`, which uses a fresh compiler per call so
+ * the output contains exactly these classes — never candidates left over from
+ * a previously compiled page.
  */
 async function compileCss(classNames: string[]): Promise<string> {
-  if (classNames.length === 0) return '/* No classes to generate */';
-  const compiler = await getCompiler();
-  return compiler.build(classNames);
+  return compileTailwindCss(classNames);
 }
 
 /**

@@ -15,6 +15,14 @@
  * Navigation uses window.location.href (not router.push) so the proxy
  * middleware can rewrite p_ params to the /dynamic route.
  *
+ * The current URL is read from window.location at click time rather than via
+ * useSearchParams/usePathname: both hooks suspend during a static prerender,
+ * and the Suspense boundary wrapping this component would then bake its
+ * fallback into the published HTML — leaving page 1 of every paginated
+ * collection with no server-rendered items. window.location is also the
+ * accurate source behind a rewrite, where usePathname returns the internal
+ * path.
+ *
  * Layout note: this component renders a zero-box fragment (a hidden marker
  * span + the SSR children) rather than a wrapping div. The collection's item
  * clones are emitted as direct children of the collection's layout element
@@ -25,12 +33,8 @@
  */
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { useSearchParams, usePathname } from 'next/navigation';
+import { buildPaginationHref } from '@/lib/pagination-url-utils';
 import type { CollectionPaginationMeta } from '@/types';
-
-function stripLayerPrefix(id: string): string {
-  return id.startsWith('lyr-') ? id.slice(4) : id;
-}
 
 interface PaginatedCollectionProps {
   children: React.ReactNode;
@@ -43,8 +47,6 @@ export default function PaginatedCollection({
   paginationMeta,
   collectionLayerId,
 }: PaginatedCollectionProps) {
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
   const [isPending, setIsPending] = useState(false);
   const markerRef = useRef<HTMLSpanElement>(null);
 
@@ -61,23 +63,20 @@ export default function PaginatedCollection({
   const navigateToPage = useCallback((page: number) => {
     if (page < 1 || page > totalPages) return;
 
-    const params = new URLSearchParams(searchParams.toString());
-    const paramKey = `p_${stripLayerPrefix(collectionLayerId)}`;
-
-    if (page === 1) {
-      params.delete(paramKey);
-    } else {
-      params.set(paramKey, String(page));
-    }
-
-    const newUrl = params.toString() ? `${pathname}?${params.toString()}` : pathname;
-
     setIsPending(true);
-    window.location.href = newUrl;
-  }, [pathname, searchParams, totalPages, collectionLayerId]);
+    window.location.href = buildPaginationHref({
+      basePath: window.location.pathname,
+      queryString: window.location.search.replace(/^\?/, ''),
+      collectionLayerId,
+      page,
+      paramName: paginationMeta.paramName,
+    });
+  }, [totalPages, collectionLayerId, paginationMeta.paramName]);
 
-  // Handle click events on pagination buttons (delegated at the document level,
-  // so no wrapper element is required).
+  // Handle click events on pagination controls (delegated at the document
+  // level, so no wrapper element is required). The controls are server-rendered
+  // as real links for crawlers, so the default navigation is prevented here to
+  // keep the loading state.
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
@@ -90,6 +89,9 @@ export default function PaginatedCollection({
 
       // Only handle clicks for this collection's pagination
       if (layerId !== collectionLayerId) return;
+
+      // Let the browser handle modified clicks (new tab/window) on the links
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
 
       e.preventDefault();
 
