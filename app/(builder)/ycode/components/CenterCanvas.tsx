@@ -66,7 +66,7 @@ import RichTextEditorSheet from './RichTextEditorSheet';
 import { buildPreviewAuthRevision, buildLocalizedSlugPath, buildLocalizedDynamicPageUrl } from '@/lib/page-utils';
 import { getTranslationValue, applyCmsTranslations, extractLayerTranslatableItemsShallow } from '@/lib/localisation-utils';
 import { cn } from '@/lib/utils';
-import { getCollectionVariable, canDeleteLayer, findLayerById, findParentCollectionLayer, canLayerHaveLink, updateLayerProps, removeRichTextSublayer, isRichTextLayer, getLayerCmsFieldBinding } from '@/lib/layer-utils';
+import { getCollectionVariable, canDeleteLayer, findLayerById, findParentCollectionLayer, canLayerHaveLink, updateLayerProps, removeRichTextSublayer, isRichTextLayer, getLayerCmsFieldBinding, INLINE_STYLE_KEYS } from '@/lib/layer-utils';
 import { CANVAS_BORDER, CANVAS_PADDING, updateViewportOverrides } from '@/lib/canvas-utils';
 import { BREAKPOINTS } from '@/lib/breakpoint-utils';
 import { buildFieldGroupsForLayer, flattenFieldGroups, filterFieldGroupsByType, SIMPLE_TEXT_FIELD_TYPES } from '@/lib/collection-field-utils';
@@ -1498,8 +1498,8 @@ const CenterCanvas = React.memo(function CenterCanvas({
         // Prefer the block-level style over structural inner elements (e.g.
         // paragraph inside blockquote), but keep inline marks and sub-block
         // styles like listItem that shouldn't be overridden by their container
-        const INNER_STYLE_KEYS = new Set(['bold', 'italic', 'underline', 'strike', 'link', 'subscript', 'superscript']);
-        if (blockLevelStyleKey && (!textStyleKey || !INNER_STYLE_KEYS.has(textStyleKey))) {
+        const innerStyleKeys = new Set(INLINE_STYLE_KEYS);
+        if (blockLevelStyleKey && (!textStyleKey || !innerStyleKeys.has(textStyleKey))) {
           textStyleKey = blockLevelStyleKey;
         }
       }

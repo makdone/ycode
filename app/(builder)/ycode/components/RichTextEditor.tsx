@@ -577,6 +577,11 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(({
       attributes: {
         class: cn(
           'w-full min-w-0 border border-transparent bg-input transition-[color,box-shadow] outline-none rounded-lg flex flex-col',
+          // Block nodes must keep their natural height: `overflow` on a flex
+          // item (the table wrapper) zeroes its automatic minimum size, so it
+          // would otherwise absorb all negative free space and collapse to 0px
+          // once the document outgrows a fixed-height editor.
+          '[&>*]:shrink-0',
           // Full variant gets `gap-3` for doc-style paragraph spacing; compact
           // variant (sidebar inputs / translation rows) matches the canvas,
           // which flattens multi-paragraph simple-text content into one

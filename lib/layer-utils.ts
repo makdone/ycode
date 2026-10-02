@@ -1073,6 +1073,7 @@ const STYLE_SUBLAYER_ICON_MAP: Record<string, string> = {
   superscript: 'superscript',
   subscript: 'subscript',
   link: 'link',
+  code: 'code',
   bulletList: 'listUnordered',
   orderedList: 'listOrdered',
   listItem: 'text',
@@ -1086,7 +1087,7 @@ const STYLE_SUBLAYER_ICON_MAP: Record<string, string> = {
 };
 
 /** Inline mark style keys shown for all text layers */
-const INLINE_STYLE_KEYS = ['bold', 'italic', 'underline', 'strike', 'superscript', 'subscript', 'link'];
+export const INLINE_STYLE_KEYS = ['bold', 'italic', 'underline', 'strike', 'superscript', 'subscript', 'link', 'code'];
 
 /**
  * Get text style sublayers for a layer.
