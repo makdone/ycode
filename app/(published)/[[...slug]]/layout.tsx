@@ -1,14 +1,20 @@
+import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import SiteDocumentLayout, { generateSiteMetadata } from '@/components/site-document-layout';
 import { fetchGlobalPageSettings } from '@/lib/generate-page-metadata';
+import { withCustom404Metadata } from '@/lib/not-found-metadata';
 import { resolveHtmlLang } from '@/lib/resolve-html-lang';
 import { getSiteBaseUrl } from '@/lib/url-utils';
-
-export const generateMetadata = generateSiteMetadata;
 
 interface PublishedLayoutProps {
   children: ReactNode;
   params: Promise<{ slug?: string[] }>;
+}
+
+export async function generateMetadata({ params }: PublishedLayoutProps): Promise<Metadata> {
+  const [siteMetadata, { slug }] = await Promise.all([generateSiteMetadata(), params]);
+
+  return withCustom404Metadata(slug?.join('/') ?? '', siteMetadata);
 }
 
 /**

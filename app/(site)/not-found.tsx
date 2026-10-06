@@ -1,23 +1,10 @@
 import Link from 'next/link';
-import { unstable_cache } from 'next/cache';
-import { fetchErrorPage, slimPageData } from '@/lib/page-fetcher';
+import { fetchCachedErrorPage } from '@/lib/published-page-cache';
 import { fetchGlobalPageSettings } from '@/lib/generate-page-metadata';
 import { getSettingByKey } from '@/lib/repositories/settingsRepository';
 import { tenantStore } from '@/lib/supabase-server';
 import PageRenderer from '@/components/PageRenderer';
 import YcodeBadge from '@/components/YcodeBadge';
-
-/** Cached lookup of the user's custom 404 page, invalidated on publish. */
-function fetchCachedCustom404(tenantId?: string) {
-  return unstable_cache(
-    async () => {
-      const data = await fetchErrorPage(404, true, tenantId);
-      return data ? slimPageData(data) : null;
-    },
-    ['error-404'],
-    { tags: ['all-pages'], revalidate: false }
-  )();
-}
 
 /**
  * 404 boundary for public pages. Renders the user's custom 404 page when one
@@ -27,7 +14,7 @@ function fetchCachedCustom404(tenantId?: string) {
 export default async function NotFound() {
   const tenantId = tenantStore.getStore();
 
-  const errorPageData = await fetchCachedCustom404(tenantId).catch(() => null);
+  const errorPageData = await fetchCachedErrorPage(404, tenantId).catch(() => null);
 
   if (errorPageData) {
     const globalSettings = await fetchGlobalPageSettings().catch(() => null);

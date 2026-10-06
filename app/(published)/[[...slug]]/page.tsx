@@ -7,8 +7,9 @@ import type { Metadata } from 'next';
 import { getSupabaseAdmin } from '@/lib/supabase-server';
 import { GLOBAL_SETTINGS_TAG } from '@/lib/cache-tags';
 import { buildSlugPath } from '@/lib/page-utils';
-import { generatePageMetadata, fetchGlobalPageSettings } from '@/lib/generate-page-metadata';
-import { fetchHomepage, fetchPageByPath, fetchPageByPathForMetadata, fetchErrorPage, splitPageData, reassemblePageData, slimPageData } from '@/lib/page-fetcher';
+import { generatePageMetadata, generateErrorPageMetadata, fetchGlobalPageSettings } from '@/lib/generate-page-metadata';
+import { fetchCachedErrorPage, fetchCachedPageForMetadata } from '@/lib/published-page-cache';
+import { fetchHomepage, fetchPageByPath, splitPageData, reassemblePageData } from '@/lib/page-fetcher';
 import type { PageData, PaginationContext } from '@/lib/page-fetcher';
 import PageRenderer from '@/components/PageRenderer';
 import PaginationSeoLinks from '@/components/PaginationSeoLinks';
@@ -230,14 +231,6 @@ async function fetchPublishedHomepage() {
   return reassemblePageData(core, layers || []);
 }
 
-async function fetchPublishedPageForMetadata(slugPath: string) {
-  return unstable_cache(
-    async () => fetchPageByPathForMetadata(slugPath, true),
-    [`metadata-/${slugPath}`],
-    { tags: [`route-/${slugPath}`, 'all-pages'], revalidate: false }
-  )();
-}
-
 async function fetchCachedRedirects(): Promise<RedirectType[] | null> {
   try {
     return await unstable_cache(
@@ -286,17 +279,6 @@ async function fetchCachedFoldersForAuth() {
   } catch {
     return [];
   }
-}
-
-async function fetchCachedErrorPage(errorCode: 401 | 404) {
-  return unstable_cache(
-    async () => {
-      const data = await fetchErrorPage(errorCode, true);
-      return data ? slimPageData(data) : null;
-    },
-    [`error-${errorCode}`],
-    { tags: ['all-pages'], revalidate: false }
-  )();
 }
 
 interface PageProps {
@@ -471,7 +453,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug?: st
   const isHomepage = slugPath === '';
 
   const [data, globalSettings] = await Promise.all([
-    isHomepage ? fetchPublishedHomepage() : fetchPublishedPageForMetadata(slugPath),
+    isHomepage ? fetchPublishedHomepage() : fetchCachedPageForMetadata(slugPath),
     fetchCachedGlobalSettings(),
   ]);
 
@@ -483,10 +465,13 @@ export async function generateMetadata({ params }: { params: Promise<{ slug?: st
       };
     }
 
-    return {
-      title: 'Page Not Found',
-      robots: { index: false, follow: false },
-    };
+    // The layout emits this same metadata into the flushed head (Next.js drops
+    // a page's metadata once it calls notFound()); keeping it here too means
+    // the streamed metadata the client applies doesn't contradict it.
+    const errorPageData = await fetchCachedErrorPage(404);
+    return generateErrorPageMetadata(404, errorPageData?.page ?? null, {
+      globalSeoSettings: globalSettings,
+    });
   }
 
   // Don't leak metadata for protected pages. Checking without cookies keeps
@@ -496,11 +481,10 @@ export async function generateMetadata({ params }: { params: Promise<{ slug?: st
   const protectionCheck = getPasswordProtection(data.page, folders, null);
 
   if (protectionCheck.isProtected) {
-    return {
-      title: 'Password Protected',
-      description: 'This page is password protected.',
-      robots: { index: false, follow: false },
-    };
+    const errorPageData = await fetchCachedErrorPage(401);
+    return generateErrorPageMetadata(401, errorPageData?.page ?? null, {
+      globalSeoSettings: globalSettings,
+    });
   }
 
   const routeTag = isHomepage ? 'route-/' : `route-/${slugPath}`;

@@ -422,3 +422,40 @@ export async function generatePageMetadata(
 
   return metadata;
 }
+
+/** Generic titles used when the site has no custom error page configured. */
+const ERROR_PAGE_FALLBACKS: Record<number, { title: string; description?: string }> = {
+  401: { title: 'Password Protected', description: 'This page is password protected.' },
+  404: { title: 'Page Not Found' },
+};
+
+/**
+ * Build metadata for an error response from the user's custom error page, so
+ * its SEO title and description reach the document head instead of a generic
+ * hardcoded one. Error pages are always noindex and carry no canonical
+ * (handled by `generatePageMetadata`).
+ *
+ * @param errorCode - HTTP status being served (401 or 404)
+ * @param errorPage - The custom error page, or null to use the generic fallback
+ */
+export async function generateErrorPageMetadata(
+  errorCode: number,
+  errorPage: Page | null,
+  options: Pick<GenerateMetadataOptions, 'globalSeoSettings' | 'tenantId'> = {}
+): Promise<Metadata> {
+  const fallback = ERROR_PAGE_FALLBACKS[errorCode] ?? { title: 'Error' };
+
+  if (!errorPage) {
+    return {
+      title: fallback.title,
+      ...(fallback.description ? { description: fallback.description } : {}),
+      robots: { index: false, follow: false },
+    };
+  }
+
+  return generatePageMetadata(errorPage, {
+    ...options,
+    fallbackTitle: fallback.title,
+    fallbackDescription: fallback.description,
+  });
+}

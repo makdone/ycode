@@ -2,15 +2,17 @@ import { notFound, redirect, permanentRedirect } from 'next/navigation';
 import { unstable_noStore } from 'next/cache';
 import type { Metadata } from 'next';
 import { fetchPageByPath, fetchErrorPage } from '@/lib/page-fetcher';
+import { fetchCachedErrorPage } from '@/lib/published-page-cache';
 import PageRenderer from '@/components/PageRenderer';
 import PaginationSeoLinks from '@/components/PaginationSeoLinks';
 import PasswordForm from '@/components/PasswordForm';
-import { fetchGlobalPageSettings, generatePageMetadata } from '@/lib/generate-page-metadata';
+import { fetchGlobalPageSettings, generateErrorPageMetadata, generatePageMetadata } from '@/lib/generate-page-metadata';
 import { getSettingByKey } from '@/lib/repositories/settingsRepository';
 import { parseAuthCookie, getPasswordProtection, fetchFoldersForAuth } from '@/lib/page-auth';
 import { getPaginationContext, toQueryString } from '@/lib/pagination-context';
 import { buildCanonicalPaginationQueryString } from '@/lib/pagination-url-utils';
 import { matchRedirect } from '@/lib/redirect-utils';
+import { getTenantIdFromHeaders } from '@/lib/supabase-server';
 import { getSiteBaseUrl } from '@/lib/url-utils';
 import type { Redirect as RedirectType } from '@/types';
 
@@ -154,26 +156,29 @@ export async function generateMetadata({ params, searchParams }: DynamicSlugPage
   const queryString = toQueryString(resolvedSearchParams);
   const paginationContext = getPaginationContext(`/${slugPath}`, queryString);
 
-  const [data, globalSettings] = await Promise.all([
+  const [data, globalSettings, resolvedTenantId] = await Promise.all([
     fetchPageByPath(slugPath, true, paginationContext),
     fetchGlobalPageSettings(),
+    getTenantIdFromHeaders(),
   ]);
+  const tenantId = resolvedTenantId ?? undefined;
 
   if (!data) {
-    return {
-      title: 'Page Not Found',
-      robots: { index: false, follow: false },
-    };
+    const errorPageData = await fetchCachedErrorPage(404, tenantId);
+    return generateErrorPageMetadata(404, errorPageData?.page ?? null, {
+      globalSeoSettings: globalSettings,
+      tenantId,
+    });
   }
 
   // Don't leak metadata for protected pages — the page component gates access.
   const folders = await fetchFoldersForAuth(true);
   if (getPasswordProtection(data.page, folders, null).isProtected) {
-    return {
-      title: 'Password Protected',
-      description: 'This page is password protected.',
-      robots: { index: false, follow: false },
-    };
+    const errorPageData = await fetchCachedErrorPage(401, tenantId);
+    return generateErrorPageMetadata(401, errorPageData?.page ?? null, {
+      globalSeoSettings: globalSettings,
+      tenantId,
+    });
   }
 
   const metadata = await generatePageMetadata(data.page, {
