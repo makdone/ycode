@@ -9,6 +9,7 @@ import { headers } from 'next/headers';
 import { getSettingsByKeys } from '@/lib/repositories/settingsRepository';
 import { credentials } from '@/lib/credentials';
 import { getRequestOrigin, getSiteBaseUrl } from '@/lib/url-utils';
+import { tagResponseForPublish } from '@/lib/response-cache-tag';
 import type { SitemapSettings } from '@/types';
 
 // Reads the request origin, so it can never be prerendered at build time
@@ -16,6 +17,8 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
+    await tagResponseForPublish();
+
     const requestOrigin = getRequestOrigin(await headers());
 
     const hasSupabaseCredentials = await credentials.exists();

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import {
   Field,
@@ -21,6 +21,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
+import { usePrimaryDomain } from '@/hooks/use-primary-domain';
 import { cn, isCloudVersion } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/useSettingsStore';
 import {
@@ -40,8 +42,48 @@ import type { SecurityHeadersSettings } from '@/lib/security-headers';
 // to an empty Referrer-Policy (header omitted).
 const REFERRER_POLICY_OFF = 'off';
 
+/**
+ * Build an example security.txt `Expires` value.
+ * RFC 9116 recommends less than a year ahead, so this lands a day short.
+ */
+function getSecurityTxtExpiryExample(): string {
+  const expiry = new Date();
+  expiry.setFullYear(expiry.getFullYear() + 1);
+  expiry.setDate(expiry.getDate() - 1);
+
+  return `${expiry.toISOString().slice(0, 10)}T00:00:00.000Z`;
+}
+
+/** Pull the hostname out of a URL or bare domain, for template examples. */
+function extractHostname(url: string | null): string | null {
+  const trimmed = url?.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+
+  try {
+    return new URL(withProtocol).hostname || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Build a starter security.txt the user can edit. */
+function buildSecurityTxtTemplate(domain: string): string {
+  return [
+    `Contact: https://${domain}/contact`,
+    `Expires: ${getSecurityTxtExpiryExample()}`,
+    'Preferred-Languages: en',
+    `Policy: https://${domain}/security-policy`,
+  ].join('\n');
+}
+
 export default function SecuritySettingsPage() {
   const { getSettingByKey, saveSettings } = useSettingsStore();
+  const primaryDomain = usePrimaryDomain();
 
   const stored = getSettingByKey(SECURITY_HEADERS_SETTING_KEY) as Partial<SecurityHeadersSettings> | null;
   const [settings, setSettings] = useState<SecurityHeadersSettings>({
@@ -58,6 +100,15 @@ export default function SecuritySettingsPage() {
   // Kept as text so the field can be cleared while typing.
   const [rateLimitInput, setRateLimitInput] = useState(String(spamSettings.rateLimitMaxSubmissions));
   const [isSavingSpam, setIsSavingSpam] = useState(false);
+
+  const storedSecurityTxt = getSettingByKey('security_txt') as string | null;
+  const canonicalUrl = getSettingByKey('global_canonical_url') as string | null;
+  const [securityTxt, setSecurityTxt] = useState(storedSecurityTxt || '');
+  const [isSavingSecurityTxt, setIsSavingSecurityTxt] = useState(false);
+  const securityTxtTemplate = useMemo(
+    () => buildSecurityTxtTemplate(extractHostname(canonicalUrl) || primaryDomain || 'example.com'),
+    [canonicalUrl, primaryDomain],
+  );
 
   // Individual header controls are gated on the master toggle.
   const disabled = !settings.enabled;
@@ -124,6 +175,26 @@ export default function SecuritySettingsPage() {
       setIsSavingSpam(false);
     }
   }, [rateLimitInput, saveSettings, spamSettings]);
+
+  const handleGenerateSecurityTxt = useCallback(() => {
+    setSecurityTxt(securityTxtTemplate);
+  }, [securityTxtTemplate]);
+
+  const handleSaveSecurityTxt = useCallback(async () => {
+    setIsSavingSecurityTxt(true);
+    try {
+      const success = await saveSettings({ security_txt: securityTxt });
+
+      if (!success) {
+        toast.error(useSettingsStore.getState().error || 'Settings could not be saved. Please try again.');
+        return;
+      }
+
+      toast.success('security.txt has been successfully saved');
+    } finally {
+      setIsSavingSecurityTxt(false);
+    }
+  }, [saveSettings, securityTxt]);
 
   return (
     <div className="p-8">
@@ -360,6 +431,56 @@ export default function SecuritySettingsPage() {
                 disabled={isSavingSpam}
               >
                 {isSavingSpam ? 'Saving...' : 'Save changes'}
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-10 bg-secondary/20 p-8 rounded-lg mt-6">
+          <div>
+            <FieldLegend>Vulnerability reporting</FieldLegend>
+            <FieldDescription>
+              Publishes a security.txt file so researchers who find a vulnerability on your site know where to report it. Leave empty to serve nothing.
+            </FieldDescription>
+          </div>
+
+          <div className="col-span-2 grid grid-cols-2 gap-8">
+            <Field className="col-span-2">
+              <FieldLabel htmlFor="security-txt">Contents of security.txt</FieldLabel>
+              <FieldDescription>
+                Served at /.well-known/security.txt. Keep the Expires date less than a year ahead and refresh it whenever you review the contacts, as a stale file is worse than none. Learn more at{' '}
+                <a
+                  href="https://securitytxt.org"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-foreground underline"
+                >
+                  securitytxt.org
+                </a>.
+              </FieldDescription>
+              <Textarea
+                id="security-txt"
+                value={securityTxt}
+                onChange={(e) => setSecurityTxt(e.target.value)}
+                placeholder={securityTxtTemplate}
+                className="min-h-24"
+              />
+            </Field>
+
+            <div className="col-span-2 flex justify-end gap-2">
+              {!securityTxt.trim() && (
+                <Button
+                  size="sm" variant="secondary"
+                  onClick={handleGenerateSecurityTxt}
+                >
+                  Generate template
+                </Button>
+              )}
+              <Button
+                size="sm" onClick={handleSaveSecurityTxt}
+                disabled={isSavingSecurityTxt}
+              >
+                {isSavingSecurityTxt ? 'Saving...' : 'Save changes'}
               </Button>
             </div>
           </div>
