@@ -54,6 +54,59 @@ export async function registerClient(data: RegisterClientData): Promise<McpOAuth
   return row;
 }
 
+/**
+ * Remove DCR registrations that never completed (or no longer have) an
+ * authorisation. Every connect attempt registers a new client, so without this
+ * the table grows unbounded. A client is kept while any token or pending code
+ * references it, and is never removed within 24h of registration so an
+ * in-flight consent flow can't lose its client.
+ *
+ * Best-effort; callers should not await failures.
+ */
+export async function cleanupOrphanClients(): Promise<void> {
+  const client = await getSupabaseAdmin();
+
+  if (!client) {
+    return;
+  }
+
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+  const { data: stale, error } = await client
+    .from('mcp_oauth_clients')
+    .select('client_id')
+    .lt('created_at', cutoff);
+
+  if (error || !stale || stale.length === 0) {
+    return;
+  }
+
+  const staleIds = stale.map((row) => row.client_id);
+
+  const [{ data: tokenRefs }, { data: codeRefs }] = await Promise.all([
+    client.from('mcp_tokens').select('oauth_client_id').in('oauth_client_id', staleIds),
+    client.from('mcp_oauth_codes').select('client_id').in('client_id', staleIds),
+  ]);
+
+  const referenced = new Set<string>();
+  for (const row of tokenRefs ?? []) {
+    if (row.oauth_client_id) referenced.add(row.oauth_client_id);
+  }
+  for (const row of codeRefs ?? []) {
+    referenced.add(row.client_id);
+  }
+
+  const orphanIds = staleIds.filter((id) => !referenced.has(id));
+  if (orphanIds.length === 0) {
+    return;
+  }
+
+  await client
+    .from('mcp_oauth_clients')
+    .delete()
+    .in('client_id', orphanIds);
+}
+
 export async function getClient(clientId: string): Promise<McpOAuthClient | null> {
   const client = await getSupabaseAdmin();
 

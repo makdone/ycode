@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { getAllTokens, createToken } from '@/lib/repositories/mcpTokenRepository';
+import { getAllTokens, createToken, cleanupExpiredOAuthTokens } from '@/lib/repositories/mcpTokenRepository';
 import { noCache } from '@/lib/api-response';
 
 export const dynamic = 'force-dynamic';
@@ -7,10 +7,12 @@ export const revalidate = 0;
 
 /**
  * GET /ycode/api/mcp-tokens
- * List all MCP tokens
+ * List all MCP tokens. Expired OAuth connections are purged first so the
+ * list only ever shows connections that can still be used.
  */
 export async function GET() {
   try {
+    await cleanupExpiredOAuthTokens().catch(() => {});
     const tokens = await getAllTokens();
 
     return noCache({ data: tokens });

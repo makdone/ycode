@@ -1,58 +1,31 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Label } from '@/components/ui/label';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import Icon from '@/components/ui/icon';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-  DialogDescription,
-} from '@/components/ui/dialog';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-
-interface McpToken {
-  id: string;
-  name: string;
-  token?: string;
-  token_prefix: string;
-  mcp_url?: string;
-  is_active: boolean;
-  last_used_at: string | null;
-  created_at: string;
-  oauth_client_id: string | null;
-  expires_at: string | null;
-}
+import { Spinner } from '@/components/ui/spinner';
+import McpEndpointCard from './components/mcp-endpoint-card';
+import McpClientInstructions from './components/mcp-client-instructions';
+import McpConnectionsList from './components/mcp-connections-list';
+import McpLegacyTokens from './components/mcp-legacy-tokens';
+import { isOAuthToken, type McpToken } from './components/types';
 
 export default function McpPage() {
   const [tokens, setTokens] = useState<McpToken[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [showGenerateDialog, setShowGenerateDialog] = useState(false);
-  const [showUrlDialog, setShowUrlDialog] = useState(false);
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [tokenToDelete, setTokenToDelete] = useState<McpToken | null>(null);
-  const [newTokenName, setNewTokenName] = useState('');
-  const [generatedToken, setGeneratedToken] = useState<McpToken | null>(null);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [mcpBearerUrl, setMcpBearerUrl] = useState('/ycode/mcp');
+  const [mcpUrl, setMcpUrl] = useState('');
+  const [isLocalhost, setIsLocalhost] = useState(false);
 
   useEffect(() => {
-    fetchTokens();
-    setMcpBearerUrl(`${window.location.origin}/ycode/mcp`);
+    const { origin, hostname } = window.location;
+    // Deployments behind a reverse proxy or served from several hostnames can
+    // pin the advertised endpoint; otherwise it is this site's own /ycode/mcp.
+    const configured = process.env.NEXT_PUBLIC_MCP_SERVER_URL?.trim();
+    setMcpUrl(configured || `${origin}/ycode/mcp`);
+    setIsLocalhost(!configured && (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.endsWith('.localhost')));
   }, []);
 
-  const fetchTokens = async () => {
+  const fetchTokens = useCallback(async () => {
     try {
       const response = await fetch('/ycode/api/mcp-tokens');
       const result = await response.json();
@@ -64,31 +37,34 @@ export default function McpPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
-  const handleGenerateToken = async () => {
-    if (!newTokenName.trim()) return;
+  useEffect(() => {
+    fetchTokens();
+  }, [fetchTokens]);
 
-    setIsGenerating(true);
+  const { connections, urlTokens } = useMemo(() => ({
+    connections: tokens.filter(isOAuthToken),
+    urlTokens: tokens.filter((token) => !isOAuthToken(token)),
+  }), [tokens]);
+
+  const handleGenerateToken = async (name: string): Promise<McpToken | null> => {
     try {
       const response = await fetch('/ycode/api/mcp-tokens', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newTokenName.trim() }),
+        body: JSON.stringify({ name }),
       });
 
       const result = await response.json();
       if (result.data) {
-        setGeneratedToken(result.data);
-        setShowGenerateDialog(false);
-        setShowUrlDialog(true);
-        setNewTokenName('');
         fetchTokens();
+        return result.data as McpToken;
       }
+      return null;
     } catch (error) {
       console.error('Failed to generate MCP token:', error);
-    } finally {
-      setIsGenerating(false);
+      return null;
     }
   };
 
@@ -99,263 +75,69 @@ export default function McpPage() {
       await fetch(`/ycode/api/mcp-tokens/${tokenToDelete.id}`, {
         method: 'DELETE',
       });
-      setTokens(tokens.filter(t => t.id !== tokenToDelete.id));
+      setTokens((prev) => prev.filter((t) => t.id !== tokenToDelete.id));
     } catch (error) {
       console.error('Failed to delete MCP token:', error);
     } finally {
-      setShowDeleteDialog(false);
       setTokenToDelete(null);
     }
   };
 
-  const copyToClipboard = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (error) {
-      console.error('Failed to copy:', error);
-    }
-  };
-
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
-  };
-
-  const formatLastUsed = (dateString: string | null) => {
-    if (!dateString) return 'Never';
-    return formatDate(dateString);
-  };
-
-  const isOAuthToken = (token: McpToken) => Boolean(token.oauth_client_id);
-
-  const tokenStatusLabel = (token: McpToken) => {
-    if (!isOAuthToken(token)) return 'URL token';
-    if (token.expires_at && new Date(token.expires_at).getTime() < Date.now()) {
-      return 'OAuth (expired)';
-    }
-    return 'OAuth';
-  };
+  const deleteIsConnection = tokenToDelete ? isOAuthToken(tokenToDelete) : false;
 
   return (
     <div className="p-8">
-      <div className="max-w-3xl mx-auto">
+      <div className="max-w-3xl mx-auto flex flex-col gap-8">
 
-        <header className="pt-8 pb-6 flex items-center justify-between">
+        <div className="flex flex-col gap-3 pt-8">
           <span className="text-base font-medium">MCP</span>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => setShowGenerateDialog(true)}
-          >
-            Generate MCP URL
-          </Button>
-        </header>
-
-        <p className="text-sm text-muted-foreground mb-6">
-          Connect AI assistants like Claude, Cursor, or Windsurf to your YCode project.
-          Generate an MCP URL and paste it into your AI tool&apos;s connector settings.
-        </p>
-
-        {isLoading ? (
-          <div className="py-12 text-center text-muted-foreground text-sm">
-            Loading...
-          </div>
-        ) : tokens.length > 0 ? (
-          <div className="flex flex-col gap-3">
-            {tokens.map((token) => (
-              <div
-                key={token.id}
-                className="flex items-center gap-4 p-4 bg-secondary/20 rounded-lg"
-              >
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-1">
-                    <Label className="font-medium">{token.name}</Label>
-                    <code className="text-xs text-muted-foreground bg-secondary px-1.5 py-0.5 rounded font-mono">
-                      {token.token_prefix}...
-                    </code>
-                    <span className="text-xs text-muted-foreground bg-secondary px-1.5 py-0.5 rounded">
-                      {tokenStatusLabel(token)}
-                    </span>
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    Created {formatDate(token.created_at)} · Last used: {formatLastUsed(token.last_used_at)}
-                    {isOAuthToken(token) && token.expires_at
-                      ? <> · Expires {formatDate(token.expires_at)}</>
-                      : null}
-                  </div>
-                </div>
-
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="secondary"
-                      size="xs"
-                    >
-                      <Icon name="more" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem
-                      className="text-destructive focus:text-destructive"
-                      onClick={() => {
-                        setTokenToDelete(token);
-                        setShowDeleteDialog(true);
-                      }}
-                    >
-                      Delete
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="py-12 text-center text-muted-foreground text-sm border border-dashed rounded-lg">
-            No MCP connections yet. Click &ldquo;Generate MCP URL&rdquo; to create one.
-          </div>
-        )}
-
-        <header className="pt-10 pb-3">
-          <span className="text-base font-medium">How to connect</span>
-        </header>
-
-        <div className="flex flex-col gap-6 bg-secondary/20 p-6 rounded-lg text-sm">
-          <section>
-            <h3 className="font-medium mb-2">Claude Desktop</h3>
-            <p className="text-muted-foreground">
-              Settings &rarr; Connectors &rarr; Add custom connector &rarr; Paste the MCP URL
-            </p>
-          </section>
-
-          <section>
-            <h3 className="font-medium mb-2">Cursor</h3>
-            <p className="text-muted-foreground">
-              Settings &rarr; MCP &rarr; Add new MCP server &rarr; Type: &ldquo;SSE&rdquo; &rarr; Paste the MCP URL
-            </p>
-          </section>
-
-          <section>
-            <h3 className="font-medium mb-2">Other AI tools</h3>
-            <p className="text-muted-foreground">
-              Any AI tool that supports the MCP Streamable HTTP transport can connect using the URL.
-              No API key is needed — the URL contains the authentication token.
-            </p>
-          </section>
-
-          <section>
-            <h3 className="font-medium mb-2">Claude.ai web / ChatGPT (OAuth)</h3>
-            <p className="text-muted-foreground">
-              These clients connect via OAuth. Add a custom connector pointing to{' '}
-              <code className="text-xs bg-secondary px-1.5 py-0.5 rounded font-mono">
-                {mcpBearerUrl}
-              </code>{' '}
-              and you&apos;ll be prompted to approve access from this page. OAuth-issued tokens appear in the
-              list above and can be revoked at any time.
-            </p>
-          </section>
+          <p className="text-sm text-muted-foreground">
+            Connect AI assistants like Claude, Cursor, or ChatGPT to this YCode project. They can
+            read and edit pages, collections, assets, and more on your behalf.
+          </p>
         </div>
 
-        {/* Generate Dialog */}
-        <Dialog
-          open={showGenerateDialog}
-          onOpenChange={setShowGenerateDialog}
-        >
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Generate MCP URL</DialogTitle>
-              <DialogDescription>
-                Create a unique MCP URL for connecting an AI assistant to your YCode project.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="py-4">
-              <Label htmlFor="token-name">Connection name</Label>
-              <Input
-                id="token-name"
-                value={newTokenName}
-                onChange={(e) => setNewTokenName(e.target.value)}
-                placeholder="e.g. Claude Desktop, Cursor"
-                className="mt-2"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleGenerateToken();
-                }}
-              />
-            </div>
-            <DialogFooter>
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setShowGenerateDialog(false);
-                  setNewTokenName('');
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleGenerateToken}
-                disabled={!newTokenName.trim() || isGenerating}
-              >
-                {isGenerating ? 'Generating...' : 'Generate'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        {mcpUrl && <McpEndpointCard url={mcpUrl} />}
 
-        {/* URL Display Dialog */}
-        <Dialog
-          open={showUrlDialog}
-          onOpenChange={setShowUrlDialog}
-        >
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Your MCP URL</DialogTitle>
-              <DialogDescription>
-                Copy this URL and paste it into your AI tool. This URL will only be shown once.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="py-4">
-              {generatedToken?.mcp_url && (
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 text-xs bg-secondary px-3 py-2.5 rounded-lg font-mono break-all select-all">
-                    {generatedToken.mcp_url}
-                  </code>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => copyToClipboard(generatedToken.mcp_url!)}
-                  >
-                    {copied ? 'Copied!' : 'Copy'}
-                  </Button>
-                </div>
-              )}
-              <p className="text-xs text-muted-foreground mt-3">
-                Keep this URL private. Anyone with this URL can access your YCode project through MCP.
-              </p>
+        <div className="flex flex-col gap-3">
+          <span className="text-base font-medium">Connections</span>
+          {isLoading ? (
+            <div className="flex items-center justify-center py-10">
+              <Spinner />
             </div>
-            <DialogFooter>
-              <Button
-                onClick={() => {
-                  setShowUrlDialog(false);
-                  setGeneratedToken(null);
-                }}
-              >
-                Done
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+          ) : (
+            <McpConnectionsList
+              connections={connections}
+              onRevoke={setTokenToDelete}
+            />
+          )}
+        </div>
 
-        {/* Delete Confirmation */}
+        {mcpUrl && (
+          <McpClientInstructions
+            url={mcpUrl}
+            isLocalhost={isLocalhost}
+          />
+        )}
+
+        {!isLoading && (
+          <McpLegacyTokens
+            tokens={urlTokens}
+            onGenerate={handleGenerateToken}
+            onDelete={setTokenToDelete}
+          />
+        )}
+
         <ConfirmDialog
-          open={showDeleteDialog}
-          onOpenChange={setShowDeleteDialog}
-          title="Delete MCP connection"
-          description={`Are you sure you want to delete "${tokenToDelete?.name}"? AI tools using this URL will no longer be able to connect.`}
-          confirmLabel="Delete"
+          open={tokenToDelete !== null}
+          onOpenChange={(open) => {
+            if (!open) setTokenToDelete(null);
+          }}
+          title={deleteIsConnection ? 'Revoke connection' : 'Delete URL token'}
+          description={deleteIsConnection
+            ? `Revoke access for "${tokenToDelete?.name}"? The client will need to reconnect and approve access again.`
+            : `Delete "${tokenToDelete?.name}"? AI tools using this URL will no longer be able to connect.`}
+          confirmLabel={deleteIsConnection ? 'Revoke' : 'Delete'}
           onConfirm={handleDeleteToken}
           confirmVariant="destructive"
         />

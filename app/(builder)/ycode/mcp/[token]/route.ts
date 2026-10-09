@@ -25,7 +25,7 @@ export async function POST(
   { params }: { params: Promise<{ token: string }> },
 ) {
   const { token } = await params;
-  if (!(await authenticateToken(token))) {
+  if (!(await authenticateToken(token, request))) {
     return unauthorizedJson('Invalid MCP token');
   }
   return handleMcpPost(request);
@@ -36,7 +36,7 @@ export async function GET(
   { params }: { params: Promise<{ token: string }> },
 ) {
   const { token } = await params;
-  if (!(await authenticateToken(token))) {
+  if (!(await authenticateToken(token, request))) {
     return unauthorizedJson('Invalid MCP token');
   }
   return handleMcpGet(request);
@@ -47,7 +47,7 @@ export async function DELETE(
   { params }: { params: Promise<{ token: string }> },
 ) {
   const { token } = await params;
-  if (!(await authenticateToken(token))) {
+  if (!(await authenticateToken(token, request))) {
     return unauthorizedJson('Invalid MCP token');
   }
   return handleMcpDelete(request);

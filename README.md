@@ -24,6 +24,18 @@ To self-host Ycode you will need:
 
 Follow the [installation instructions][install] to get started.
 
+## Connecting AI Assistants (MCP)
+
+Every Ycode project exposes a [Model Context Protocol](https://modelcontextprotocol.io) server at `https://<your-project-domain>/ycode/mcp`. Claude, Claude Code, Cursor, ChatGPT, VS Code, and any other MCP client can read and edit pages, collections, assets, and settings through it.
+
+Self-hosted projects are not listed in the Claude or ChatGPT connector directories, because each install has its own URL. Add your project as a **custom connector** instead:
+
+1. In the builder, open **Settings → MCP** and copy the MCP server URL.
+2. In your AI client, add a custom (remote) MCP connector and paste the URL — for example in Claude: **Settings → Connectors → Add custom connector**.
+3. Connect, sign in to Ycode, and approve access.
+
+The MCP settings page has step-by-step instructions for each client and lists the connections you have approved so you can revoke them at any time. Clients that connect from the vendor's servers (Claude.ai, ChatGPT) need a publicly reachable HTTPS URL, so deploy your project first.
+
 ## Support
 
 We provide official support on [Ycode Cloud][cloud] projects. Community-driven support for the Open Source version is available in [Discord][discord].

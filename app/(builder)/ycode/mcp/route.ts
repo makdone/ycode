@@ -49,7 +49,7 @@ async function authorize(request: NextRequest): Promise<Response | null> {
     return unauthorizedWithChallenge(request, 'Authorization required');
   }
 
-  const valid = await authenticateToken(token);
+  const valid = await authenticateToken(token, request);
   if (!valid) {
     return unauthorizedWithChallenge(request, 'Invalid or expired access token');
   }

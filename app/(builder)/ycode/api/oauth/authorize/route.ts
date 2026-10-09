@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthUser } from '@/lib/supabase-auth';
-import { getClient } from '@/lib/repositories/mcpOAuthClientRepository';
+import { isRedirectUriRegistered, resolveOAuthClient } from '@/lib/oauth/resolve-client';
 import { createCode } from '@/lib/repositories/mcpOAuthCodeRepository';
 
 export const dynamic = 'force-dynamic';
@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'login_required' }, { status: 401 });
   }
 
-  const client = await getClient(clientId);
+  const client = await resolveOAuthClient(clientId);
   if (!client) {
     return NextResponse.json(
       { error: 'invalid_client', error_description: 'Unknown client_id' },
@@ -98,7 +98,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (!client.redirect_uris.includes(redirectUri)) {
+  if (!isRedirectUriRegistered(client, redirectUri)) {
     return NextResponse.json(
       { error: 'invalid_request', error_description: 'redirect_uri not registered' },
       { status: 400 },

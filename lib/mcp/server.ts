@@ -7,6 +7,7 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { DEFERRED_GROUP_GUIDES, MCP_PUBLISHING_INSTRUCTIONS, SYSTEM_INSTRUCTIONS } from '@/lib/mcp/instructions';
+import { withToolAnnotations } from '@/lib/mcp/tool-annotations';
 import { registerPageTools } from '@/lib/mcp/tools/pages';
 import { registerPageFolderTools } from '@/lib/mcp/tools/page-folders';
 import { registerLayerTools } from '@/lib/mcp/tools/layers';
@@ -28,15 +29,36 @@ import { registerAnimationTools } from '@/lib/mcp/tools/animations';
 import { registerReferenceResources } from '@/lib/mcp/resources/reference';
 import { registerSiteResources } from '@/lib/mcp/resources/site';
 
-export function createMcpServer(): McpServer {
+export interface CreateMcpServerOptions {
+  /**
+   * Register additional tools after the built-in ones (e.g. a hosted
+   * deployment adding site-selection tools). Tools registered here must have
+   * an entry in `lib/mcp/tool-annotations.ts` or be registered via
+   * `server.registerTool` with their own title/annotations.
+   */
+  extraTools?: (server: McpServer) => void;
+  /** Appended to the server instructions sent to the client on initialize. */
+  extraInstructions?: string;
+}
+
+export function createMcpServer(options: CreateMcpServerOptions = {}): McpServer {
   // External MCP agents get every tool up front, so they also get the full
   // deferred-group guides plus the publishing instructions. The in-app agent
   // runtime uses SYSTEM_INSTRUCTIONS alone, delivers group guides via
   // load_tools, and appends its own draft-first (never publish) policy instead.
-  const server = new McpServer(
+  const instructions = SYSTEM_INSTRUCTIONS
+    + '\n' + Object.values(DEFERRED_GROUP_GUIDES).join('\n\n')
+    + MCP_PUBLISHING_INSTRUCTIONS
+    + (options.extraInstructions ? '\n\n' + options.extraInstructions : '');
+
+  const rawServer = new McpServer(
     { name: 'ycode', version: '1.0.0' },
-    { instructions: SYSTEM_INSTRUCTIONS + '\n' + Object.values(DEFERRED_GROUP_GUIDES).join('\n\n') + MCP_PUBLISHING_INSTRUCTIONS },
+    { instructions },
   );
+
+  // Tool files call the plain `server.tool(...)` API; the wrapper attaches the
+  // per-tool title and read-only/destructive hints from tool-annotations.ts.
+  const server = withToolAnnotations(rawServer);
 
   registerPageTools(server);
   registerPageFolderTools(server);
@@ -60,5 +82,7 @@ export function createMcpServer(): McpServer {
   registerReferenceResources(server);
   registerSiteResources(server);
 
-  return server;
+  options.extraTools?.(server);
+
+  return rawServer;
 }

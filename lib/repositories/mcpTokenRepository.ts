@@ -12,6 +12,7 @@ export interface McpToken {
   updated_at: string;
   oauth_client_id: string | null;
   expires_at: string | null;
+  refresh_expires_at: string | null;
   user_id: string | null;
 }
 
@@ -32,10 +33,24 @@ export interface CreateOAuthTokenData {
   name: string;
   access_token_ttl_seconds?: number;
   refresh_token_ttl_seconds?: number;
+  /**
+   * Original connection time. Rotation passes the previous row's value so the
+   * "Created" date shown in the builder stays stable across hourly refreshes.
+   */
+  created_at?: string;
 }
 
 const DEFAULT_ACCESS_TOKEN_TTL_SECONDS = 60 * 60; // 1 hour
 const DEFAULT_REFRESH_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
+
+/**
+ * How long a rotated refresh token keeps working after it has been used.
+ * Clients occasionally fire two refreshes at once; without a grace window the
+ * second one fails and the connection drops.
+ */
+const REFRESH_GRACE_MS = 30 * 1000;
+
+const TOKEN_COLUMNS = 'id, name, token_prefix, is_active, last_used_at, created_at, updated_at, oauth_client_id, expires_at, refresh_expires_at, user_id';
 
 function generateToken(): string {
   return 'ymc_' + randomBytes(24).toString('hex');
@@ -63,7 +78,8 @@ export async function getAllTokens(): Promise<McpToken[]> {
 
   const { data, error } = await client
     .from('mcp_tokens')
-    .select('id, name, token_prefix, is_active, last_used_at, created_at, updated_at, oauth_client_id, expires_at, user_id')
+    .select(TOKEN_COLUMNS)
+    .eq('is_active', true)
     .order('created_at', { ascending: false });
 
   if (error) {
@@ -92,7 +108,7 @@ export async function createToken(name: string): Promise<McpTokenWithPlainToken>
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
-    .select('id, name, token, token_prefix, is_active, last_used_at, created_at, updated_at, oauth_client_id, expires_at, user_id')
+    .select(`token, ${TOKEN_COLUMNS}`)
     .single();
 
   if (error) {
@@ -115,7 +131,7 @@ export async function validateToken(token: string): Promise<McpToken | null> {
 
   const { data, error } = await client
     .from('mcp_tokens')
-    .select('id, name, token_prefix, is_active, last_used_at, created_at, updated_at, oauth_client_id, expires_at, user_id')
+    .select(TOKEN_COLUMNS)
     .eq('token', token)
     .eq('is_active', true)
     .single();
@@ -172,7 +188,7 @@ export async function getTokenById(id: string): Promise<McpToken | null> {
 
   const { data, error } = await client
     .from('mcp_tokens')
-    .select('id, name, token_prefix, is_active, last_used_at, created_at, updated_at, oauth_client_id, expires_at, user_id')
+    .select(TOKEN_COLUMNS)
     .eq('id', id)
     .single();
 
@@ -202,6 +218,7 @@ export async function createOAuthToken(
   const token = generateToken();
   const refreshToken = generateRefreshToken();
   const now = Date.now();
+  const nowIso = new Date(now).toISOString();
   const expiresAt = new Date(now + accessTtl * 1000).toISOString();
   const refreshExpiresAt = new Date(now + refreshTtl * 1000).toISOString();
   const tokenPrefix = token.substring(0, 12);
@@ -217,8 +234,8 @@ export async function createOAuthToken(
       expires_at: expiresAt,
       refresh_token_hash: hashRefreshToken(refreshToken),
       refresh_expires_at: refreshExpiresAt,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      created_at: data.created_at ?? nowIso,
+      updated_at: nowIso,
     });
 
   if (error) {
@@ -235,11 +252,16 @@ export async function createOAuthToken(
 
 /**
  * Rotate a refresh token: validate the old one, issue a fresh access+refresh
- * pair, and revoke the old token row. Returns null if the refresh token is
- * unknown, revoked, or expired.
+ * pair, and retire the old row. Returns null if the refresh token is unknown,
+ * revoked, expired, or was issued to a different client.
+ *
+ * The old row is kept (inactive) for a short grace window instead of being
+ * deleted outright so a concurrent duplicate refresh still succeeds. Inactive
+ * rows past their grace window are removed by `cleanupExpiredOAuthTokens`.
  */
 export async function rotateRefreshToken(
   refreshToken: string,
+  clientId: string,
   options?: { access_token_ttl_seconds?: number; refresh_token_ttl_seconds?: number },
 ): Promise<OAuthTokenPair | null> {
   const client = await getSupabaseAdmin();
@@ -248,11 +270,13 @@ export async function rotateRefreshToken(
     throw new Error('Supabase not configured');
   }
 
+  const nowIso = new Date().toISOString();
+
   const { data: existing, error: fetchError } = await client
     .from('mcp_tokens')
-    .select('id, name, token, oauth_client_id, user_id, refresh_expires_at, is_active')
+    .select('id, name, token, oauth_client_id, user_id, refresh_expires_at, is_active, created_at')
     .eq('refresh_token_hash', hashRefreshToken(refreshToken))
-    .eq('is_active', true)
+    .or(`is_active.eq.true,refresh_grace_until.gt.${nowIso}`)
     .single();
 
   if (fetchError || !existing) {
@@ -268,17 +292,56 @@ export async function rotateRefreshToken(
     return null;
   }
 
-  // Revoke the old token first so a leaked refresh token can't be reused.
-  await client.from('mcp_tokens').delete().eq('id', existing.id);
-  if (existing.token) {
-    invalidateToken(existing.token);
+  // RFC 6749 §6: a refresh token is bound to the client it was issued to.
+  if (existing.oauth_client_id !== clientId) {
+    return null;
+  }
+
+  // Retire the old row before issuing the new pair. The access token stops
+  // working immediately (validateToken requires is_active); the refresh token
+  // stays usable only until refresh_grace_until.
+  if (existing.is_active) {
+    await client
+      .from('mcp_tokens')
+      .update({
+        is_active: false,
+        refresh_grace_until: new Date(Date.now() + REFRESH_GRACE_MS).toISOString(),
+        updated_at: nowIso,
+      })
+      .eq('id', existing.id);
+
+    if (existing.token) {
+      invalidateToken(existing.token);
+    }
   }
 
   return createOAuthToken({
     user_id: existing.user_id,
     oauth_client_id: existing.oauth_client_id,
     name: existing.name,
+    created_at: existing.created_at,
     access_token_ttl_seconds: options?.access_token_ttl_seconds,
     refresh_token_ttl_seconds: options?.refresh_token_ttl_seconds,
   });
+}
+
+/**
+ * Remove OAuth token rows that can no longer be used: refresh token expired,
+ * or rotated and past the grace window. URL tokens (no oauth_client_id) are
+ * never touched. Best-effort; callers should not await failures.
+ */
+export async function cleanupExpiredOAuthTokens(): Promise<void> {
+  const client = await getSupabaseAdmin();
+
+  if (!client) {
+    return;
+  }
+
+  const nowIso = new Date().toISOString();
+
+  await client
+    .from('mcp_tokens')
+    .delete()
+    .not('oauth_client_id', 'is', null)
+    .or(`refresh_expires_at.lt.${nowIso},and(is_active.eq.false,refresh_grace_until.lt.${nowIso})`);
 }

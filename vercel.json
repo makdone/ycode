@@ -15,7 +15,7 @@
     "app/(builder)/ycode/api/**/*.ts": {
       "maxDuration": 60
     },
-    "app/(builder)/ycode/mcp/*/route.ts": {
+    "app/(builder)/ycode/mcp/**/route.ts": {
       "maxDuration": 60
     }
   },

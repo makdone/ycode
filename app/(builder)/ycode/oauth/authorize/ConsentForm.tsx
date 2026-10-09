@@ -6,6 +6,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 
 interface ConsentFormProps {
   clientName: string;
+  siteName: string | null;
   userEmail: string;
   clientId: string;
   redirectUri: string;
@@ -18,9 +19,11 @@ interface ConsentFormProps {
 export default function ConsentForm(props: ConsentFormProps) {
   const [submitting, setSubmitting] = useState<'approve' | 'deny' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [siteHost, setSiteHost] = useState('');
 
   useEffect(() => {
     document.documentElement.classList.add('dark');
+    setSiteHost(window.location.host);
     return () => {
       document.documentElement.classList.remove('dark');
     };
@@ -62,11 +65,16 @@ export default function ConsentForm(props: ConsentFormProps) {
   };
 
   let hostname = props.redirectUri;
+  let isLoopbackRedirect = false;
   try {
-    hostname = new URL(props.redirectUri).host;
+    const parsed = new URL(props.redirectUri);
+    hostname = parsed.host;
+    isLoopbackRedirect = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.hostname === '[::1]';
   } catch {
     // keep raw value on parse failure
   }
+
+  const siteLabel = props.siteName || siteHost || 'this YCode project';
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-neutral-950 p-6">
@@ -82,7 +90,11 @@ export default function ConsentForm(props: ConsentFormProps) {
         <div className="text-sm text-white/80 leading-relaxed">
           <p>
             <span className="font-medium text-white">{props.clientName}</span> is requesting
-            access to your YCode project through the Model Context Protocol.
+            access to <span className="font-medium text-white">{siteLabel}</span>
+            {props.siteName && siteHost ? (
+              <> (<span className="font-mono text-white/70">{siteHost}</span>)</>
+            ) : null}
+            {' '}through the Model Context Protocol.
           </p>
           <p className="mt-3 text-white/60">
             If you approve, this application will be able to read and modify your pages,
@@ -92,6 +104,11 @@ export default function ConsentForm(props: ConsentFormProps) {
 
         <div className="text-xs text-white/50 bg-white/5 px-3 py-2 rounded">
           Redirecting to <span className="text-white/80 font-mono">{hostname}</span>
+          {isLoopbackRedirect && (
+            <p className="mt-1">
+              This is an application running on your computer. Only approve if you started this connection yourself.
+            </p>
+          )}
         </div>
 
         {error && (
