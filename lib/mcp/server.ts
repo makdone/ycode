@@ -27,6 +27,7 @@ import { registerFormTools } from '@/lib/mcp/tools/forms';
 import { registerSettingsTools } from '@/lib/mcp/tools/settings';
 import { registerPublishingTools } from '@/lib/mcp/tools/publishing';
 import { registerAnimationTools } from '@/lib/mcp/tools/animations';
+import { registerHtmlImportTools } from '@/lib/mcp/tools/html-import';
 import { registerReferenceResources } from '@/lib/mcp/resources/reference';
 import { registerSiteResources } from '@/lib/mcp/resources/site';
 
@@ -85,6 +86,7 @@ export function createMcpServer(options: CreateMcpServerOptions = {}): McpServer
   registerSettingsTools(server);
   registerPublishingTools(server);
   registerAnimationTools(server);
+  registerHtmlImportTools(server);
 
   registerReferenceResources(server);
   registerSiteResources(server);

@@ -76,7 +76,20 @@ function renameScaledUtility(cls: string): string | null {
   return null;
 }
 
-export function normalizeV3ToV4(classes: string[]): string[] {
+export interface NormalizeV3ToV4Options {
+  /**
+   * Shift v3 size scales to v4 (rounded → rounded-sm, shadow-sm → shadow-xs,
+   * ring → ring-3, …). Disable for input already written in v4, where the
+   * shift would change the rendered size.
+   */
+  rescaleSizes?: boolean;
+}
+
+/** Renames whose v3 and v4 meanings differ in size, so v4 input must keep them. */
+const SCALE_SENSITIVE_RENAMES = new Set(['ring', 'shadow-inner', 'outline-none']);
+
+export function normalizeV3ToV4(classes: string[], options: NormalizeV3ToV4Options = {}): string[] {
+  const { rescaleSizes = true } = options;
   const result: string[] = [];
   const opacityEntries: { prefix: string; value: string }[] = [];
 
@@ -84,7 +97,7 @@ export function normalizeV3ToV4(classes: string[]): string[] {
     const [variantPrefix, base] = splitVariantPrefix(cls);
 
     const renamed = V3_TO_V4_RENAMES[base];
-    if (renamed !== undefined) {
+    if (renamed !== undefined && (rescaleSizes || !SCALE_SENSITIVE_RENAMES.has(base))) {
       if (renamed) result.push(variantPrefix + renamed);
       continue;
     }
@@ -103,7 +116,7 @@ export function normalizeV3ToV4(classes: string[]): string[] {
       continue;
     }
 
-    const scaled = renameScaledUtility(base);
+    const scaled = rescaleSizes ? renameScaledUtility(base) : null;
     if (scaled) {
       result.push(variantPrefix + scaled);
       continue;

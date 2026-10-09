@@ -76,6 +76,7 @@ export const TOOL_META: Record<string, ToolMeta> = {
   update_layer_settings: write('Update layer settings'),
   update_form_settings: write('Update form settings'),
   export_layer_html: read('Export layer as HTML'),
+  import_html: write('Import HTML as layers'),
   update_layer_iframe: write('Update layer iframe'),
   // Batches may contain delete_layer ops, but every op edits the page *draft* —
   // nothing reaches the live site until `publish` (destructive). Marking the

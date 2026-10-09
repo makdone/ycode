@@ -238,6 +238,8 @@ touches more than one layer, use the op inside one batch instead of the single t
   update_layer_settings.
 - **Forms:** the \`form\` template is ready to use; extend it with native \`input\` / \`textarea\` /
   \`select\` children (never simulated fields — see Element Types).
+- **HTML import (opt-in):** only when the user asks for it or provides HTML, import_html turns
+  HTML + Tailwind into native layers in one call. Default to add_layout and the layer tools otherwise.
 
 ### Animations & Interactions
 

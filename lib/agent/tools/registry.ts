@@ -19,6 +19,7 @@ import { registerFormTools } from '@/lib/mcp/tools/forms';
 import { registerSettingsTools } from '@/lib/mcp/tools/settings';
 import { registerPublishingTools } from '@/lib/mcp/tools/publishing';
 import { registerAnimationTools } from '@/lib/mcp/tools/animations';
+import { registerHtmlImportTools } from '@/lib/mcp/tools/html-import';
 
 import type { AgentTool, AgentToolGroup, AgentToolResult } from './types';
 
@@ -59,6 +60,8 @@ const TOOL_REGISTRARS: Array<[ToolRegistrar, AgentToolGroup]> = [
   [registerSettingsTools, 'site'],
   [registerPublishingTools, 'site'],
   [registerAnimationTools, 'animations'],
+  // Opt-in builder: deferred so its schema only costs tokens when requested.
+  [registerHtmlImportTools, 'site'],
 ];
 
 /**
