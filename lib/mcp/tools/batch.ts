@@ -52,6 +52,7 @@ const addLayerOp = z.object({
   custom_name: z.string().optional(),
   ref_id: z.string().optional().describe('A reference ID so later operations can target this layer. Style it with a follow-up update_design op referencing this ref_id.'),
   image_asset_id: z.string().optional().describe('For image layers: asset ID to display'),
+  image_alt: z.string().optional().describe('For image layers: alt text for accessibility'),
   design: designSchema.optional().describe('Optional design to apply inline when creating the layer, instead of a follow-up update_design op.'),
 });
 
@@ -189,11 +190,8 @@ EXAMPLE:
                 collectFontFamiliesFromDesign(op.design as Record<string, unknown>, fontFamilies);
               }
 
-              if (op.image_asset_id && newLayer.variables?.image) {
-                newLayer.variables = {
-                  ...newLayer.variables,
-                  image: { ...newLayer.variables.image, src: { type: 'asset', data: { asset_id: op.image_asset_id } } },
-                };
+              if ((op.image_asset_id || op.image_alt !== undefined) && newLayer.variables?.image) {
+                newLayer = applyImageUpdate(newLayer, { asset_id: op.image_asset_id, alt: op.image_alt });
               }
 
               if (op.ref_id) refMap.set(op.ref_id, newLayer.id);

@@ -1,7 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { getUnpublishedPages, getAllDraftPages } from '@/lib/repositories/pageRepository';
-import { getUnpublishedLayerStyles, publishLayerStyles } from '@/lib/repositories/layerStyleRepository';
-import { getUnpublishedComponents, publishComponents } from '@/lib/repositories/componentRepository';
+import { getUnpublishedPageChanges, getAllDraftPages, hardDeleteSoftDeletedPages } from '@/lib/repositories/pageRepository';
+import { getUnpublishedLayerStyles, publishLayerStyles, hardDeleteSoftDeletedLayerStyles } from '@/lib/repositories/layerStyleRepository';
+import { getUnpublishedComponents, publishComponents, hardDeleteSoftDeletedComponents } from '@/lib/repositories/componentRepository';
 import { getAllCollections, getUnpublishedCollections } from '@/lib/repositories/collectionRepository';
 import { getItemsByCollectionId } from '@/lib/repositories/collectionItemRepository';
 import { getUnpublishedAssets, publishAssets, hardDeleteSoftDeletedAssets } from '@/lib/repositories/assetRepository';
@@ -31,11 +31,16 @@ async function countUnpublishedLocales(): Promise<number> {
 export function registerPublishingTools(server: McpServer) {
   server.tool(
     'get_unpublished_changes',
-    'Check what changes are pending and need to be published. Reports unpublished pages, styles, components, collections, fonts, assets, translations, and locales.',
+    `Check what changes are pending and need to be published. Reports unpublished pages, styles, components, collections, fonts, assets, translations, and locales.
+
+Each unpublished page has a status: "new" (never published), "modified", "unpublishing"
+(marked as draft but still live), or "deleted" (removed but still live). A page is "modified"
+when its settings, its layer tree, or its folder differ from the live version — so a page can
+be modified even when the page-level content_hash in list_pages matches (its layers changed).`,
     {},
     async () => {
       const [pages, styles, components, collections, fonts, assets, assetFolders, translations, locales, globals] = await Promise.all([
-        getUnpublishedPages().catch(() => []),
+        getUnpublishedPageChanges().catch(() => []),
         getUnpublishedLayerStyles().catch(() => []),
         getUnpublishedComponents().catch(() => []),
         getUnpublishedCollections().catch(() => []),
@@ -56,7 +61,7 @@ export function registerPublishingTools(server: McpServer) {
           type: 'text' as const,
           text: JSON.stringify({
             has_unpublished_changes: hasChanges,
-            unpublished_pages: pages.map((p) => ({ id: p.id, name: p.name })),
+            unpublished_pages: pages.map((p) => ({ id: p.id, name: p.name, status: p.status })),
             unpublished_styles: styles.map((s) => ({ id: s.id, name: s.name })),
             unpublished_components: components.map((c: { id: string; name: string }) => ({ id: c.id, name: c.name })),
             unpublished_collections: collections.map((c: { id: string; name: string }) => ({ id: c.id, name: c.name })),
@@ -135,6 +140,14 @@ export function registerPublishingTools(server: McpServer) {
           changes.layer_styles = 0;
         }
       } catch { changes.layer_styles = 0; }
+
+      // Remove the live versions of deleted pages, components, and styles
+      try {
+        const result = await hardDeleteSoftDeletedPages();
+        changes.deleted_pages = result.count;
+      } catch { /* non-fatal */ }
+      try { await hardDeleteSoftDeletedComponents(); } catch { /* non-fatal */ }
+      try { await hardDeleteSoftDeletedLayerStyles(); } catch { /* non-fatal */ }
 
       // Publish asset folders
       try {
