@@ -46,3 +46,55 @@ test('export omits src for assets missing from the URL map', () => {
   assert.doesNotMatch(html, /src=/);
   assert.doesNotMatch(html, /style=/);
 });
+
+const linkedSection: Layer = {
+  id: 'cta',
+  name: 'section',
+  classes: '',
+  settings: { id: 'contact' },
+  children: [
+    {
+      id: 'to-features',
+      name: 'button',
+      classes: 'px-4',
+      variables: { link: { type: 'url', anchor_layer_id: 'features' } },
+      children: [],
+    },
+    {
+      id: 'to-about',
+      name: 'div',
+      classes: '',
+      variables: { link: { type: 'page', page: { id: 'page-about' } } },
+      children: [],
+    },
+    {
+      id: 'mail',
+      name: 'text',
+      classes: 'underline',
+      settings: { tag: 'p' },
+      variables: {
+        text: { type: 'dynamic_text', data: { content: 'Write to us' } },
+        link: { type: 'email', email: { type: 'dynamic_text', data: { content: 'hi@example.com' } } },
+      },
+    },
+  ],
+};
+
+test('export renders every link type with the published href', () => {
+  const html = layerToExportHtml(linkedSection, {}, {
+    pages: [{ id: 'page-about', slug: 'about', page_folder_id: null, is_index: false, is_dynamic: false } as never],
+    folders: [],
+  });
+
+  assert.match(html, /<section id="contact">/);
+  assert.match(html, /<a class="px-4" href="#features">/);
+  assert.match(html, /<a href="\/about">/);
+  assert.match(html, /<a href="mailto:hi@example\.com"><p class="underline">Write to us<\/p><\/a>/);
+});
+
+test('export leaves out page links it cannot resolve', () => {
+  const html = layerToExportHtml(linkedSection);
+
+  assert.doesNotMatch(html, /\/about/);
+  assert.match(html, /href="#features"/);
+});

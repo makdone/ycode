@@ -24,6 +24,8 @@ import {
   upsertDraftLayers,
 } from '@/lib/repositories/pageLayersRepository';
 import { getComponentById } from '@/lib/repositories/componentRepository';
+import { getPageById } from '@/lib/repositories/pageRepository';
+import { getTenantIdFromHeaders } from '@/lib/supabase-server';
 import { broadcastLayersChanged } from '@/lib/mcp/broadcast';
 
 interface CacheEntry {
@@ -45,20 +47,31 @@ function isFresh(entry: CacheEntry | undefined): entry is CacheEntry {
 }
 
 /**
+ * One process can serve several sites (multi-tenant deployments), so entries
+ * are keyed by tenant as well as page — a page id must never hit another
+ * site's cached tree.
+ */
+async function cacheKey(pageId: string): Promise<string> {
+  const tenantId = await getTenantIdFromHeaders().catch(() => null);
+  return `${tenantId ?? ''}:${pageId}`;
+}
+
+/**
  * Fetch the draft `PageLayers` row for a page, served from the in-memory cache
  * when fresh. Returns `null` if no draft exists.
  */
 export async function getCachedDraft(pageId: string): Promise<PageLayers | null> {
-  const cached = cache.get(pageId);
+  const key = await cacheKey(pageId);
+  const cached = cache.get(key);
   if (isFresh(cached)) {
     return cached.pageLayers;
   }
 
   const draft = await getDraftLayers(pageId);
   if (draft) {
-    cache.set(pageId, { pageLayers: draft, expiresAt: Date.now() + CACHE_TTL_MS });
+    cache.set(key, { pageLayers: draft, expiresAt: Date.now() + CACHE_TTL_MS });
   } else {
-    cache.delete(pageId);
+    cache.delete(key);
   }
   return draft;
 }
@@ -72,12 +85,18 @@ export async function getCachedDraft(pageId: string): Promise<PageLayers | null>
  */
 export async function getCachedLayers(pageId: string): Promise<Layer[]> {
   const draft = await getCachedDraft(pageId);
-  if (!draft && await getComponentById(pageId).catch(() => null)) {
+  if (draft) return (draft.layers as Layer[]) || [];
+
+  if (await getComponentById(pageId).catch(() => null)) {
     throw new Error(
       `"${pageId}" is a component ID, not a page ID. Edit layers inside a component with update_component_layers (component_id: "${pageId}") — it supports update_image with alt, update_text, update_design, update_link, and more.`,
     );
   }
-  return (draft?.layers as Layer[]) || [];
+  // An unknown id would otherwise read as an empty page and every layer as "not found"
+  if (!await getPageById(pageId).catch(() => null)) {
+    throw new Error(`Page "${pageId}" does not exist on this site. Check the id with list_pages (or that the right site is selected).`);
+  }
+  return [];
 }
 
 /**
@@ -88,18 +107,19 @@ export async function getCachedLayers(pageId: string): Promise<Layer[]> {
  * the database.
  */
 export async function saveCachedLayers(pageId: string, layers: Layer[]): Promise<PageLayers> {
-  const cached = cache.get(pageId);
+  const key = await cacheKey(pageId);
+  const cached = cache.get(key);
   const existingDraft = isFresh(cached) ? cached.pageLayers : undefined;
 
   let saved: PageLayers;
   try {
     saved = await upsertDraftLayers(pageId, layers, undefined, existingDraft);
   } catch (error) {
-    cache.delete(pageId);
+    cache.delete(key);
     throw error;
   }
 
-  cache.set(pageId, { pageLayers: saved, expiresAt: Date.now() + CACHE_TTL_MS });
+  cache.set(key, { pageLayers: saved, expiresAt: Date.now() + CACHE_TTL_MS });
   broadcastLayersChanged(pageId, layers).catch(() => {});
   return saved;
 }
@@ -109,5 +129,7 @@ export async function saveCachedLayers(pageId: string, layers: Layer[]): Promise
  * outside this module's awareness (e.g. publishing, deleting).
  */
 export function invalidateCachedPage(pageId: string): void {
-  cache.delete(pageId);
+  for (const key of cache.keys()) {
+    if (key.endsWith(`:${pageId}`)) cache.delete(key);
+  }
 }

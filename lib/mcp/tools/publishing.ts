@@ -79,7 +79,12 @@ be modified even when the page-level content_hash in list_pages matches (its lay
 
   server.tool(
     'publish',
-    'Publish all draft changes to make them live. This publishes pages, collections, components, styles, assets, and regenerates CSS.',
+    `Publish all draft changes to make them live. This publishes pages, collections, components, styles, assets, and regenerates CSS.
+
+The result's changes.pages counts pages whose settings or layers were republished. The live
+site is cached: the first request after publishing can still return the previous version
+while the cache refreshes, so re-request (or wait a few seconds) before concluding a change
+did not go live.`,
     {},
     async () => {
       const publishedAt = new Date().toISOString();
@@ -96,7 +101,8 @@ be modified even when the page-level content_hash in list_pages matches (its lay
         const draftPages = await getAllDraftPages();
         if (draftPages.length > 0) {
           const result = await publishPages(draftPages.map((p) => p.id));
-          changes.pages = result.count;
+          // `count` covers page-row changes only; layer-only edits show up in changedPageIds
+          changes.pages = result.changedPageIds.length;
         } else {
           changes.pages = 0;
         }

@@ -6,6 +6,7 @@
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { ZodRawShape } from 'zod';
 import { DEFERRED_GROUP_GUIDES, MCP_PUBLISHING_INSTRUCTIONS, SYSTEM_INSTRUCTIONS } from '@/lib/mcp/instructions';
 import { withToolAnnotations } from '@/lib/mcp/tool-annotations';
 import { registerPageTools } from '@/lib/mcp/tools/pages';
@@ -40,6 +41,12 @@ export interface CreateMcpServerOptions {
   extraTools?: (server: McpServer) => void;
   /** Appended to the server instructions sent to the client on initialize. */
   extraInstructions?: string;
+  /**
+   * Optional parameters added to every built-in tool (not `extraTools`) and
+   * stripped before the handler runs, e.g. a per-call site selector that the
+   * hosting layer reads from the raw request to pick the tenant.
+   */
+  sharedToolParams?: ZodRawShape;
 }
 
 export function createMcpServer(options: CreateMcpServerOptions = {}): McpServer {
@@ -59,7 +66,7 @@ export function createMcpServer(options: CreateMcpServerOptions = {}): McpServer
 
   // Tool files call the plain `server.tool(...)` API; the wrapper attaches the
   // per-tool title and read-only/destructive hints from tool-annotations.ts.
-  const server = withToolAnnotations(rawServer);
+  const server = withToolAnnotations(rawServer, options.sharedToolParams);
 
   registerPageTools(server);
   registerPageFolderTools(server);
