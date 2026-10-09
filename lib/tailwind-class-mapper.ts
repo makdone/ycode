@@ -1470,10 +1470,11 @@ export function classesToDesign(classes: string | string[]): Layer['design'] {
       return; // Skip this class
     }
 
-    // Strip breakpoint prefix (but keep base classes)
-    // "max-md:m-[10px]" should still be parsed into design object
-    // But "max-md:hover:m-[10px]" should have been skipped above
-    cls = cls.replace(/^(max-lg|max-md|lg|md):/, '');
+    // The design object holds desktop values only; breakpoint classes stay in
+    // `classes` and must not overwrite the desktop value (e.g. max-md:flex-col).
+    if (cls.match(/^(max-lg|max-md|lg|md):/)) {
+      return;
+    }
 
     // ===== LAYOUT =====
     // Display

@@ -49,6 +49,8 @@ const nextConfig: NextConfig = {
     'better-sqlite3',
     'tedious',
     'pg-query-stream',
+    // Server-side HTML import; its optional `canvas` require must not be bundled
+    'linkedom',
   ],
 
   // Turbopack configuration
