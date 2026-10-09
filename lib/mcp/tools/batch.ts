@@ -18,6 +18,7 @@ import {
   applyLayerSettings,
   buildLinkSettings,
   describeLink,
+  resolveLinkAnchor,
 } from '@/lib/mcp/utils';
 import type { RichTextBlock } from '@/lib/mcp/utils';
 import { getCachedLayers, saveCachedLayers } from '@/lib/mcp/page-layers';
@@ -124,7 +125,10 @@ apply_style, move_layer, delete_layer. Use this whenever a turn touches two or m
 the single-purpose tools are for one-off edits or element-specific settings (slider, lightbox,
 map, options source).
 
-Use ref_id in add_layer to name layers, then reference them in later operations.
+LIMIT: max 50 operations per call — split larger builds into several calls.
+
+Use ref_id in add_layer to name layers, then reference them in later operations (including
+update_link anchor_layer_id; give the target an HTML id with update_settings first).
 
 EXAMPLE:
 {
@@ -137,7 +141,7 @@ EXAMPLE:
 }`,
     {
       page_id: z.string().describe('The page ID'),
-      operations: z.array(operationSchema).min(1).max(50).describe('Array of operations to execute in order'),
+      operations: z.array(operationSchema).min(1).max(50).describe('Array of operations to execute in order (max 50)'),
     },
     async ({ page_id, operations }) => {
       let layers = await getCachedLayers(page_id);
@@ -250,9 +254,18 @@ EXAMPLE:
               const layerId = resolveId(op.layer_id, refMap);
               const layer = findLayerById(layers, layerId);
               if (!layer) { results.push({ op: i, status: 'error', detail: `Layer "${op.layer_id}" not found` }); continue; }
+              const linksElsewhere = op.link_type === 'page' && op.page_id_target && op.page_id_target !== page_id;
+              const anchorInput = op.anchor_layer_id && !linksElsewhere
+                ? { ...op, anchor_layer_id: resolveId(op.anchor_layer_id, refMap) }
+                : op;
+              const resolvedLink = resolveLinkAnchor(
+                anchorInput,
+                linksElsewhere && op.anchor_layer_id ? await getCachedLayers(op.page_id_target!) : layers,
+              );
+              if ('error' in resolvedLink) { results.push({ op: i, status: 'error', detail: resolvedLink.error }); continue; }
               layers = updateLayerById(layers, layerId, (l) => ({
                 ...l,
-                variables: { ...l.variables, link: buildLinkSettings(op, l.variables?.link) },
+                variables: { ...l.variables, link: buildLinkSettings(resolvedLink.input, l.variables?.link) },
               }));
               results.push({ op: i, status: 'ok', detail: `${describeLink(op)} on "${layer.customName || layer.name}"` });
               break;

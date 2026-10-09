@@ -692,6 +692,39 @@ export function buildLinkSettings(input: LinkInput, existing?: LinkSettings): Li
   return link;
 }
 
+/**
+ * Normalize `anchor_layer_id` to the target element's HTML id, the value the
+ * builder stores and the renderer turns into `href="#id"`. Accepts either a
+ * layer id or an HTML id already present on `targetLayers` (the page the link
+ * points to). Returns an error when the anchor cannot render.
+ */
+export function resolveLinkAnchor<T extends LinkInput>(
+  input: T,
+  targetLayers: Layer[],
+): { input: T } | { error: string } {
+  const raw = input.anchor_layer_id?.replace(/^#/, '');
+  if (!raw) return { input };
+
+  const byLayerId = findLayerById(targetLayers, raw);
+  if (byLayerId) {
+    const htmlId = byLayerId.settings?.id || byLayerId.attributes?.id;
+    if (!htmlId) {
+      return {
+        error: `Layer "${raw}" has no HTML id, so there is nothing to scroll to. Give it one first with update_layer_settings (html_id, e.g. "features"), then link to it.`,
+      };
+    }
+    return { input: { ...input, anchor_layer_id: htmlId } };
+  }
+
+  const exists = (list: Layer[]): boolean => list.some((l) =>
+    l.settings?.id === raw || l.attributes?.id === raw || (l.children ? exists(l.children) : false));
+  if (exists(targetLayers)) return { input: { ...input, anchor_layer_id: raw } };
+
+  return {
+    error: `No layer with id or HTML id "${raw}" on the target page. Pass a layer id whose layer has an HTML id (update_layer_settings html_id).`,
+  };
+}
+
 /** Summary for tool results, e.g. "Set page link". */
 export function describeLink(input: LinkInput): string {
   return `Set ${input.link_type} link`;

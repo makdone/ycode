@@ -247,7 +247,7 @@ export const updateLinkOp = z.object({
   email: z.string().optional().describe('For email type: the email address'),
   phone: z.string().optional().describe('For phone type: the phone number'),
   asset_id: z.string().optional().describe('For asset type: the asset ID to download'),
-  anchor_layer_id: z.string().optional().describe('Layer ID to scroll to as an in-page anchor (with url type for the same page, page type for another page)'),
+  anchor_layer_id: z.string().optional().describe('Layer to scroll to (layer ID, ref_id, or HTML id). The target needs an HTML id (update_settings html_id). With url type and no url it links within the page; with page type it links to that section on page_id_target.'),
   target: z.enum(['_blank', '_self', '_parent', '_top']).optional().describe('Link target. _blank opens a new tab.'),
   rel: z.string().optional().describe('rel attribute, e.g. "noopener noreferrer", "nofollow"'),
   download: z.boolean().optional().describe('When true, download the linked resource instead of navigating.'),
