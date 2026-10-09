@@ -19,7 +19,9 @@ import {
   describeLink,
 } from '@/lib/mcp/utils';
 import type { RichTextBlock } from '@/lib/mcp/utils';
+import { buildAssetUrlMap, collectLayerAssetIds } from '@/lib/asset-utils';
 import { layerToExportHtml } from '@/lib/html-layer-converter';
+import { getAssetsByIds } from '@/lib/repositories/assetRepository';
 import { collectFontFamiliesFromDesign, ensureFontsInstalled, fontWarnings } from '@/lib/mcp/font-install';
 import { getCachedLayers as getPageLayers, saveCachedLayers } from '@/lib/mcp/page-layers';
 import { designSchema, richTextBlockSchema, templateEnum } from './shared-schemas';
@@ -694,7 +696,9 @@ page via the HTML import flow.`,
       if (!layer) {
         return { content: [{ type: 'text' as const, text: `Error: Layer "${layer_id}" not found.` }], isError: true };
       }
-      const html = layerToExportHtml(layer);
+      const assetIds = [...collectLayerAssetIds([layer], [])];
+      const assets = await getAssetsByIds(assetIds);
+      const html = layerToExportHtml(layer, buildAssetUrlMap(Object.values(assets)));
       return { content: [{ type: 'text' as const, text: html }] };
     },
   );

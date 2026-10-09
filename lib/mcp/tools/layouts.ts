@@ -56,7 +56,7 @@ without list_layouts (only use list_layouts if you need preview image URLs).`,
     {
       page_id: z.string().describe('The page ID'),
       layout_key: z.string().describe('Layout key (e.g. "hero-001", "pricing-001", "footer-002")'),
-      parent_layer_id: z.string().optional().describe('Parent layer ID. If omitted, appends to page root.'),
+      parent_layer_id: z.string().optional().describe('Parent layer ID. If omitted, appends to the page body.'),
       position: z.number().optional().describe('Position within parent. Omit to append at end.'),
     },
     async ({ page_id, layout_key, parent_layer_id, position }) => {
@@ -75,13 +75,17 @@ without list_layouts (only use list_layouts if you need preview image URLs).`,
 
       let layers: Layer[] = await getCachedLayers(page_id);
 
-      if (parent_layer_id) {
-        const parent = findLayerById(layers, parent_layer_id);
+      // Page sections belong inside the body layer, not beside it at the root.
+      const targetParentId = parent_layer_id
+        ?? layers.find((l) => l.id === 'body' || l.name === 'body')?.id;
+
+      if (targetParentId) {
+        const parent = findLayerById(layers, targetParentId);
         if (!parent) {
           return {
             content: [{
               type: 'text' as const,
-              text: `Error: Parent "${parent_layer_id}" not found.`,
+              text: `Error: Parent "${targetParentId}" not found.`,
             }],
             isError: true,
           };
@@ -95,7 +99,7 @@ without list_layouts (only use list_layouts if you need preview image URLs).`,
             isError: true,
           };
         }
-        layers = insertLayer(layers, parent_layer_id, layoutLayer, position);
+        layers = insertLayer(layers, targetParentId, layoutLayer, position);
       } else if (position !== undefined) {
         layers = [...layers];
         layers.splice(position, 0, layoutLayer);

@@ -7,7 +7,6 @@ import type { Layer, DesignProperties, Breakpoint, UIState, CollectionFieldType,
 import { generateId } from '@/lib/utils';
 import { markdownToTiptapJson } from '@/lib/markdown-to-tiptap';
 import {
-  designToClassString,
   propertyToClass,
   setBreakpointClass,
   buildBgImgVarName,
@@ -527,16 +526,37 @@ export function applyDesignToLayer(
       mergedDesign.backgrounds = bgDesign;
     }
 
-    // Regenerate base classes, preserve any state/breakpoint-prefixed classes
-    const existingClasses = Array.isArray(layer.classes) ? layer.classes : (layer.classes || '').split(' ').filter(Boolean);
-    const stateClasses = existingClasses.filter(cls =>
-      cls.match(/^(max-lg:|max-md:|lg:|md:)?(hover:|focus:|active:|disabled:|current:)/) ||
-      cls.match(/^(max-lg:|max-md:)/)
-    );
-    const baseClasses = designToClassString(mergedDesign);
-    const allClasses = baseClasses ? `${baseClasses} ${stateClasses.join(' ')}`.trim() : stateClasses.join(' ');
+    const changes: Record<string, Record<string, unknown>> = { ...inputDesign };
+    if (mergedDesign.backgrounds?.backgroundImage && (bgGradientVars || bgImageVars)) {
+      changes.backgrounds = {
+        ...(changes.backgrounds || {}),
+        backgroundImage: mergedDesign.backgrounds.backgroundImage,
+      };
+    }
 
-    return { ...layer, design: mergedDesign, classes: allClasses };
+    // Only touch classes for the properties being changed (same as the builder's
+    // useDesignSync). Layer classes can carry base classes the design object
+    // doesn't describe (e.g. layout templates), so regenerating everything from
+    // the design would silently drop them.
+    let classes = Array.isArray(layer.classes) ? [...layer.classes] : (layer.classes || '').split(' ').filter(Boolean);
+    for (const [cat, props] of Object.entries(changes)) {
+      if (!props || typeof props !== 'object') continue;
+      for (const [prop, value] of Object.entries(props)) {
+        if (prop === 'isActive' || value === undefined) continue;
+        const cls = value === null || value === ''
+          ? null
+          : propertyToClass(cat as keyof DesignProperties, prop, String(value));
+        const updated = setBreakpointClass(classes, prop, cls, 'desktop', 'neutral');
+        if (updated === classes && cls) {
+          for (const c of cls.split(' ').filter(Boolean)) {
+            if (!updated.includes(c)) updated.push(c);
+          }
+        }
+        classes = updated;
+      }
+    }
+
+    return { ...layer, design: mergedDesign, classes: classes.join(' ') };
   }
 
   // State/breakpoint path: apply each property with prefix via setBreakpointClass

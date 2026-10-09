@@ -718,6 +718,15 @@ function getVariableContent(variable: any): string {
   return (variable.data as any).content || '';
 }
 
+/** Resolve a media src variable, looking asset ids up in the caller-provided URL map. */
+function getMediaSrc(variable: any, assetUrls: Record<string, string>): string {
+  if (variable?.type === 'asset') {
+    const assetId = variable.data?.asset_id;
+    return (assetId && assetUrls[assetId]) || '';
+  }
+  return getVariableContent(variable);
+}
+
 function resolveExportTag(layer: Layer): string {
   let tag = getLayerHtmlTag(layer);
 
@@ -741,7 +750,7 @@ function buildLinkAttrs(link: LinkSettings): string[] {
   return attrs;
 }
 
-function layerToHtmlString(layer: Layer, indent: number): string {
+function layerToHtmlString(layer: Layer, indent: number, assetUrls: Record<string, string>): string {
   const pad = '  '.repeat(indent);
   const tag = resolveExportTag(layer);
   const classes = getClassesString(layer);
@@ -753,13 +762,19 @@ function layerToHtmlString(layer: Layer, indent: number): string {
     attrs.push(`id="${escapeHtml(layer.attributes.id)}"`);
   }
 
+  // The bg-[image:var(--bg-img)] class reads the image from this CSS variable.
+  const bgImageSrc = getMediaSrc(layer.variables?.backgroundImage?.src, assetUrls);
+  if (bgImageSrc) {
+    attrs.push(`style="${escapeHtml(`--bg-img:url('${bgImageSrc}')`)}"`);
+  }
+
   const linkSettings = layer.variables?.link;
   if (tag === 'a' && linkSettings) {
     attrs.push(...buildLinkAttrs(linkSettings));
   }
 
   if (layer.name === 'image') {
-    const src = getVariableContent(layer.variables?.image?.src);
+    const src = getMediaSrc(layer.variables?.image?.src, assetUrls);
     const alt = getVariableContent(layer.variables?.image?.alt);
     if (src) attrs.push(`src="${escapeHtml(src)}"`);
     attrs.push(`alt="${escapeHtml(alt)}"`);
@@ -794,8 +809,12 @@ function layerToHtmlString(layer: Layer, indent: number): string {
   }
 
   if (layer.name === 'video' || layer.name === 'audio') {
-    const src = getVariableContent(layer.variables?.[layer.name as 'video' | 'audio']?.src);
+    const src = getMediaSrc(layer.variables?.[layer.name as 'video' | 'audio']?.src, assetUrls);
     if (src) attrs.push(`src="${escapeHtml(src)}"`);
+    if (layer.name === 'video') {
+      const poster = getMediaSrc(layer.variables?.video?.poster, assetUrls);
+      if (poster) attrs.push(`poster="${escapeHtml(poster)}"`);
+    }
     if (layer.attributes?.controls) attrs.push('controls');
     if (layer.attributes?.loop) attrs.push('loop');
     if (layer.attributes?.muted) attrs.push('muted');
@@ -831,7 +850,7 @@ function layerToHtmlString(layer: Layer, indent: number): string {
   }
 
   const childHtml = layer.children
-    .map((child) => layerToHtmlString(child, indent + 1))
+    .map((child) => layerToHtmlString(child, indent + 1, assetUrls))
     .join('\n');
 
   return `${openTag}\n${childHtml}\n${pad}${closeTag}`;
@@ -839,7 +858,8 @@ function layerToHtmlString(layer: Layer, indent: number): string {
 
 /**
  * Convert a single layer and its children to HTML.
+ * @param assetUrls - Map of asset id → URL used to resolve asset-backed media
  */
-export function layerToExportHtml(layer: Layer): string {
-  return layerToHtmlString(layer, 0);
+export function layerToExportHtml(layer: Layer, assetUrls: Record<string, string> = {}): string {
+  return layerToHtmlString(layer, 0, assetUrls);
 }
