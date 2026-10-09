@@ -23,6 +23,7 @@ import {
   getDraftLayers,
   upsertDraftLayers,
 } from '@/lib/repositories/pageLayersRepository';
+import { getComponentById } from '@/lib/repositories/componentRepository';
 import { broadcastLayersChanged } from '@/lib/mcp/broadcast';
 
 interface CacheEntry {
@@ -64,9 +65,18 @@ export async function getCachedDraft(pageId: string): Promise<PageLayers | null>
 
 /**
  * Convenience: return just the layer tree (or `[]` if no draft).
+ *
+ * Agents often pass a component ID where a page ID is expected, which would
+ * otherwise surface as a misleading "Layer not found". Throw a pointer to the
+ * component tools instead (the MCP server reports thrown errors to the agent).
  */
 export async function getCachedLayers(pageId: string): Promise<Layer[]> {
   const draft = await getCachedDraft(pageId);
+  if (!draft && await getComponentById(pageId).catch(() => null)) {
+    throw new Error(
+      `"${pageId}" is a component ID, not a page ID. Edit layers inside a component with update_component_layers (component_id: "${pageId}") — it supports update_image with alt, update_text, update_design, update_link, and more.`,
+    );
+  }
   return (draft?.layers as Layer[]) || [];
 }
 

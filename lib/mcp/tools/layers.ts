@@ -309,7 +309,7 @@ or a named size ("sm", "md", "lg"). Apply on the text/heading/button layer.`,
 
   server.tool(
     'update_layer_image',
-    'Set the image source of an image layer using an asset ID (from upload_asset or list_assets). Optionally set alt text.',
+    'Set the image source of an image layer on a PAGE using an asset ID (from upload_asset or list_assets). Optionally set alt text. For images inside a component, use update_component_layers with an update_image op instead.',
     {
       page_id: z.string().describe('The page ID'),
       layer_id: z.string().describe('The image layer ID'),
