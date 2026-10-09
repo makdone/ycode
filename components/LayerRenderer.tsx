@@ -58,7 +58,7 @@ import { transformLayerIdsForInstance, resolveVariableLinks } from '@/lib/resolv
 import type { DesignColorVariable } from '@/types';
 
 /**
- * Build a map of layerId -> anchor value (attributes.id) for O(1) anchor resolution
+ * Build a map of layerId -> anchor value (the element's HTML id) for O(1) anchor resolution
  * Recursively traverses the layer tree once
  */
 function buildAnchorMap(layers: Layer[]): Record<string, string> {
@@ -66,9 +66,10 @@ function buildAnchorMap(layers: Layer[]): Record<string, string> {
 
   const traverse = (layerList: Layer[]) => {
     for (const layer of layerList) {
-      // Only add to map if layer has a custom id attribute set
-      if (layer.attributes?.id) {
-        map[layer.id] = layer.attributes.id;
+      // Same precedence as the rendered id attribute
+      const htmlId = layer.settings?.id || layer.attributes?.id;
+      if (htmlId) {
+        map[layer.id] = htmlId;
       }
       if (layer.children) {
         traverse(layer.children);

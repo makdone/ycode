@@ -13,6 +13,8 @@ import { classesToDesign } from '@/lib/tailwind-class-mapper';
 import { getClassesString, getLayerHtmlTag } from '@/lib/layer-utils';
 import { getTiptapTextContent } from '@/lib/text-format-utils';
 import { escapeHtml } from '@/lib/escape-html';
+import { generateLinkHref, isValidLinkSettings } from '@/lib/link-utils';
+import type { LinkResolutionContext } from '@/lib/link-utils';
 import { normalizeV3ToV4, resolveNamedColors } from '@/lib/tailwind-normalizer';
 import { cssToClasses } from '@/lib/import/css';
 
@@ -727,39 +729,71 @@ function getMediaSrc(variable: any, assetUrls: Record<string, string>): string {
   return getVariableContent(variable);
 }
 
-function resolveExportTag(layer: Layer): string {
-  let tag = getLayerHtmlTag(layer);
-
-  const linkSettings = layer.variables?.link;
-  const hasLink = linkSettings?.type === 'url' && linkSettings.url?.data.content;
-
-  if (hasLink && (layer.name === 'div' || layer.name === 'button')) {
-    tag = 'a';
-  }
-
-  return tag;
+/** Resolve a layer's link to the href the published page would render, or null. */
+function resolveExportHref(
+  layer: Layer,
+  assetUrls: Record<string, string>,
+  linkContext: LinkResolutionContext,
+): string | null {
+  const link = layer.variables?.link;
+  if (!link || !isValidLinkSettings(link)) return null;
+  return generateLinkHref(link, {
+    getAsset: (id) => (assetUrls[id] ? { id, public_url: assetUrls[id] } : null),
+    ...linkContext,
+  });
 }
 
-function buildLinkAttrs(link: LinkSettings): string[] {
-  const attrs: string[] = [];
-  if (link.url?.data.content) {
-    attrs.push(`href="${escapeHtml(link.url.data.content)}"`);
+function resolveExportTag(layer: Layer, href: string | null): string {
+  if (href && (layer.name === 'div' || layer.name === 'button')) {
+    return 'a';
   }
+  return getLayerHtmlTag(layer);
+}
+
+function buildLinkAttrs(link: LinkSettings, href: string): string[] {
+  const attrs = [`href="${escapeHtml(href)}"`];
   if (link.target) attrs.push(`target="${link.target}"`);
   if (link.rel) attrs.push(`rel="${escapeHtml(link.rel)}"`);
+  if (link.download) attrs.push('download');
   return attrs;
 }
 
-function layerToHtmlString(layer: Layer, indent: number, assetUrls: Record<string, string>): string {
+function layerToHtmlString(
+  layer: Layer,
+  indent: number,
+  assetUrls: Record<string, string>,
+  linkContext: LinkResolutionContext,
+): string {
   const pad = '  '.repeat(indent);
-  const tag = resolveExportTag(layer);
+  const href = resolveExportHref(layer, assetUrls, linkContext);
+  const tag = resolveExportTag(layer, href);
+  const html = layerElementToHtml(layer, indent, tag, href, assetUrls, linkContext);
+
+  // Layers that cannot become an <a> themselves (text, image, …) render inside one
+  if (href && tag !== 'a') {
+    const linkAttrs = buildLinkAttrs(layer.variables!.link!, href).join(' ');
+    return `${pad}<a ${linkAttrs}>${html.trimStart()}</a>`;
+  }
+  return html;
+}
+
+function layerElementToHtml(
+  layer: Layer,
+  indent: number,
+  tag: string,
+  href: string | null,
+  assetUrls: Record<string, string>,
+  linkContext: LinkResolutionContext,
+): string {
+  const pad = '  '.repeat(indent);
   const classes = getClassesString(layer);
 
   const attrs: string[] = [];
   if (classes) attrs.push(`class="${escapeHtml(classes)}"`);
 
-  if (layer.attributes?.id) {
-    attrs.push(`id="${escapeHtml(layer.attributes.id)}"`);
+  const htmlId = layer.settings?.id || layer.attributes?.id;
+  if (htmlId) {
+    attrs.push(`id="${escapeHtml(htmlId)}"`);
   }
 
   // The bg-[image:var(--bg-img)] class reads the image from this CSS variable.
@@ -768,9 +802,8 @@ function layerToHtmlString(layer: Layer, indent: number, assetUrls: Record<strin
     attrs.push(`style="${escapeHtml(`--bg-img:url('${bgImageSrc}')`)}"`);
   }
 
-  const linkSettings = layer.variables?.link;
-  if (tag === 'a' && linkSettings) {
-    attrs.push(...buildLinkAttrs(linkSettings));
+  if (tag === 'a' && href) {
+    attrs.push(...buildLinkAttrs(layer.variables!.link!, href));
   }
 
   if (layer.name === 'image') {
@@ -850,7 +883,7 @@ function layerToHtmlString(layer: Layer, indent: number, assetUrls: Record<strin
   }
 
   const childHtml = layer.children
-    .map((child) => layerToHtmlString(child, indent + 1, assetUrls))
+    .map((child) => layerToHtmlString(child, indent + 1, assetUrls, linkContext))
     .join('\n');
 
   return `${openTag}\n${childHtml}\n${pad}${closeTag}`;
@@ -858,8 +891,14 @@ function layerToHtmlString(layer: Layer, indent: number, assetUrls: Record<strin
 
 /**
  * Convert a single layer and its children to HTML.
- * @param assetUrls - Map of asset id → URL used to resolve asset-backed media
+ * @param assetUrls - Map of asset id → URL used to resolve asset-backed media and asset links
+ * @param linkContext - Pages, folders and anchor map for resolving page and anchor links;
+ *   without it, page links are left out and anchors fall back to the stored value
  */
-export function layerToExportHtml(layer: Layer, assetUrls: Record<string, string> = {}): string {
-  return layerToHtmlString(layer, 0, assetUrls);
+export function layerToExportHtml(
+  layer: Layer,
+  assetUrls: Record<string, string> = {},
+  linkContext: LinkResolutionContext = {},
+): string {
+  return layerToHtmlString(layer, 0, assetUrls, linkContext);
 }
