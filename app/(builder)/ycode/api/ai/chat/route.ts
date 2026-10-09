@@ -170,10 +170,10 @@ export async function POST(request: Request): Promise<Response> {
         if (!closed.value) {
           try {
             controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+            controller.close();
           } catch {
-            // reader gone; nothing to deliver
+            // reader gone; nothing to deliver or close
           }
-          controller.close();
         }
       }
     },

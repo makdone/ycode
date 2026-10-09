@@ -284,16 +284,26 @@ async function* runAgentInner(
         }
       }
     } catch (error) {
-      // Deadline hit (or the caller aborted) mid-request. The provider call was
-      // cancelled, so nothing partial is trustworthy — but edits made by earlier
-      // turns are already persisted, so end the run the same resumable way the
-      // between-turns budget check does instead of throwing the stream away.
-      if (runController.signal.aborted || (error as { name?: string })?.name === 'AbortError') {
+      // Deadline hit mid-request. The provider call was cancelled, so nothing
+      // partial is trustworthy — but edits made by earlier turns are already
+      // persisted, so end the run the same resumable way the between-turns
+      // budget check does instead of throwing the stream away.
+      if (runController.signal.aborted) {
         usage.log(model, turn);
         yield* emitPageChanges();
         yield* emitComponentChanges();
         yield usage.toEvent(model);
         yield { type: 'error', message: TIME_LIMIT_MESSAGE };
+        return;
+      }
+      // The user stopped the run. That's not a failure or a time limit, so end
+      // quietly, still reporting the edits earlier turns persisted.
+      if (callerSignal?.aborted || (error as { name?: string })?.name === 'AbortError') {
+        usage.log(model, turn);
+        yield* emitPageChanges();
+        yield* emitComponentChanges();
+        yield usage.toEvent(model);
+        yield { type: 'done', stopReason: 'cancelled' };
         return;
       }
       // The prompt is too long for the model's context window. It's rejected
