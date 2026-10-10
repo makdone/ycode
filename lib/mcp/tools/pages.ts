@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { getAllPages, getPageById, getPagesByFolder, createPage, updatePage, deletePage, duplicatePage } from '@/lib/repositories/pageRepository';
+import { getAllPages, getPageById, getPagesByFolder, getUnpublishedPageChanges, createPage, updatePage, deletePage, duplicatePage } from '@/lib/repositories/pageRepository';
 import { getAllPageFolders } from '@/lib/repositories/pageFolderRepository';
 import { upsertDraftLayers } from '@/lib/repositories/pageLayersRepository';
 import { getSettingByKey, setSetting } from '@/lib/repositories/settingsRepository';
@@ -21,11 +21,28 @@ function generateRedirectId(): string {
 export function registerPageTools(server: McpServer) {
   server.tool(
     'list_pages',
-    'List all pages in the website with their IDs, names, slugs, and folder structure',
+    `List all pages in the website with their IDs, names, slugs, and folder structure.
+
+Returns one row per page (the editable draft). has_published_version tells whether the page
+is live; has_unpublished_changes tells whether publishing would change it (same check as
+get_unpublished_changes).`,
     {},
     async () => {
-      const pages = await getAllPages();
-      const folders = await getAllPageFolders();
+      const [drafts, published, changes, folders] = await Promise.all([
+        getAllPages({ is_published: false }),
+        getAllPages({ is_published: true }),
+        getUnpublishedPageChanges().catch(() => []),
+        getAllPageFolders({ is_published: false }),
+      ]);
+      const publishedIds = new Set(published.map((p) => p.id));
+      const changedIds = new Set(changes.map((c) => c.id));
+
+      const pages = drafts.map(({ is_published, ...page }) => ({
+        ...page,
+        has_published_version: publishedIds.has(page.id),
+        has_unpublished_changes: changedIds.has(page.id),
+      }));
+
       return {
         content: [{ type: 'text' as const, text: JSON.stringify({ pages, folders }) }],
       };

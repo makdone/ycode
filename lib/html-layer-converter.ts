@@ -9,12 +9,46 @@
 
 import type { Layer, LinkSettings } from '@/types';
 import { generateId } from '@/lib/utils';
-import { classesToDesign } from '@/lib/tailwind-class-mapper';
-import { getClassesString, getLayerHtmlTag } from '@/lib/layer-utils';
+import { classesToDesign, getAffectedProperties } from '@/lib/tailwind-class-mapper';
+import { getClassesString, getLayerHtmlTag, isLeafLayer } from '@/lib/layer-utils';
 import { getTiptapTextContent } from '@/lib/text-format-utils';
 import { escapeHtml } from '@/lib/escape-html';
+import { generateLinkHref, isValidLinkSettings } from '@/lib/link-utils';
+import type { LinkResolutionContext } from '@/lib/link-utils';
 import { normalizeV3ToV4, resolveNamedColors } from '@/lib/tailwind-normalizer';
 import { cssToClasses } from '@/lib/import/css';
+
+// Numeric node types instead of the `Node` global, which server-side DOMs don't define.
+const ELEMENT_NODE = 1;
+const TEXT_NODE = 3;
+
+/** Something the import dropped or could not convert faithfully. */
+export interface HtmlImportWarning {
+  message: string;
+  /** Element path in the source HTML, e.g. `section[1] > div[2] > img[1]` */
+  path: string;
+  /** Created layer the warning applies to, when one exists */
+  layerId?: string;
+}
+
+export interface HtmlImportOptions {
+  /** Receives a warning for every dropped or lossily converted element, attribute, or class. */
+  warnings?: HtmlImportWarning[];
+  /**
+   * Input classes are already Tailwind v4, so v3 → v4 size rescaling
+   * (rounded → rounded-sm, …) is skipped.
+   */
+  tailwindV4?: boolean;
+}
+
+interface ImportContext {
+  warnings: HtmlImportWarning[] | null;
+  rescaleSizes: boolean;
+}
+
+function warn(ctx: ImportContext, path: string, message: string, layerId?: string): void {
+  ctx.warnings?.push({ message, path, ...(layerId ? { layerId } : {}) });
+}
 
 /** Returns the URL only if it's absolute, otherwise undefined (relative paths become placeholders). */
 function resolveAbsoluteUrl(url: string): string | undefined {
@@ -230,13 +264,13 @@ const HTML_TAG_TO_MARK: Record<string, string> = {
   code: 'code', kbd: 'code',
 };
 
-function collectInlineNodes(node: Node, marks: TiptapMark[]): TiptapNode[] {
+function collectInlineNodes(node: Node, marks: TiptapMark[], ctx: ImportContext, path: string): TiptapNode[] {
   const nodes: TiptapNode[] = [];
 
   for (let i = 0; i < node.childNodes.length; i++) {
     const child = node.childNodes[i];
 
-    if (child.nodeType === Node.TEXT_NODE) {
+    if (child.nodeType === TEXT_NODE) {
       const text = child.textContent || '';
       if (text) {
         nodes.push({
@@ -248,7 +282,7 @@ function collectInlineNodes(node: Node, marks: TiptapMark[]): TiptapNode[] {
       continue;
     }
 
-    if (child.nodeType !== Node.ELEMENT_NODE) continue;
+    if (child.nodeType !== ELEMENT_NODE) continue;
     const el = child as Element;
     const tag = el.tagName.toLowerCase();
 
@@ -256,6 +290,8 @@ function collectInlineNodes(node: Node, marks: TiptapMark[]): TiptapNode[] {
       nodes.push({ type: 'hardBreak' });
       continue;
     }
+
+    warnInlineAttributes(el, tag, ctx, path);
 
     if (tag === 'a') {
       const href = el.getAttribute('href') || '';
@@ -270,23 +306,35 @@ function collectInlineNodes(node: Node, marks: TiptapMark[]): TiptapNode[] {
           ...(rel ? { rel } : {}),
         },
       };
-      nodes.push(...collectInlineNodes(el, [...marks, linkMark]));
+      nodes.push(...collectInlineNodes(el, [...marks, linkMark], ctx, path));
       continue;
     }
 
     const markType = HTML_TAG_TO_MARK[tag];
     if (markType) {
-      nodes.push(...collectInlineNodes(el, [...marks, { type: markType }]));
+      nodes.push(...collectInlineNodes(el, [...marks, { type: markType }], ctx, path));
     } else {
-      nodes.push(...collectInlineNodes(el, marks));
+      nodes.push(...collectInlineNodes(el, marks, ctx, path));
     }
   }
 
   return nodes;
 }
 
-function buildRichTextDoc(el: Element) {
-  const inlineNodes = collectInlineNodes(el, []);
+/** Rich text keeps the text and marks of inline elements, but not their classes or attributes. */
+function warnInlineAttributes(el: Element, tag: string, ctx: ImportContext, path: string): void {
+  if (!ctx.warnings) return;
+  const kept = tag === 'a' ? LINK_ATTRS : [];
+  const dropped = Array.from(el.attributes)
+    .map((attr) => attr.name)
+    .filter((name) => !kept.includes(name));
+  if (dropped.length > 0) {
+    warn(ctx, `${path} > ${tag}`, `Inline <${tag}> inside text lost its ${dropped.join(', ')} (rich text keeps only text, bold/italic/underline/strike/code/sub/sup marks, and links)`);
+  }
+}
+
+function buildRichTextDoc(el: Element, ctx: ImportContext, path: string) {
+  const inlineNodes = collectInlineNodes(el, [], ctx, path);
   return {
     type: 'doc' as const,
     content: [{
@@ -301,7 +349,7 @@ function buildRichTextDoc(el: Element) {
 function isTextOnlyElement(el: Element): boolean {
   for (let i = 0; i < el.childNodes.length; i++) {
     const node = el.childNodes[i];
-    if (node.nodeType === Node.ELEMENT_NODE) {
+    if (node.nodeType === ELEMENT_NODE) {
       const child = node as Element;
       const tag = child.tagName.toLowerCase();
       if (tag !== 'br' && !INLINE_TEXT_TAGS.has(tag)) return false;
@@ -358,7 +406,7 @@ function cleanDesign(design: Layer['design']): Layer['design'] | undefined {
   return hasValues ? (cleaned as Layer['design']) : undefined;
 }
 
-function resolveImportClasses(el: Element): string {
+function resolveImportClasses(el: Element, ctx: ImportContext, path: string, layerId: string): string {
   const classAttr = el.getAttribute('class') || '';
   const styleAttr = el.getAttribute('style') || '';
 
@@ -366,18 +414,73 @@ function resolveImportClasses(el: Element): string {
   const inlineClasses = styleAttr ? styleToClasses(styleAttr) : [];
 
   const merged = [...htmlClasses, ...inlineClasses];
-  const normalized = normalizeV3ToV4(merged);
+  const normalized = normalizeV3ToV4(merged, { rescaleSizes: ctx.rescaleSizes });
   const resolved = resolveNamedColors(normalized);
+
+  if (ctx.warnings) {
+    warnDroppedStyles(styleAttr, ctx, path, layerId);
+    for (const cls of resolved) warnClass(cls, ctx, path, layerId);
+  }
 
   return resolved.join(' ');
 }
 
-function sanitizeSvg(el: Element): void {
-  el.querySelectorAll('script').forEach(s => s.remove());
+function warnDroppedStyles(styleAttr: string, ctx: ImportContext, path: string, layerId: string): void {
+  for (const decl of styleAttr.split(';').map((d) => d.trim()).filter(Boolean)) {
+    if (styleToClasses(decl).length === 0) {
+      warn(ctx, path, `Inline style "${decl}" was dropped (no Tailwind equivalent)`, layerId);
+    }
+  }
+}
+
+const VARIANT_PREFIX_RE = /^((?:[a-z0-9-]+:)+)/;
+const MOBILE_FIRST_BREAKPOINTS = new Set(['sm', 'md', 'lg', 'xl', '2xl']);
+const EDITABLE_BREAKPOINT_VARIANTS = new Set(['max-lg', 'max-md']);
+const EDITABLE_STATE_VARIANTS = new Set(['hover', 'focus', 'active', 'disabled', 'current', 'visited']);
+
+/**
+ * Classes always render, but the design panel only shows breakpoint/state
+ * variants it knows and utilities it can attribute to a design property.
+ */
+function warnClass(cls: string, ctx: ImportContext, path: string, layerId: string): void {
+  const prefix = cls.match(VARIANT_PREFIX_RE)?.[1] ?? '';
+  const variants = prefix.split(':').filter(Boolean);
+  const base = cls.slice(prefix.length);
+
+  const mobileFirst = variants.find((v) => MOBILE_FIRST_BREAKPOINTS.has(v));
+  if (mobileFirst) {
+    warn(ctx, path, `Mobile-first prefix "${mobileFirst}:" (in "${cls}") renders, but Ycode is desktop-first and can't edit it per breakpoint. Use unprefixed classes for desktop, "max-lg:" for tablet and "max-md:" for mobile`, layerId);
+    return;
+  }
+
+  const breakpoints = variants.filter((v) => EDITABLE_BREAKPOINT_VARIANTS.has(v));
+  const states = variants.filter((v) => EDITABLE_STATE_VARIANTS.has(v));
+  const isEditableVariant = breakpoints.length <= 1
+    && states.length <= 1
+    && breakpoints.length + states.length === variants.length
+    && (breakpoints.length === 0 || variants[0] === breakpoints[0]);
+  if (!isEditableVariant) {
+    warn(ctx, path, `Variant "${prefix}" (in "${cls}") renders, but has no control in the design panel`, layerId);
+    return;
+  }
+
+  if (getAffectedProperties(base).length === 0) {
+    warn(ctx, path, `Class "${base}" renders, but has no control in the design panel (editable only as a raw class)`, layerId);
+  }
+}
+
+/** Removes scripts and event handlers; returns how many were removed. */
+function sanitizeSvg(el: Element): number {
+  let removed = 0;
+  el.querySelectorAll('script').forEach(s => {
+    s.remove();
+    removed++;
+  });
   const walk = (node: Element) => {
     for (const attr of Array.from(node.attributes)) {
       if (attr.name.toLowerCase().startsWith('on')) {
         node.removeAttribute(attr.name);
+        removed++;
       }
     }
     for (let i = 0; i < node.children.length; i++) {
@@ -385,27 +488,91 @@ function sanitizeSvg(el: Element): void {
     }
   };
   walk(el);
+  return removed;
 }
 
-function elementToLayer(el: Element): Layer | null {
+const DROPPED_TAGS = new Set(['script', 'style', 'link', 'meta', 'br']);
+
+const DROPPED_TAG_HINTS: Record<string, string> = {
+  style: 'express styles as Tailwind classes',
+  script: 'add scripts via page custom code',
+  br: 'use gap or margin between blocks',
+};
+
+/** Tags imported as a plain div, losing their native behavior or content. */
+const LOSSY_TAGS = new Set([
+  'picture', 'source', 'track', 'canvas', 'embed', 'object', 'option', 'optgroup',
+  'datalist', 'output', 'progress', 'meter', 'dialog',
+]);
+
+const LINK_ATTRS = ['href', 'target', 'rel'];
+
+/** Attributes each tag maps into the layer (besides class/style/id). */
+const IMPORTED_ATTRS: Record<string, string[]> = {
+  a: LINK_ATTRS,
+  img: ['src', 'alt', 'width', 'height'],
+  input: ['type', 'placeholder', 'name'],
+  textarea: ['placeholder', 'name', 'rows'],
+  select: ['name'],
+  form: ['action', 'method'],
+  iframe: ['src'],
+  video: ['src', 'controls', 'loop', 'muted', 'autoplay'],
+  audio: ['src', 'controls', 'loop', 'muted', 'autoplay'],
+};
+
+/** Tags converted before the `id` attribute is read. */
+const ID_DROPPING_TAGS = new Set(['img', 'input', 'textarea', 'select', 'iframe', 'video', 'audio']);
+
+function warnDroppedAttributes(el: Element, tag: string, ctx: ImportContext, path: string, layerId: string): void {
+  if (!ctx.warnings || tag === 'svg') return;
+  const imported = IMPORTED_ATTRS[tag] || [];
+  const dropped = Array.from(el.attributes)
+    .map((attr) => attr.name)
+    .filter((name) => name !== 'class' && name !== 'style' && !imported.includes(name)
+      && !(name === 'id' && !ID_DROPPING_TAGS.has(tag)));
+  if (dropped.length > 0) {
+    warn(ctx, path, `Attributes dropped from <${tag}>: ${dropped.join(', ')}`, layerId);
+  }
+}
+
+function warnRelativeSrc(el: Element, tag: string, ctx: ImportContext, path: string, layerId: string, hint: string): void {
+  const rawSrc = el.getAttribute('src');
+  if (!rawSrc) {
+    warn(ctx, path, `<${tag}> has no src; ${hint}`, layerId);
+  } else if (!resolveAbsoluteUrl(rawSrc)) {
+    warn(ctx, path, `<${tag}> src "${rawSrc}" is not an absolute URL and was dropped; ${hint}`, layerId);
+  }
+}
+
+function elementToLayer(el: Element, ctx: ImportContext, path: string): Layer | null {
   const tag = el.tagName.toLowerCase();
 
-  if (tag === 'script' || tag === 'style' || tag === 'link' || tag === 'meta' || tag === 'br') {
+  if (DROPPED_TAGS.has(tag)) {
+    const hint = DROPPED_TAG_HINTS[tag];
+    warn(ctx, path, `<${tag}> is not imported${hint ? `; ${hint}` : ''}`);
     return null;
   }
 
+  const layerId = generateId('lyr');
   const layerName = TAG_TO_LAYER_NAME[tag] || 'div';
-  const classes = resolveImportClasses(el);
+  const classes = resolveImportClasses(el, ctx, path, layerId);
 
   const rawDesign = classes ? classesToDesign(classes) : undefined;
   const design = cleanDesign(rawDesign);
 
   const layer: Layer = {
-    id: generateId('lyr'),
+    id: layerId,
     name: layerName,
     classes,
     ...(design ? { design } : {}),
   };
+
+  warnDroppedAttributes(el, tag, ctx, path, layerId);
+  if (!TAG_TO_LAYER_NAME[tag]) {
+    warn(ctx, path, `Unknown tag <${tag}> was imported as a div`, layerId);
+  } else if (LOSSY_TAGS.has(tag)) {
+    warn(ctx, path, `<${tag}> was imported as a plain div and loses its native behavior`, layerId);
+  }
 
   if (HEADING_TAGS.has(tag)) {
     layer.settings = { tag };
@@ -430,10 +597,16 @@ function elementToLayer(el: Element): Layer | null {
       if (target) linkSettings.target = target;
       if (rel) linkSettings.rel = rel;
       layer.variables = { ...layer.variables, link: linkSettings };
+      if (href.startsWith('#') && href.length > 1) {
+        warn(ctx, path, `Link "${href}" was kept as a URL; use update_layer_link with an anchor target for a native anchor link`, layerId);
+      }
     }
   }
 
   if (tag === 'img') {
+    if (ctx.warnings) {
+      warnRelativeSrc(el, tag, ctx, path, layerId, 'upload it with upload_asset and set it with update_layer_image');
+    }
     const rawSrc = el.getAttribute('src');
     const alt = el.getAttribute('alt');
     const absoluteSrc = rawSrc ? resolveAbsoluteUrl(rawSrc) : undefined;
@@ -485,6 +658,9 @@ function elementToLayer(el: Element): Layer | null {
   }
 
   if (tag === 'select') {
+    if (el.querySelector('option')) {
+      warn(ctx, path, '<select> options were not imported; set them with update_layer_settings', layerId);
+    }
     const name = el.getAttribute('name');
     layer.attributes = {
       ...layer.attributes,
@@ -504,6 +680,9 @@ function elementToLayer(el: Element): Layer | null {
   }
 
   if (tag === 'iframe') {
+    if (ctx.warnings) {
+      warnRelativeSrc(el, tag, ctx, path, layerId, 'set an absolute URL with update_layer_iframe');
+    }
     const iframeSrc = resolveAbsoluteUrl(el.getAttribute('src') || '');
     if (iframeSrc) {
       layer.variables = {
@@ -517,6 +696,13 @@ function elementToLayer(el: Element): Layer | null {
   }
 
   if (tag === 'video' || tag === 'audio') {
+    if (ctx.warnings) {
+      const hasSources = el.querySelector('source') !== null;
+      warnRelativeSrc(
+        el, tag, ctx, path, layerId,
+        `${hasSources ? '<source> children are not imported; ' : ''}set the media with update_layer_video`,
+      );
+    }
     const mediaSrc = resolveAbsoluteUrl(el.getAttribute('src') || '');
     if (mediaSrc) {
       layer.variables = {
@@ -537,7 +723,9 @@ function elementToLayer(el: Element): Layer | null {
   }
 
   if (tag === 'svg') {
-    sanitizeSvg(el);
+    if (sanitizeSvg(el) > 0) {
+      warn(ctx, path, 'Scripts and event handlers were removed from <svg>', layerId);
+    }
     // Strip class/style already extracted to the icon layer's design properties
     el.removeAttribute('class');
     el.removeAttribute('style');
@@ -559,7 +747,7 @@ function elementToLayer(el: Element): Layer | null {
   const isTextLayer = TEXT_LAYER_NAMES.has(layerName);
 
   if (isTextLayer && isTextOnlyElement(el)) {
-    const doc = buildRichTextDoc(el);
+    const doc = buildRichTextDoc(el, ctx, path);
     const hasContent = doc.content[0].content.length > 0;
     if (!hasContent) {
       // Empty text elements (e.g. decorative <span>) become div layers
@@ -575,7 +763,7 @@ function elementToLayer(el: Element): Layer | null {
   }
 
   if (!isTextLayer && isTextOnlyElement(el) && el.textContent?.trim()) {
-    const doc = buildRichTextDoc(el);
+    const doc = buildRichTextDoc(el, ctx, path);
     if (CONTAINER_NAMES.has(layerName)) {
       layer.children = [makeTextLayer(doc)];
     } else {
@@ -587,20 +775,10 @@ function elementToLayer(el: Element): Layer | null {
     return layer;
   }
 
-  const children: Layer[] = [];
-  for (let i = 0; i < el.childNodes.length; i++) {
-    const node = el.childNodes[i];
-    if (node.nodeType === Node.TEXT_NODE) {
-      const text = (node.textContent || '').trim();
-      if (text) {
-        children.push(makeTextLayer(text));
-      }
-    } else if (node.nodeType === Node.ELEMENT_NODE) {
-      const childLayer = elementToLayer(node as Element);
-      if (childLayer) {
-        children.push(childLayer);
-      }
-    }
+  const children = childNodesToLayers(el, ctx, path);
+
+  if (children.length > 0 && isLeafLayer(layer)) {
+    warn(ctx, path, `<${tag}> contains block content, but its "${layerName}" layer can't have children in the editor; wrap the content in a div instead`, layerId);
   }
 
   if (isTextLayer && children.length === 0) {
@@ -620,8 +798,54 @@ function elementToLayer(el: Element): Layer | null {
   return layer;
 }
 
+function childNodesToLayers(parent: Element, ctx: ImportContext, parentPath: string): Layer[] {
+  const layers: Layer[] = [];
+  const tagCounts: Record<string, number> = {};
+
+  for (let i = 0; i < parent.childNodes.length; i++) {
+    const node = parent.childNodes[i];
+    if (node.nodeType === TEXT_NODE) {
+      const text = (node.textContent || '').trim();
+      if (text) {
+        layers.push(makeTextLayer(text));
+      }
+    } else if (node.nodeType === ELEMENT_NODE) {
+      const tag = (node as Element).tagName.toLowerCase();
+      tagCounts[tag] = (tagCounts[tag] || 0) + 1;
+      const path = `${parentPath ? `${parentPath} > ` : ''}${tag}[${tagCounts[tag]}]`;
+      const layer = elementToLayer(node as Element, ctx, path);
+      if (layer) layers.push(layer);
+    }
+  }
+
+  return layers;
+}
+
 /**
- * Parse an HTML string into a Ycode Layer tree.
+ * Convert a parsed HTML document's body into a Ycode Layer tree.
+ * Works with any DOM implementation (browser DOMParser or a server-side DOM).
+ */
+export function documentToLayers(doc: Document, options: HtmlImportOptions = {}): Layer[] {
+  const ctx: ImportContext = {
+    warnings: options.warnings ?? null,
+    rescaleSizes: !options.tailwindV4,
+  };
+
+  // Parsers hoist <style>, <link>, <title>, etc. into <head>, out of the body walk
+  if (ctx.warnings && doc.head) {
+    for (let i = 0; i < doc.head.children.length; i++) {
+      const tag = doc.head.children[i].tagName.toLowerCase();
+      if (tag === 'meta') continue;
+      const hint = DROPPED_TAG_HINTS[tag];
+      warn(ctx, `head > ${tag}`, `<${tag}> is not imported${hint ? `; ${hint}` : ''}`);
+    }
+  }
+
+  return doc.body ? childNodesToLayers(doc.body, ctx, '') : [];
+}
+
+/**
+ * Parse an HTML string into a Ycode Layer tree (browser only).
  * Converts Tailwind classes to design properties.
  * Absolute image/media URLs are preserved; relative paths become placeholders.
  */
@@ -631,24 +855,7 @@ export function htmlToLayers(html: string): Layer[] {
   try {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, 'text/html');
-
-    const layers: Layer[] = [];
-    const body = doc.body;
-
-    for (let i = 0; i < body.childNodes.length; i++) {
-      const node = body.childNodes[i];
-      if (node.nodeType === Node.ELEMENT_NODE) {
-        const layer = elementToLayer(node as Element);
-        if (layer) layers.push(layer);
-      } else if (node.nodeType === Node.TEXT_NODE) {
-        const text = (node.textContent || '').trim();
-        if (text) {
-          layers.push(makeTextLayer(text));
-        }
-      }
-    }
-
-    return layers;
+    return documentToLayers(doc);
   } catch (err) {
     console.warn('htmlToLayers: failed to parse HTML', err);
     return [];
@@ -718,48 +925,94 @@ function getVariableContent(variable: any): string {
   return (variable.data as any).content || '';
 }
 
-function resolveExportTag(layer: Layer): string {
-  let tag = getLayerHtmlTag(layer);
-
-  const linkSettings = layer.variables?.link;
-  const hasLink = linkSettings?.type === 'url' && linkSettings.url?.data.content;
-
-  if (hasLink && (layer.name === 'div' || layer.name === 'button')) {
-    tag = 'a';
+/** Resolve a media src variable, looking asset ids up in the caller-provided URL map. */
+function getMediaSrc(variable: any, assetUrls: Record<string, string>): string {
+  if (variable?.type === 'asset') {
+    const assetId = variable.data?.asset_id;
+    return (assetId && assetUrls[assetId]) || '';
   }
-
-  return tag;
+  return getVariableContent(variable);
 }
 
-function buildLinkAttrs(link: LinkSettings): string[] {
-  const attrs: string[] = [];
-  if (link.url?.data.content) {
-    attrs.push(`href="${escapeHtml(link.url.data.content)}"`);
+/** Resolve a layer's link to the href the published page would render, or null. */
+function resolveExportHref(
+  layer: Layer,
+  assetUrls: Record<string, string>,
+  linkContext: LinkResolutionContext,
+): string | null {
+  const link = layer.variables?.link;
+  if (!link || !isValidLinkSettings(link)) return null;
+  return generateLinkHref(link, {
+    getAsset: (id) => (assetUrls[id] ? { id, public_url: assetUrls[id] } : null),
+    ...linkContext,
+  });
+}
+
+function resolveExportTag(layer: Layer, href: string | null): string {
+  if (href && (layer.name === 'div' || layer.name === 'button')) {
+    return 'a';
   }
+  return getLayerHtmlTag(layer);
+}
+
+function buildLinkAttrs(link: LinkSettings, href: string): string[] {
+  const attrs = [`href="${escapeHtml(href)}"`];
   if (link.target) attrs.push(`target="${link.target}"`);
   if (link.rel) attrs.push(`rel="${escapeHtml(link.rel)}"`);
+  if (link.download) attrs.push('download');
   return attrs;
 }
 
-function layerToHtmlString(layer: Layer, indent: number): string {
+function layerToHtmlString(
+  layer: Layer,
+  indent: number,
+  assetUrls: Record<string, string>,
+  linkContext: LinkResolutionContext,
+): string {
   const pad = '  '.repeat(indent);
-  const tag = resolveExportTag(layer);
+  const href = resolveExportHref(layer, assetUrls, linkContext);
+  const tag = resolveExportTag(layer, href);
+  const html = layerElementToHtml(layer, indent, tag, href, assetUrls, linkContext);
+
+  // Layers that cannot become an <a> themselves (text, image, …) render inside one
+  if (href && tag !== 'a') {
+    const linkAttrs = buildLinkAttrs(layer.variables!.link!, href).join(' ');
+    return `${pad}<a ${linkAttrs}>${html.trimStart()}</a>`;
+  }
+  return html;
+}
+
+function layerElementToHtml(
+  layer: Layer,
+  indent: number,
+  tag: string,
+  href: string | null,
+  assetUrls: Record<string, string>,
+  linkContext: LinkResolutionContext,
+): string {
+  const pad = '  '.repeat(indent);
   const classes = getClassesString(layer);
 
   const attrs: string[] = [];
   if (classes) attrs.push(`class="${escapeHtml(classes)}"`);
 
-  if (layer.attributes?.id) {
-    attrs.push(`id="${escapeHtml(layer.attributes.id)}"`);
+  const htmlId = layer.settings?.id || layer.attributes?.id;
+  if (htmlId) {
+    attrs.push(`id="${escapeHtml(htmlId)}"`);
   }
 
-  const linkSettings = layer.variables?.link;
-  if (tag === 'a' && linkSettings) {
-    attrs.push(...buildLinkAttrs(linkSettings));
+  // The bg-[image:var(--bg-img)] class reads the image from this CSS variable.
+  const bgImageSrc = getMediaSrc(layer.variables?.backgroundImage?.src, assetUrls);
+  if (bgImageSrc) {
+    attrs.push(`style="${escapeHtml(`--bg-img:url('${bgImageSrc}')`)}"`);
+  }
+
+  if (tag === 'a' && href) {
+    attrs.push(...buildLinkAttrs(layer.variables!.link!, href));
   }
 
   if (layer.name === 'image') {
-    const src = getVariableContent(layer.variables?.image?.src);
+    const src = getMediaSrc(layer.variables?.image?.src, assetUrls);
     const alt = getVariableContent(layer.variables?.image?.alt);
     if (src) attrs.push(`src="${escapeHtml(src)}"`);
     attrs.push(`alt="${escapeHtml(alt)}"`);
@@ -794,8 +1047,12 @@ function layerToHtmlString(layer: Layer, indent: number): string {
   }
 
   if (layer.name === 'video' || layer.name === 'audio') {
-    const src = getVariableContent(layer.variables?.[layer.name as 'video' | 'audio']?.src);
+    const src = getMediaSrc(layer.variables?.[layer.name as 'video' | 'audio']?.src, assetUrls);
     if (src) attrs.push(`src="${escapeHtml(src)}"`);
+    if (layer.name === 'video') {
+      const poster = getMediaSrc(layer.variables?.video?.poster, assetUrls);
+      if (poster) attrs.push(`poster="${escapeHtml(poster)}"`);
+    }
     if (layer.attributes?.controls) attrs.push('controls');
     if (layer.attributes?.loop) attrs.push('loop');
     if (layer.attributes?.muted) attrs.push('muted');
@@ -831,7 +1088,7 @@ function layerToHtmlString(layer: Layer, indent: number): string {
   }
 
   const childHtml = layer.children
-    .map((child) => layerToHtmlString(child, indent + 1))
+    .map((child) => layerToHtmlString(child, indent + 1, assetUrls, linkContext))
     .join('\n');
 
   return `${openTag}\n${childHtml}\n${pad}${closeTag}`;
@@ -839,7 +1096,14 @@ function layerToHtmlString(layer: Layer, indent: number): string {
 
 /**
  * Convert a single layer and its children to HTML.
+ * @param assetUrls - Map of asset id → URL used to resolve asset-backed media and asset links
+ * @param linkContext - Pages, folders and anchor map for resolving page and anchor links;
+ *   without it, page links are left out and anchors fall back to the stored value
  */
-export function layerToExportHtml(layer: Layer): string {
-  return layerToHtmlString(layer, 0);
+export function layerToExportHtml(
+  layer: Layer,
+  assetUrls: Record<string, string> = {},
+  linkContext: LinkResolutionContext = {},
+): string {
+  return layerToHtmlString(layer, 0, assetUrls, linkContext);
 }

@@ -35,7 +35,7 @@ const GROUP_HINTS: Record<Exclude<AgentToolGroup, 'core'>, string> = {
   styles: 'shared reusable styles (create/apply/update, combo stacks)',
   animations: 'GSAP animation presets and raw interactions',
   localization: 'locales and translations',
-  site: 'site settings, redirects, form submissions, page/asset folders, unpublished-changes status',
+  site: 'site settings, redirects, form submissions, page/asset folders, unpublished-changes status, importing user-provided HTML',
 };
 
 /** Names of the tools in each deferred group, for discovery via load_tools. */

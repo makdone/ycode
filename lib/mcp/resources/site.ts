@@ -17,8 +17,8 @@ export function registerSiteResources(server: McpServer) {
     },
     async () => {
       const [pages, folders] = await Promise.all([
-        getAllPages(),
-        getAllPageFolders(),
+        getAllPages({ is_published: false }),
+        getAllPageFolders({ is_published: false }),
       ]);
 
       return {

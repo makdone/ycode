@@ -17,9 +17,15 @@ import {
   applyLayerSettings,
   buildLinkSettings,
   describeLink,
+  resolveLinkAnchor,
 } from '@/lib/mcp/utils';
 import type { RichTextBlock } from '@/lib/mcp/utils';
+import { buildAssetUrlMap, collectLayerAssetIds } from '@/lib/asset-utils';
 import { layerToExportHtml } from '@/lib/html-layer-converter';
+import { findLayersWithAnchorId } from '@/lib/layer-utils';
+import { getAssetsByIds } from '@/lib/repositories/assetRepository';
+import { getAllDraftPageFolders } from '@/lib/repositories/pageFolderRepository';
+import { getAllDraftPages } from '@/lib/repositories/pageRepository';
 import { collectFontFamiliesFromDesign, ensureFontsInstalled, fontWarnings } from '@/lib/mcp/font-install';
 import { getCachedLayers as getPageLayers, saveCachedLayers } from '@/lib/mcp/page-layers';
 import { designSchema, richTextBlockSchema, templateEnum } from './shared-schemas';
@@ -309,7 +315,7 @@ or a named size ("sm", "md", "lg"). Apply on the text/heading/button layer.`,
 
   server.tool(
     'update_layer_image',
-    'Set the image source of an image layer using an asset ID (from upload_asset or list_assets). Optionally set alt text.',
+    'Set the image source of an image layer on a PAGE using an asset ID (from upload_asset or list_assets). Optionally set alt text. For images inside a component, use update_component_layers with an update_image op instead.',
     {
       page_id: z.string().describe('The page ID'),
       layer_id: z.string().describe('The image layer ID'),
@@ -340,7 +346,9 @@ LINK TYPES:
 - email: Mailto link
 - phone: Tel link
 - asset: Download link to an asset
-- anchor: Set anchor_layer_id (and optionally page_id_target) to jump to a specific layer on the same or another page.`,
+- anchor: Set anchor_layer_id to jump to a section. Same page: link_type "url" with only
+  anchor_layer_id (no url). Another page: link_type "page" with page_id_target. The target
+  layer needs an HTML id (update_layer_settings html_id); the link renders as href="#<html id>".`,
     {
       page_id: z.string().describe('The page ID'),
       layer_id: z.string().describe('The layer ID'),
@@ -351,17 +359,26 @@ LINK TYPES:
       email: z.string().optional().describe('For email type: the email address'),
       phone: z.string().optional().describe('For phone type: the phone number'),
       asset_id: z.string().optional().describe('For asset type: the asset ID to download'),
-      anchor_layer_id: z.string().optional().describe('Layer ID to scroll to as an in-page anchor. Combine with link_type "url" to link to "#layer" on the same page, or with link_type "page" to link to "#layer" on another page.'),
+      anchor_layer_id: z.string().optional().describe('Layer to scroll to: its layer ID or its HTML id. The layer must have an HTML id (set via update_layer_settings html_id). With link_type "url" and no url it links within this page; with link_type "page" it links to that section on page_id_target.'),
       target: z.enum(['_blank', '_self', '_parent', '_top']).optional().describe('Link target. _blank opens new tab.'),
       rel: z.string().optional().describe('rel attribute, e.g. "noopener noreferrer", "nofollow", "sponsored", "ugc"'),
       download: z.boolean().optional().describe('When true, instruct the browser to download the linked resource instead of navigating.'),
     },
-    async ({ page_id, layer_id, ...link }) => {
+    async ({ page_id, layer_id, ...linkInput }) => {
       const layers = await getPageLayers(page_id);
       const layer = findLayerById(layers, layer_id);
       if (!layer) {
         return { content: [{ type: 'text' as const, text: `Error: Layer "${layer_id}" not found.` }], isError: true };
       }
+
+      const anchorLayers = linkInput.link_type === 'page' && linkInput.page_id_target && linkInput.page_id_target !== page_id
+        ? await getPageLayers(linkInput.page_id_target)
+        : layers;
+      const resolved = resolveLinkAnchor(linkInput, anchorLayers);
+      if ('error' in resolved) {
+        return { content: [{ type: 'text' as const, text: `Error: ${resolved.error}` }], isError: true };
+      }
+      const link = resolved.input;
 
       const updated = updateLayerById(layers, layer_id, (l) => ({
         ...l,
@@ -683,7 +700,8 @@ redirect_url: used when success_action is "redirect". Accepts an internal path "
     'export_layer_html',
     `Render a layer (and its descendants) to a self-contained HTML string with Tailwind
 classes preserved. Useful for copying a section, sharing markup, or seeding another
-page via the HTML import flow.`,
+page via the HTML import flow. Links render as <a href> with the same href the published
+page uses (page, anchor, url, email, phone, asset), so you can check link setup here.`,
     {
       page_id: z.string().describe('The page ID'),
       layer_id: z.string().describe('The layer ID to export'),
@@ -694,7 +712,21 @@ page via the HTML import flow.`,
       if (!layer) {
         return { content: [{ type: 'text' as const, text: `Error: Layer "${layer_id}" not found.` }], isError: true };
       }
-      const html = layerToExportHtml(layer);
+      const assetIds = [...collectLayerAssetIds([layer], [])];
+      const [assets, pages, folders] = await Promise.all([
+        getAssetsByIds(assetIds),
+        getAllDraftPages(),
+        getAllDraftPageFolders(),
+      ]);
+      const anchorMap = Object.fromEntries(
+        findLayersWithAnchorId(layers).map(({ layer: target, id }) => [target.id, id]),
+      );
+      const html = layerToExportHtml(layer, buildAssetUrlMap(Object.values(assets)), {
+        pages,
+        folders,
+        anchorMap,
+        pageId: page_id,
+      });
       return { content: [{ type: 'text' as const, text: html }] };
     },
   );

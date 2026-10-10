@@ -103,16 +103,21 @@ function normalizeVariables(input: Array<z.infer<typeof variableUpdateSchema>>):
 export function registerComponentTools(server: McpServer) {
   server.tool(
     'list_components',
-    'List all reusable components with their variables',
+    'List all reusable components with their variables. has_published_version tells whether the component is live; has_unpublished_changes tells whether publishing would change it (same check as get_unpublished_changes).',
     {},
     async () => {
-      const components = await getAllComponents(false);
+      const [components, published] = await Promise.all([
+        getAllComponents(false),
+        getAllComponents(true),
+      ]);
+      const publishedHashById = new Map(published.map((c) => [c.id, c.content_hash]));
       const summary = components.map((c) => ({
         id: c.id,
         name: c.name,
         variables: c.variables || [],
         layer_count: countLayers(c.layers),
-        is_published: c.is_published,
+        has_published_version: publishedHashById.has(c.id),
+        has_unpublished_changes: !publishedHashById.has(c.id) || publishedHashById.get(c.id) !== c.content_hash,
       }));
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(summary) }],
@@ -788,6 +793,7 @@ Pass variant_id to target a specific named variant; omit it to update the primar
           custom_name: z.string().optional(),
           ref_id: z.string().optional().describe('Reference ID for later operations. Style it with a follow-up update_design op referencing this ref_id.'),
           image_asset_id: z.string().optional().describe('For image layers: asset ID to display'),
+          image_alt: z.string().optional().describe('For image layers: alt text for accessibility'),
           design: designSchema.optional().describe('Optional design to apply inline when creating the layer, instead of a follow-up update_design op.'),
           variable_id: z.string().optional()
             .describe('Component variable ID to link to this layer. The bind target is derived from the variable\'s type (text/rich_text/image/link/icon/audio/video/variant) — do not pass a type. Must be an existing variable on the component.'),
@@ -900,11 +906,8 @@ Pass variant_id to target a specific named variant; omit it to update the primar
                 collectFontFamiliesFromDesign(op.design as Record<string, unknown>, fontFamilies);
               }
 
-              if (op.image_asset_id && newLayer.variables?.image) {
-                newLayer.variables = {
-                  ...newLayer.variables,
-                  image: { ...newLayer.variables.image, src: { type: 'asset', data: { asset_id: op.image_asset_id } } },
-                };
+              if ((op.image_asset_id || op.image_alt !== undefined) && newLayer.variables?.image) {
+                newLayer = applyImageUpdate(newLayer, { asset_id: op.image_asset_id, alt: op.image_alt });
               }
 
               let linkDetail = '';
@@ -1144,7 +1147,7 @@ dangling links or orphaned overrides are left behind.`,
       // because a page couldn't be cleaned.
       let cleanedPages = 0;
       try {
-        const pages = await getAllPages();
+        const pages = await getAllPages({ is_published: false });
         for (const page of pages) {
           const before = await getPageLayers(page.id);
           const after = cleanInstanceOverridesInLayers(before, component_id, variable_id, category);
