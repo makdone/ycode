@@ -230,3 +230,44 @@ type MissingFields = {
 
 const _designSchemaDriftCheck: [MissingFields] extends [never] ? true : MissingFields = true;
 void _designSchemaDriftCheck;
+
+/**
+ * Batch operations shared by batch_operations (pages) and update_component_layers
+ * (components). Kept here so the two tools accept the same shapes; the single
+ * tools (update_layer_link, update_layer_settings, update_layer_background_image)
+ * use the same helpers in lib/mcp/utils.
+ */
+export const updateLinkOp = z.object({
+  type: z.literal('update_link'),
+  layer_id: z.string().describe('Layer ID or ref_id from a prior add_layer'),
+  link_type: z.enum(['url', 'email', 'phone', 'asset', 'page']).describe('Type of link'),
+  url: z.string().optional().describe('For url type: the target URL'),
+  page_id_target: z.string().optional().describe('For page type: the target page ID'),
+  collection_item_id: z.string().optional().describe('For dynamic page links: the specific collection item. Omit to resolve per item at runtime.'),
+  email: z.string().optional().describe('For email type: the email address'),
+  phone: z.string().optional().describe('For phone type: the phone number'),
+  asset_id: z.string().optional().describe('For asset type: the asset ID to download'),
+  anchor_layer_id: z.string().optional().describe('Layer to scroll to (layer ID, ref_id, or HTML id). The target needs an HTML id (update_settings html_id). With url type and no url it links within the page; with page type it links to that section on page_id_target.'),
+  target: z.enum(['_blank', '_self', '_parent', '_top']).optional().describe('Link target. _blank opens a new tab.'),
+  rel: z.string().optional().describe('rel attribute, e.g. "noopener noreferrer", "nofollow"'),
+  download: z.boolean().optional().describe('When true, download the linked resource instead of navigating.'),
+});
+
+export const updateSettingsOp = z.object({
+  type: z.literal('update_settings'),
+  layer_id: z.string().describe('Layer ID or ref_id from a prior add_layer'),
+  tag: z.string().optional().describe('HTML tag override: h1-h6, p, span, div, section, nav, footer, header, main, aside, article'),
+  html_id: z.string().optional().describe('Custom HTML element ID (for anchor links, CSS targeting)'),
+  custom_name: z.string().optional().describe('Display name for the layer in the builder'),
+  hidden: z.boolean().optional().describe('Hide the layer everywhere (canvas and published site)'),
+  keep_in_html: z.boolean().optional().describe('When hidden, keep the element in the HTML collapsed so custom code can reveal it'),
+  custom_attributes: z.record(z.string(), z.string()).optional().describe('Custom HTML attributes as { name: value } pairs (merged into existing)'),
+  html_embed_code: z.string().optional().describe('For htmlEmbed layers: the HTML/CSS/JS code to embed'),
+});
+
+export const updateBackgroundImageOp = z.object({
+  type: z.literal('update_background_image'),
+  layer_id: z.string().describe('Layer ID or ref_id from a prior add_layer'),
+  asset_id: z.string().optional().describe('Asset ID for the background image'),
+  url: z.string().optional().describe('Direct URL for the background image (alternative to asset_id)'),
+});

@@ -13,7 +13,7 @@ import {
 } from '@/stores/useCollaborationPresenceStore';
 
 /**
- * YCode Editor Layout (Client Component)
+ * Ycode Editor Layout (Client Component)
  *
  * This layout wraps all /ycode routes and renders YCodeBuilder once.
  * By keeping YCodeBuilder at the layout level, it persists across route changes,

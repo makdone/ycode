@@ -1,7 +1,7 @@
 /**
  * Webflow Migration Service
  *
- * Orchestrates a one-click migration of a Webflow CMS site into YCode:
+ * Orchestrates a one-click migration of a Webflow CMS site into Ycode:
  * creates collections + fields from the Webflow schema, imports items as
  * drafts, resolves cross-collection references, and publishes the items
  * that are currently live on Webflow.
@@ -64,7 +64,7 @@ import type { CollectionField, CollectionFieldData } from '@/types';
 
 export const APP_ID = 'webflow';
 
-/** Hidden YCode field key that stores the Webflow item id for tracking. */
+/** Hidden Ycode field key that stores the Webflow item id for tracking. */
 const HIDDEN_FIELD_KEY = 'webflow_id';
 
 /** Concurrency cap for asset downloads from Webflow's CDN. */
@@ -123,7 +123,7 @@ export async function removeImport(importId: string): Promise<boolean> {
 // =============================================================================
 
 /**
- * Build the `data` payload for a YCode field from a Webflow field. Carries
+ * Build the `data` payload for a Ycode field from a Webflow field. Carries
  * over `validations.options` for Option fields and flags multi-asset fields.
  */
 function buildFieldData(wfField: WebflowField): CollectionFieldData {
@@ -142,7 +142,7 @@ function buildFieldData(wfField: WebflowField): CollectionFieldData {
 }
 
 /**
- * Merge Webflow option choices into an existing YCode Option field. Adds new
+ * Merge Webflow option choices into an existing Ycode Option field. Adds new
  * choices and refreshes renamed labels, keeping existing options to avoid
  * orphaning item values that reference them.
  */
@@ -173,7 +173,7 @@ async function syncOptionFieldChoices(
     }
   }
 
-  // Carry over any YCode-only options (added manually in YCode) so we don't
+  // Carry over any Ycode-only options (added manually in Ycode) so we don't
   // lose them on re-sync.
   for (const opt of existing) {
     if (!wfOptions.some((wf) => wf.id === opt.id)) {
@@ -198,14 +198,14 @@ interface CollectionScaffold {
 }
 
 /**
- * Idempotently ensure a YCode collection + field exists for every Webflow
+ * Idempotently ensure a Ycode collection + field exists for every Webflow
  * collection / field in the site. Reuses existing mappings (from a prior
  * migration of the same site) when available; only creates what's new.
  *
- * - New Webflow collection → create YCode collection + fields + tracking field.
- * - Existing Webflow collection (mapping present) → reuse YCode collection,
+ * - New Webflow collection → create Ycode collection + fields + tracking field.
+ * - Existing Webflow collection (mapping present) → reuse Ycode collection,
  *   add any new fields that appeared in Webflow since last migration.
- * - Existing collection whose YCode counterpart was deleted → recorded as an
+ * - Existing collection whose Ycode counterpart was deleted → recorded as an
  *   error and skipped.
  */
 async function ensureScaffolds(
@@ -220,14 +220,14 @@ async function ensureScaffolds(
   const scaffolds: CollectionScaffold[] = [];
   const wfToYcodeCollectionId = new Map<string, string>();
 
-  // Pass 1 — ensure YCode collections exist, so pass 2 can wire reference
-  // fields to the right YCode collection id.
+  // Pass 1 — ensure Ycode collections exist, so pass 2 can wire reference
+  // fields to the right Ycode collection id.
   for (let i = 0; i < webflowCollections.length; i++) {
     const wf = webflowCollections[i];
     const existing = mappingByWebflowId.get(wf.id);
 
-    // Reuse the existing YCode collection only if it's still present (and not
-    // soft-deleted). If the user deleted the YCode collection after a previous
+    // Reuse the existing Ycode collection only if it's still present (and not
+    // soft-deleted). If the user deleted the Ycode collection after a previous
     // migration, drop the stale mapping and recreate the collection from
     // scratch so re-importing actually brings the collection back.
     const existingCollection = existing
@@ -262,12 +262,12 @@ async function ensureScaffolds(
     }
   }
 
-  // Pass 2 — ensure each Webflow field has a matching YCode field, and that
+  // Pass 2 — ensure each Webflow field has a matching Ycode field, and that
   // a hidden tracking field exists. Missing-by-slug matching lets us recover
   // the mapping if a Webflow field was renamed or the mapping was lost.
   //
   // Imported fields are created with `key: null` (just like user-created
-  // fields) so they remain editable / deletable in the CMS UI — the YCode
+  // fields) so they remain editable / deletable in the CMS UI — the Ycode
   // builder gates field editing behind `field.key`, treating any keyed field
   // as a built-in / system field.
   for (const scaffold of scaffolds) {
@@ -291,14 +291,14 @@ async function ensureScaffolds(
         const existingField = ycodeFields.find((f) => f.id === existingFieldId);
         if (existingField) {
           // Backfill: earlier versions of this migration set `key: slug` on
-          // every imported field, which made the YCode CMS treat them as
+          // every imported field, which made the Ycode CMS treat them as
           // built-in fields and block editing. Clear the key so users can
           // edit / duplicate / delete them like any user-created field.
           if (existingField.key && existingField.id !== scaffold.recordIdFieldId) {
             await updateField(existingField.id, { key: null });
             existingField.key = null;
           }
-          // Re-sync: keep YCode's option list in step with Webflow when
+          // Re-sync: keep Ycode's option list in step with Webflow when
           // Webflow adds new choices to an Option field after migration.
           if (wfField.type === 'Option') {
             await syncOptionFieldChoices(existingField, wfField);
@@ -387,13 +387,13 @@ function fingerprintSingle(asset: WebflowAsset | null | undefined): string {
 }
 
 interface UploadAssetsContext {
-  /** Map url -> YCode asset id for download deduplication within a sync run. */
+  /** Map url -> Ycode asset id for download deduplication within a sync run. */
   cache: Map<string, string>;
   isMultiple: boolean;
 }
 
 /**
- * Download Webflow asset(s) and upload them to YCode storage, returning
+ * Download Webflow asset(s) and upload them to Ycode storage, returning
  * either a single asset id (single asset field) or a JSON array of ids
  * (multi-asset field).
  */
@@ -485,7 +485,7 @@ interface BuiltItemValues {
 
 /**
  * Build the raw values map for a single Webflow item. References stay as raw
- * Webflow ids — pass 2 (`resolveReferences`) substitutes the YCode item ids.
+ * Webflow ids — pass 2 (`resolveReferences`) substitutes the Ycode item ids.
  */
 async function buildItemValues(
   item: WebflowItem,
@@ -564,7 +564,7 @@ interface ImportItemsParams {
 }
 
 /**
- * Reconcile staged Webflow items into YCode drafts. Creates, updates, or
+ * Reconcile staged Webflow items into Ycode drafts. Creates, updates, or
  * soft-deletes as needed. Returns a map of `webflowItemId -> ycodeItemId`
  * so pass 2 can resolve references locally without extra DB hits.
  */
@@ -574,7 +574,7 @@ async function importItemsAsDrafts(
   const { scaffold, webflowItems, prevFingerprints, newFingerprints, result } = params;
   const assetCache = new Map<string, string>();
 
-  // Load existing YCode items + their values so we can dirty-check.
+  // Load existing Ycode items + their values so we can dirty-check.
   const { items: existingItems } = await getItemsByCollectionId(scaffold.ycodeCollectionId);
   const existingValues = existingItems.length > 0
     ? await getValuesByItemIds(existingItems.map((i) => i.id))
@@ -646,7 +646,7 @@ async function importItemsAsDrafts(
     result.updated += updates.length;
   }
 
-  // Soft-delete YCode items whose Webflow counterpart is gone.
+  // Soft-delete Ycode items whose Webflow counterpart is gone.
   // An item is "gone" when it has a webflow_id (so it was previously synced)
   // but wasn't matched against any incoming item in this run.
   const seenWebflowIds = new Set(webflowItems.map((wi) => wi.id));
@@ -696,7 +696,7 @@ interface ReferenceResolveParams {
 
 /**
  * Walk each collection's reference fields and replace the raw Webflow item
- * ids stored in pass 1 with the matching YCode item ids. Single Reference
+ * ids stored in pass 1 with the matching Ycode item ids. Single Reference
  * fields store a string, MultiReference fields store a JSON array.
  */
 async function resolveReferences(params: ReferenceResolveParams): Promise<void> {
@@ -711,7 +711,7 @@ async function resolveReferences(params: ReferenceResolveParams): Promise<void> 
     const itemMap = itemMaps.get(scaffold.webflowCollection.id);
     if (!itemMap || itemMap.size === 0) continue;
 
-    // Load all current YCode item values once to avoid per-item DB queries.
+    // Load all current Ycode item values once to avoid per-item DB queries.
     const ycodeItemIds = Array.from(itemMap.values());
     const valuesByItem = await getValuesByItemIds(ycodeItemIds);
 
@@ -778,7 +778,7 @@ async function resolveReferences(params: ReferenceResolveParams): Promise<void> 
 
 /**
  * For each Webflow item that's currently live on the site, publish the
- * corresponding YCode draft so both rows (`is_published` true + false)
+ * corresponding Ycode draft so both rows (`is_published` true + false)
  * exist in the database.
  */
 async function publishLiveItems(
@@ -913,10 +913,10 @@ async function runItemsSync(
 }
 
 /**
- * Idempotent migration / re-sync of a Webflow site into YCode.
+ * Idempotent migration / re-sync of a Webflow site into Ycode.
  *
- * - First run: creates the YCode collections + fields and imports items.
- * - Subsequent runs against the same site: reuse the existing YCode
+ * - First run: creates the Ycode collections + fields and imports items.
+ * - Subsequent runs against the same site: reuse the existing Ycode
  *   collections, add any new collections / fields that appeared in Webflow,
  *   and reconcile items.
  *
@@ -970,7 +970,7 @@ export async function runMigration(
       errors: [],
     };
 
-    // Build / augment the scaffolds — creates new YCode collections + fields
+    // Build / augment the scaffolds — creates new Ycode collections + fields
     // only for things that don't already exist in the import mapping.
     const scaffolds = await ensureScaffolds(
       webflowCollections,
@@ -1078,7 +1078,7 @@ async function batchUpsertValues(
   }
 }
 
-/** Soft-delete a batch of YCode items. */
+/** Soft-delete a batch of Ycode items. */
 async function batchSoftDelete(itemIds: string[]): Promise<void> {
   if (itemIds.length === 0) return;
   const client = await getSupabaseAdmin();

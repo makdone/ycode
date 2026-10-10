@@ -12,7 +12,7 @@ export const maxDuration = 300;
  * POST /ycode/api/apps/webflow/migrate
  * Body: { siteId: string }
  *
- * Runs a one-click full migration for a Webflow site: creates YCode
+ * Runs a one-click full migration for a Webflow site: creates Ycode
  * collections + fields, imports items as drafts, resolves references, and
  * publishes items currently live on Webflow.
  */

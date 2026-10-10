@@ -76,7 +76,12 @@ export const TOOL_META: Record<string, ToolMeta> = {
   update_layer_settings: write('Update layer settings'),
   update_form_settings: write('Update form settings'),
   export_layer_html: read('Export layer as HTML'),
+  import_html: write('Import HTML as layers'),
   update_layer_iframe: write('Update layer iframe'),
+  // Batches may contain delete_layer ops, but every op edits the page *draft* —
+  // nothing reaches the live site until `publish` (destructive). Marking the
+  // batch destructive would make every multi-edit turn look like a delete and
+  // push clients back to one prompt per edit, which is what batching avoids.
   batch_operations: write('Run batch layer operations'),
 
   // Layouts
@@ -216,8 +221,14 @@ type RawToolHandler = Parameters<McpServer['registerTool']>[2];
  * Wrap an McpServer so the tool files' plain `server.tool(name, description,
  * schema, handler)` calls are registered with the title and annotations from
  * TOOL_META. Everything else is forwarded to the real server.
+ *
+ * `sharedParams` are added to every tool's input schema and removed from the
+ * arguments before the tool handler runs (handlers may spread their arguments
+ * into database updates). The hosting layer reads them from the raw request.
  */
-export function withToolAnnotations(server: McpServer): McpServer {
+export function withToolAnnotations(server: McpServer, sharedParams: ZodRawShape = {}): McpServer {
+  const sharedKeys = Object.keys(sharedParams);
+
   const annotatedTool = (
     name: string,
     description: string,
@@ -225,7 +236,22 @@ export function withToolAnnotations(server: McpServer): McpServer {
     handler: RawToolHandler,
   ) => {
     const { title, annotations } = getToolAnnotations(name);
-    return server.registerTool(name, { title, description, inputSchema, annotations }, handler);
+    if (sharedKeys.length === 0) {
+      return server.registerTool(name, { title, description, inputSchema, annotations }, handler);
+    }
+
+    const callHandler = handler as (args: Record<string, unknown>, extra: unknown) => ReturnType<RawToolHandler>;
+    const withoutShared = ((args: Record<string, unknown>, extra: unknown) => {
+      const rest = { ...args };
+      for (const key of sharedKeys) delete rest[key];
+      return callHandler(rest, extra);
+    }) as RawToolHandler;
+
+    return server.registerTool(
+      name,
+      { title, description, inputSchema: { ...inputSchema, ...sharedParams }, annotations },
+      withoutShared,
+    );
   };
 
   return new Proxy(server, {

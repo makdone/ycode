@@ -239,7 +239,7 @@ export async function listItems(
 
 /**
  * Return the set of item ids currently live for a collection. Used by
- * the migration / re-sync to decide which YCode draft items to publish.
+ * the migration / re-sync to decide which Ycode draft items to publish.
  */
 export async function listLiveItemIds(
   token: string,

@@ -25,7 +25,8 @@ export function isValidLinkSettings(link: LinkSettings | undefined | null): bool
 
   switch (link.type) {
     case 'url':
-      return !!link.url?.data?.content;
+      // An anchor alone is a same-page link (href="#anchor")
+      return !!link.url?.data?.content || !!link.anchor_layer_id;
     case 'email':
       return !!link.email?.data?.content;
     case 'phone':

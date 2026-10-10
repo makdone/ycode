@@ -1,7 +1,7 @@
 /**
  * Convert Webflow rich-text HTML into a TipTap JSON document string.
  *
- * Webflow's CMS RichText fields are returned as raw HTML. YCode's `rich_text`
+ * Webflow's CMS RichText fields are returned as raw HTML. Ycode's `rich_text`
  * field expects a serialized TipTap document. This converter handles the
  * common subset (paragraphs, headings, lists, bold/italic/links) and falls
  * back to a single paragraph with stripped text for anything unrecognized.

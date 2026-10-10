@@ -71,85 +71,83 @@ export default function McpLegacyTokens({ tokens, onGenerate, onDelete }: McpLeg
       open={open}
       onOpenChange={setOpen}
     >
-      <div className="border rounded-lg overflow-hidden">
-        <CollapsibleTrigger asChild>
-          <div
-            role="button"
-            tabIndex={0}
-            className="w-full flex items-center gap-3 p-4 text-left hover:bg-secondary/30 transition-colors cursor-pointer"
-          >
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium pointer-events-none">Advanced: legacy URL tokens</div>
-              <div className="text-xs text-muted-foreground pointer-events-none">
-                For clients that don&apos;t support OAuth. The token is part of the URL and never expires.
-              </div>
-            </div>
-            <Icon
-              name={open ? 'triangle-down' : 'triangle-right'}
-              className="text-muted-foreground shrink-0"
-            />
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-1">
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              className="flex items-center gap-2 self-start text-base font-medium hover:text-foreground/80 transition-colors cursor-pointer"
+            >
+              Legacy URL tokens
+              <Icon
+                name={open ? 'triangle-down' : 'triangle-right'}
+                className="size-3 shrink-0 text-muted-foreground"
+              />
+            </button>
+          </CollapsibleTrigger>
+          <p className="text-sm text-muted-foreground">
+            For clients that don&apos;t support OAuth. The token is part of the URL and never expires.
+          </p>
+        </div>
+
+        <CollapsibleContent className="flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-4 bg-secondary/20 p-4 rounded-lg">
+            <p className="text-xs text-muted-foreground">
+              Anyone with a URL token can access this project. Prefer the OAuth URL above whenever
+              your client supports it.
+            </p>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="shrink-0"
+              onClick={() => setShowGenerateDialog(true)}
+            >
+              Generate URL token
+            </Button>
           </div>
-        </CollapsibleTrigger>
 
-        <CollapsibleContent>
-          <div className="border-t p-4 flex flex-col gap-4">
-            <div className="flex items-center justify-between gap-4">
-              <p className="text-xs text-muted-foreground">
-                Anyone with a URL token can access this project. Prefer the OAuth URL above whenever
-                your client supports it.
-              </p>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setShowGenerateDialog(true)}
-              >
-                Generate URL token
-              </Button>
-            </div>
-
-            {tokens.length > 0 && (
-              <div className="flex flex-col gap-2">
-                {tokens.map((token) => (
-                  <div
-                    key={token.id}
-                    className="flex items-center gap-4 p-3 bg-secondary/20 rounded-lg"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-3 mb-0.5">
-                        <Label className="font-medium text-xs truncate">{token.name}</Label>
-                        <code className="text-xs text-muted-foreground bg-secondary px-1.5 py-0.5 rounded font-mono">
-                          {token.token_prefix}…
-                        </code>
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        Created {formatDate(token.created_at, 'MMM D, YYYY')} · {token.last_used_at ? `last used ${formatRelativeTime(token.last_used_at, false)}` : 'never used'}
-                      </div>
+          {tokens.length > 0 && (
+            <div className="flex flex-col gap-3">
+              {tokens.map((token) => (
+                <div
+                  key={token.id}
+                  className="flex items-center gap-4 p-4 bg-secondary/20 rounded-lg"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-3 mb-1">
+                      <Label className="font-medium truncate">{token.name}</Label>
+                      <code className="text-xs text-muted-foreground bg-secondary px-1.5 py-0.5 rounded font-mono">
+                        {token.token_prefix}…
+                      </code>
                     </div>
-
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant="secondary"
-                          size="xs"
-                          aria-label={`Actions for ${token.name}`}
-                        >
-                          <Icon name="more" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          className="text-destructive focus:text-destructive"
-                          onClick={() => onDelete(token)}
-                        >
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    <div className="text-xs text-muted-foreground">
+                      Created {formatDate(token.created_at, 'MMM D, YYYY')} · {token.last_used_at ? `last used ${formatRelativeTime(token.last_used_at, false)}` : 'never used'}
+                    </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
+
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="secondary"
+                        size="xs"
+                        aria-label={`Actions for ${token.name}`}
+                      >
+                        <Icon name="more" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        className="text-destructive focus:text-destructive"
+                        onClick={() => onDelete(token)}
+                      >
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              ))}
+            </div>
+          )}
         </CollapsibleContent>
       </div>
 
@@ -224,7 +222,7 @@ export default function McpLegacyTokens({ tokens, onGenerate, onDelete }: McpLeg
               </div>
             )}
             <p className="text-xs text-muted-foreground mt-3">
-              Keep this URL private. Anyone with this URL can access your YCode project through MCP.
+              Keep this URL private. Anyone with this URL can access your Ycode project through MCP.
             </p>
           </div>
           <DialogFooter>

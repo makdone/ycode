@@ -7,7 +7,7 @@ export const revalidate = 0;
 
 /**
  * DELETE /ycode/api/apps/webflow/imports/[importId]
- * Remove an import record. The YCode collections that were created by the
+ * Remove an import record. The Ycode collections that were created by the
  * migration are NOT deleted — they stay around for the user to keep using.
  */
 export async function DELETE(

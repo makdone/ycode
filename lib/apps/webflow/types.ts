@@ -133,7 +133,7 @@ export type WebflowSyncStatus = 'idle' | 'syncing' | 'error';
 
 /**
  * One row inside a `WebflowImport.collectionMappings` array — links a single
- * Webflow CMS collection to the YCode collection that was created for it.
+ * Webflow CMS collection to the Ycode collection that was created for it.
  */
 export interface WebflowCollectionMapping {
   webflowCollectionId: string;
@@ -141,16 +141,16 @@ export interface WebflowCollectionMapping {
   webflowSlug: string;
   ycodeCollectionId: string;
   ycodeCollectionName: string;
-  /** YCode field ID of the hidden `webflow_id` tracking field. */
+  /** Ycode field ID of the hidden `webflow_id` tracking field. */
   recordIdFieldId: string;
   /**
-   * Mapping of Webflow field id -> YCode field id, captured at migration time.
+   * Mapping of Webflow field id -> Ycode field id, captured at migration time.
    * Used by re-sync so it doesn't have to re-derive the mapping.
    */
   fieldIdMap: Record<string, string>;
-  /** Mapping of Webflow slug -> YCode field id (lookup by slug for `fieldData`). */
+  /** Mapping of Webflow slug -> Ycode field id (lookup by slug for `fieldData`). */
   fieldSlugMap: Record<string, string>;
-  /** Webflow field ids whose YCode counterpart is a Reference / MultiReference. */
+  /** Webflow field ids whose Ycode counterpart is a Reference / MultiReference. */
   referenceFieldIds: string[];
 }
 

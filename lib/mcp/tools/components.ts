@@ -19,6 +19,11 @@ import {
   getTiptapTextContent,
   buildTiptapDoc,
   applyDesignToLayer,
+  applyImageUpdate,
+  describeImageUpdate,
+  applyLayerSettings,
+  buildLinkSettings,
+  describeLink,
   generateId,
 } from '@/lib/mcp/utils';
 import type { RichTextBlock } from '@/lib/mcp/utils';
@@ -40,7 +45,7 @@ import {
   broadcastComponentDeleted,
   broadcastComponentLayersUpdated,
 } from '@/lib/mcp/broadcast';
-import { designSchema, richTextBlockSchema, templateEnum } from './shared-schemas';
+import { designSchema, richTextBlockSchema, templateEnum, updateLinkOp, updateSettingsOp } from './shared-schemas';
 
 const variableTypeEnum = z.enum(['text', 'rich_text', 'image', 'link', 'audio', 'video', 'icon', 'variant', 'visibility', 'id'])
   .describe('Variable type. "variant" lets instances pick which variant of a nested component is rendered. "visibility" is a boolean ({ visible: true|false }) that shows/hides the linked layer per instance. "id" is a string ({ id: "my-element" }) that sets the linked layer\'s HTML id attribute per instance (e.g. per-page tracking ids).');
@@ -98,16 +103,21 @@ function normalizeVariables(input: Array<z.infer<typeof variableUpdateSchema>>):
 export function registerComponentTools(server: McpServer) {
   server.tool(
     'list_components',
-    'List all reusable components with their variables',
+    'List all reusable components with their variables. has_published_version tells whether the component is live; has_unpublished_changes tells whether publishing would change it (same check as get_unpublished_changes).',
     {},
     async () => {
-      const components = await getAllComponents(false);
+      const [components, published] = await Promise.all([
+        getAllComponents(false),
+        getAllComponents(true),
+      ]);
+      const publishedHashById = new Map(published.map((c) => [c.id, c.content_hash]));
       const summary = components.map((c) => ({
         id: c.id,
         name: c.name,
         variables: c.variables || [],
         layer_count: countLayers(c.layers),
-        is_published: c.is_published,
+        has_published_version: publishedHashById.has(c.id),
+        has_unpublished_changes: !publishedHashById.has(c.id) || publishedHashById.get(c.id) !== c.content_hash,
       }));
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(summary) }],
@@ -753,6 +763,10 @@ the batch_operations equivalent for components — use it to build or change a c
 internal structure. Use ref_id in add_layer to name layers, then reference them in
 later operations (e.g. a follow-up update_design op to style a just-added layer).
 
+OPERATIONS: add_layer, update_design, update_text, set_rich_text, update_image (asset and/or
+alt), update_link, update_settings (tag, id, name, hidden, attributes, embed code), apply_style,
+move_layer, delete_layer, link_variable. Put every change to one component in a single call.
+
 LINKING VARIABLES: A component variable does nothing until it is linked to a layer. Link it
 by passing variable_id on the add_layer operation, or with a separate link_variable operation.
 The link target and shape are derived automatically from the variable's declared type (you do
@@ -779,6 +793,7 @@ Pass variant_id to target a specific named variant; omit it to update the primar
           custom_name: z.string().optional(),
           ref_id: z.string().optional().describe('Reference ID for later operations. Style it with a follow-up update_design op referencing this ref_id.'),
           image_asset_id: z.string().optional().describe('For image layers: asset ID to display'),
+          image_alt: z.string().optional().describe('For image layers: alt text for accessibility'),
           design: designSchema.optional().describe('Optional design to apply inline when creating the layer, instead of a follow-up update_design op.'),
           variable_id: z.string().optional()
             .describe('Component variable ID to link to this layer. The bind target is derived from the variable\'s type (text/rich_text/image/link/icon/audio/video/variant) — do not pass a type. Must be an existing variable on the component.'),
@@ -799,7 +814,8 @@ Pass variant_id to target a specific named variant; omit it to update the primar
         z.object({
           type: z.literal('update_image'),
           layer_id: z.string().describe('Layer ID or ref_id'),
-          asset_id: z.string().describe('Asset ID from upload_asset'),
+          asset_id: z.string().optional().describe('Asset ID from upload_asset. Omit to keep the current image and only change alt.'),
+          alt: z.string().optional().describe('Image alt text for accessibility. Omit to keep the current alt.'),
         }),
         z.object({
           type: z.literal('set_rich_text'),
@@ -829,6 +845,8 @@ Pass variant_id to target a specific named variant; omit it to update the primar
           variable_type: variableTypeEnum.default('text')
             .describe('Optional/legacy — the type is auto-detected from the variable definition. Ignored when the variable exists.'),
         }),
+        updateLinkOp,
+        updateSettingsOp,
       ])).min(1).max(50),
     },
     async ({ component_id, variant_id, operations }) => {
@@ -888,11 +906,8 @@ Pass variant_id to target a specific named variant; omit it to update the primar
                 collectFontFamiliesFromDesign(op.design as Record<string, unknown>, fontFamilies);
               }
 
-              if (op.image_asset_id && newLayer.variables?.image) {
-                newLayer.variables = {
-                  ...newLayer.variables,
-                  image: { ...newLayer.variables.image, src: { type: 'asset', data: { asset_id: op.image_asset_id } } },
-                };
+              if ((op.image_asset_id || op.image_alt !== undefined) && newLayer.variables?.image) {
+                newLayer = applyImageUpdate(newLayer, { asset_id: op.image_asset_id, alt: op.image_alt });
               }
 
               let linkDetail = '';
@@ -952,27 +967,17 @@ Pass variant_id to target a specific named variant; omit it to update the primar
               const layerId = refMap.get(op.layer_id) || op.layer_id;
               const layer = findLayerById(layers, layerId);
               if (!layer) { results.push({ op: i, status: 'error', detail: `Layer "${op.layer_id}" not found` }); continue; }
-              layers = updateLayerById(layers, layerId, (l) => {
-                const existing = (l.variables?.image || {}) as Record<string, unknown>;
-                const existingSrc = l.variables?.image?.src as { id?: string } | undefined;
-                return {
-                  ...l,
-                  variables: {
-                    ...l.variables,
-                    image: {
-                      ...existing,
-                      // Preserve any linked component-variable id on src.
-                      src: {
-                        type: 'asset' as const,
-                        ...(existingSrc?.id ? { id: existingSrc.id } : {}),
-                        data: { asset_id: op.asset_id },
-                      },
-                      alt: (existing.alt || { type: 'dynamic_text' as const, data: { content: '' } }) as { type: 'dynamic_text'; data: { content: string } },
-                    },
-                  },
-                };
-              });
-              results.push({ op: i, status: 'ok', detail: `Set image on "${layer.customName || layer.name}"` });
+              if (op.asset_id === undefined && op.alt === undefined) {
+                results.push({ op: i, status: 'error', detail: 'update_image needs asset_id and/or alt' });
+                continue;
+              }
+              if (op.asset_id === undefined && !layer.variables?.image?.src) {
+                results.push({ op: i, status: 'error', detail: `"${layer.customName || layer.name}" has no image yet — pass asset_id to set one before alt` });
+                continue;
+              }
+              // applyImageUpdate keeps a linked component-variable id on src.
+              layers = updateLayerById(layers, layerId, (l) => applyImageUpdate(l, op));
+              results.push({ op: i, status: 'ok', detail: `${describeImageUpdate(op)} on "${layer.customName || layer.name}"` });
               break;
             }
 
@@ -1004,6 +1009,28 @@ Pass variant_id to target a specific named variant; omit it to update the primar
               if (!layer) { results.push({ op: i, status: 'error', detail: `Layer "${op.layer_id}" not found` }); continue; }
               layers = updateLayerById(layers, layerId, (l) => ({ ...l, styleId: op.style_id }));
               results.push({ op: i, status: 'ok', detail: `Applied style to "${layer.customName || layer.name}"` });
+              break;
+            }
+
+            case 'update_link': {
+              const layerId = refMap.get(op.layer_id) || op.layer_id;
+              const layer = findLayerById(layers, layerId);
+              if (!layer) { results.push({ op: i, status: 'error', detail: `Layer "${op.layer_id}" not found` }); continue; }
+              // buildLinkSettings keeps a linked component variable (variable_id) on the link.
+              layers = updateLayerById(layers, layerId, (l) => ({
+                ...l,
+                variables: { ...l.variables, link: buildLinkSettings(op, l.variables?.link) },
+              }));
+              results.push({ op: i, status: 'ok', detail: `${describeLink(op)} on "${layer.customName || layer.name}"` });
+              break;
+            }
+
+            case 'update_settings': {
+              const layerId = refMap.get(op.layer_id) || op.layer_id;
+              const layer = findLayerById(layers, layerId);
+              if (!layer) { results.push({ op: i, status: 'error', detail: `Layer "${op.layer_id}" not found` }); continue; }
+              layers = updateLayerById(layers, layerId, (l) => applyLayerSettings(l, op));
+              results.push({ op: i, status: 'ok', detail: `Updated settings on "${layer.customName || layer.name}"` });
               break;
             }
 
@@ -1120,7 +1147,7 @@ dangling links or orphaned overrides are left behind.`,
       // because a page couldn't be cleaned.
       let cleanedPages = 0;
       try {
-        const pages = await getAllPages();
+        const pages = await getAllPages({ is_published: false });
         for (const page of pages) {
           const before = await getPageLayers(page.id);
           const after = cleanInstanceOverridesInLayers(before, component_id, variable_id, category);

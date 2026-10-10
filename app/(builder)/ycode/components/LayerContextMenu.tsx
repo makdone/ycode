@@ -23,6 +23,8 @@ import { useClipboardStore } from '@/stores/useClipboardStore';
 import { useExternalPasteStore } from '@/stores/useExternalPasteStore';
 import { isClipboardReadGranted, readExternalDesignClipboard } from '@/lib/import/clipboard-detect';
 import { useComponentsStore } from '@/stores/useComponentsStore';
+import { useAssetsStore } from '@/stores/useAssetsStore';
+import { buildAssetUrlMap, collectLayerAssetIds } from '@/lib/asset-utils';
 import { canHaveChildren, canPasteIntoParent, LINK_NESTING_ERROR, findLayerById, getClassesString, regenerateInteractionIds, canCopyLayer, canDeleteLayer, regenerateIdsWithInteractionRemapping, removeLayerById, findParentAndIndex, insertLayerAfter, updateLayerProps, canConvertToCollection, isExcludedFromCollection, getCollectionVariable, getTextHeadingConversion, resetBindingsOnCollectionSourceChange } from '@/lib/layer-utils';
 import { getStyleIds } from '@/lib/layer-style-resolve';
 import { getLayerIcon, getLayerName } from '@/lib/layer-display-utils';
@@ -32,7 +34,7 @@ import { Icon } from '@/components/ui/icon';
 import { detachSpecificLayerFromComponent, checkCircularReference } from '@/lib/component-utils';
 import type { UseLiveLayerUpdatesReturn } from '@/hooks/use-live-layer-updates';
 import type { UseLiveComponentUpdatesReturn } from '@/hooks/use-live-component-updates';
-import type { Layer } from '@/types';
+import type { Asset, Layer } from '@/types';
 import CreateComponentDialog from './CreateComponentDialog';
 import SaveLayoutDialog from './SaveLayoutDialog';
 import ImportHtmlDialog from './ImportHtmlDialog';
@@ -730,7 +732,11 @@ function LayerContextMenuInner({
 
   const handleExportHtml = () => {
     if (!layer) return;
-    const html = layerToExportHtml(layer);
+    const { getAsset } = useAssetsStore.getState();
+    const assets = [...collectLayerAssetIds([layer], [])]
+      .map((id) => getAsset(id))
+      .filter((asset): asset is Asset => asset !== null);
+    const html = layerToExportHtml(layer, buildAssetUrlMap(assets));
     setExportHtml(html);
     setIsExportHtmlOpen(true);
   };

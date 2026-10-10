@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { DesignProperties, Layer, LinkSettings } from '@/types';
+import type { DesignProperties, Layer } from '@/types';
 import {
   findLayerById,
   updateLayerById,
@@ -12,10 +12,20 @@ import {
   getTiptapTextContent,
   buildTiptapDoc,
   applyDesignToLayer,
-  applyBackgroundImageDesign,
+  applyBackgroundImage,
+  applyImageUpdate,
+  applyLayerSettings,
+  buildLinkSettings,
+  describeLink,
+  resolveLinkAnchor,
 } from '@/lib/mcp/utils';
 import type { RichTextBlock } from '@/lib/mcp/utils';
+import { buildAssetUrlMap, collectLayerAssetIds } from '@/lib/asset-utils';
 import { layerToExportHtml } from '@/lib/html-layer-converter';
+import { findLayersWithAnchorId } from '@/lib/layer-utils';
+import { getAssetsByIds } from '@/lib/repositories/assetRepository';
+import { getAllDraftPageFolders } from '@/lib/repositories/pageFolderRepository';
+import { getAllDraftPages } from '@/lib/repositories/pageRepository';
 import { collectFontFamiliesFromDesign, ensureFontsInstalled, fontWarnings } from '@/lib/mcp/font-install';
 import { getCachedLayers as getPageLayers, saveCachedLayers } from '@/lib/mcp/page-layers';
 import { designSchema, richTextBlockSchema, templateEnum } from './shared-schemas';
@@ -305,12 +315,12 @@ or a named size ("sm", "md", "lg"). Apply on the text/heading/button layer.`,
 
   server.tool(
     'update_layer_image',
-    'Set the image source of an image layer using an asset ID (from upload_asset or list_assets). Optionally set alt text.',
+    'Set the image source of an image layer on a PAGE using an asset ID (from upload_asset or list_assets). Optionally set alt text. For images inside a component, use update_component_layers with an update_image op instead.',
     {
       page_id: z.string().describe('The page ID'),
       layer_id: z.string().describe('The image layer ID'),
       asset_id: z.string().describe('Asset ID from the asset library'),
-      alt: z.string().optional().describe('Image alt text for accessibility'),
+      alt: z.string().optional().describe('Image alt text for accessibility. Omit to keep the current alt.'),
     },
     async ({ page_id, layer_id, asset_id, alt }) => {
       const layers = await getPageLayers(page_id);
@@ -319,16 +329,7 @@ or a named size ("sm", "md", "lg"). Apply on the text/heading/button layer.`,
         return { content: [{ type: 'text' as const, text: `Error: Layer "${layer_id}" not found.` }], isError: true };
       }
 
-      const updated = updateLayerById(layers, layer_id, (l) => ({
-        ...l,
-        variables: {
-          ...l.variables,
-          image: {
-            src: { type: 'asset' as const, data: { asset_id } },
-            alt: { type: 'dynamic_text' as const, data: { content: alt || '' } },
-          },
-        },
-      }));
+      const updated = updateLayerById(layers, layer_id, (l) => applyImageUpdate(l, { asset_id, alt }));
 
       await savePageLayers(page_id, updated);
       return { content: [{ type: 'text' as const, text: `Set image for "${layer.customName || layer.name}" to asset ${asset_id}` }] };
@@ -345,7 +346,9 @@ LINK TYPES:
 - email: Mailto link
 - phone: Tel link
 - asset: Download link to an asset
-- anchor: Set anchor_layer_id (and optionally page_id_target) to jump to a specific layer on the same or another page.`,
+- anchor: Set anchor_layer_id to jump to a section. Same page: link_type "url" with only
+  anchor_layer_id (no url). Another page: link_type "page" with page_id_target. The target
+  layer needs an HTML id (update_layer_settings html_id); the link renders as href="#<html id>".`,
     {
       page_id: z.string().describe('The page ID'),
       layer_id: z.string().describe('The layer ID'),
@@ -356,40 +359,34 @@ LINK TYPES:
       email: z.string().optional().describe('For email type: the email address'),
       phone: z.string().optional().describe('For phone type: the phone number'),
       asset_id: z.string().optional().describe('For asset type: the asset ID to download'),
-      anchor_layer_id: z.string().optional().describe('Layer ID to scroll to as an in-page anchor. Combine with link_type "url" to link to "#layer" on the same page, or with link_type "page" to link to "#layer" on another page.'),
+      anchor_layer_id: z.string().optional().describe('Layer to scroll to: its layer ID or its HTML id. The layer must have an HTML id (set via update_layer_settings html_id). With link_type "url" and no url it links within this page; with link_type "page" it links to that section on page_id_target.'),
       target: z.enum(['_blank', '_self', '_parent', '_top']).optional().describe('Link target. _blank opens new tab.'),
       rel: z.string().optional().describe('rel attribute, e.g. "noopener noreferrer", "nofollow", "sponsored", "ugc"'),
       download: z.boolean().optional().describe('When true, instruct the browser to download the linked resource instead of navigating.'),
     },
-    async ({ page_id, layer_id, link_type, url, page_id_target, collection_item_id, email, phone, asset_id, anchor_layer_id, target, rel, download }) => {
+    async ({ page_id, layer_id, ...linkInput }) => {
       const layers = await getPageLayers(page_id);
       const layer = findLayerById(layers, layer_id);
       if (!layer) {
         return { content: [{ type: 'text' as const, text: `Error: Layer "${layer_id}" not found.` }], isError: true };
       }
 
-      const link: LinkSettings = { type: link_type };
-      if (link_type === 'url' && url) link.url = { type: 'dynamic_text', data: { content: url } };
-      if (link_type === 'email' && email) link.email = { type: 'dynamic_text', data: { content: email } };
-      if (link_type === 'phone' && phone) link.phone = { type: 'dynamic_text', data: { content: phone } };
-      if (link_type === 'asset' && asset_id) link.asset = { id: asset_id };
-      if (link_type === 'page' && page_id_target) {
-        link.page = collection_item_id
-          ? { id: page_id_target, collection_item_id }
-          : { id: page_id_target };
+      const anchorLayers = linkInput.link_type === 'page' && linkInput.page_id_target && linkInput.page_id_target !== page_id
+        ? await getPageLayers(linkInput.page_id_target)
+        : layers;
+      const resolved = resolveLinkAnchor(linkInput, anchorLayers);
+      if ('error' in resolved) {
+        return { content: [{ type: 'text' as const, text: `Error: ${resolved.error}` }], isError: true };
       }
-      if (anchor_layer_id) link.anchor_layer_id = anchor_layer_id;
-      if (target) link.target = target;
-      if (rel !== undefined) link.rel = rel;
-      if (download !== undefined) link.download = download;
+      const link = resolved.input;
 
       const updated = updateLayerById(layers, layer_id, (l) => ({
         ...l,
-        variables: { ...l.variables, link },
+        variables: { ...l.variables, link: buildLinkSettings(link, l.variables?.link) },
       }));
 
       await savePageLayers(page_id, updated);
-      return { content: [{ type: 'text' as const, text: `Set ${link_type} link on "${layer.customName || layer.name}"` }] };
+      return { content: [{ type: 'text' as const, text: `${describeLink(link)} on "${layer.customName || layer.name}"` }] };
     },
   );
 
@@ -450,17 +447,10 @@ LINK TYPES:
         return { content: [{ type: 'text' as const, text: 'Error: Provide either asset_id or url.' }], isError: true };
       }
 
-      const src = asset_id
-        ? { type: 'asset' as const, data: { asset_id } }
-        : { type: 'dynamic_text' as const, data: { content: url! } };
-
-      // Set the variable AND the design/classes that render it — the variable
+      // Sets the variable AND the design/classes that render it — the variable
       // alone only supplies the --bg-img value, nothing displays it without
       // the bg-[image:var(--bg-img)] class.
-      const updated = updateLayerById(layers, layer_id, (l) => applyBackgroundImageDesign({
-        ...l,
-        variables: { ...l.variables, backgroundImage: { src } },
-      }));
+      const updated = updateLayerById(layers, layer_id, (l) => applyBackgroundImage(l, { asset_id, url }));
 
       await savePageLayers(page_id, updated);
       const updatedLayer = findLayerById(updated, layer_id);
@@ -573,16 +563,12 @@ COMMON USES:
         return { content: [{ type: 'text' as const, text: `Error: Layer "${layer_id}" not found.` }], isError: true };
       }
 
-      const updated = updateLayerById(layers, layer_id, (l) => {
+      const updated = updateLayerById(layers, layer_id, (rawLayer) => {
+        // Element-agnostic settings share a helper with the batch `update_settings` op.
+        const l = applyLayerSettings(rawLayer, { tag, html_id, custom_name, hidden, keep_in_html, custom_attributes, html_embed_code });
         const settings = { ...l.settings };
-        if (tag) settings.tag = tag;
-        if (html_id) settings.id = html_id;
-        if (hidden !== undefined) settings.hidden = hidden;
-        if (keep_in_html !== undefined) settings.keepInHtml = keep_in_html;
         if (filter_on_change !== undefined) settings.filterOnChange = filter_on_change;
         if (is_placeholder !== undefined) settings.isPlaceholder = is_placeholder;
-        if (custom_attributes) settings.customAttributes = { ...settings.customAttributes, ...custom_attributes };
-        if (html_embed_code !== undefined) settings.htmlEmbed = { ...settings.htmlEmbed, code: html_embed_code };
         if (slider) {
           const existing = settings.slider || {} as Record<string, unknown>;
           settings.slider = {
@@ -658,11 +644,7 @@ COMMON USES:
           };
         }
 
-        return {
-          ...l,
-          settings,
-          ...(custom_name ? { customName: custom_name } : {}),
-        };
+        return { ...l, settings };
       });
 
       await savePageLayers(page_id, updated);
@@ -718,7 +700,8 @@ redirect_url: used when success_action is "redirect". Accepts an internal path "
     'export_layer_html',
     `Render a layer (and its descendants) to a self-contained HTML string with Tailwind
 classes preserved. Useful for copying a section, sharing markup, or seeding another
-page via the HTML import flow.`,
+page via the HTML import flow. Links render as <a href> with the same href the published
+page uses (page, anchor, url, email, phone, asset), so you can check link setup here.`,
     {
       page_id: z.string().describe('The page ID'),
       layer_id: z.string().describe('The layer ID to export'),
@@ -729,7 +712,21 @@ page via the HTML import flow.`,
       if (!layer) {
         return { content: [{ type: 'text' as const, text: `Error: Layer "${layer_id}" not found.` }], isError: true };
       }
-      const html = layerToExportHtml(layer);
+      const assetIds = [...collectLayerAssetIds([layer], [])];
+      const [assets, pages, folders] = await Promise.all([
+        getAssetsByIds(assetIds),
+        getAllDraftPages(),
+        getAllDraftPageFolders(),
+      ]);
+      const anchorMap = Object.fromEntries(
+        findLayersWithAnchorId(layers).map(({ layer: target, id }) => [target.id, id]),
+      );
+      const html = layerToExportHtml(layer, buildAssetUrlMap(Object.values(assets)), {
+        pages,
+        folders,
+        anchorMap,
+        pageId: page_id,
+      });
       return { content: [{ type: 'text' as const, text: html }] };
     },
   );

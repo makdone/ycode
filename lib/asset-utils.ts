@@ -126,7 +126,7 @@ export function getSvgIntrinsicSize(
   return null;
 }
 
-import type { AssetCategory, AssetCategoryFilter, Layer, Component, ComponentVariable } from '@/types';
+import type { Asset, AssetCategory, AssetCategoryFilter, Layer, Component, ComponentVariable } from '@/types';
 import {
   ASSET_CATEGORIES,
   ALLOWED_MIME_TYPES,
@@ -481,6 +481,21 @@ export function resolveInlineSvgAssetSrc(asset: InlineSvgAssetLike): string | nu
     width: asset.width,
     height: asset.height,
   });
+}
+
+/**
+ * Map asset ids to a URL usable as a media `src`: the stored file's public URL,
+ * or the resolved inline-SVG src for markup-only assets. Assets with neither are skipped.
+ */
+export function buildAssetUrlMap(
+  assets: Iterable<Pick<Asset, 'id' | 'filename' | 'public_url' | 'content' | 'width' | 'height'>>,
+): Record<string, string> {
+  const urls: Record<string, string> = {};
+  for (const asset of assets) {
+    const url = asset.public_url || resolveInlineSvgAssetSrc(asset);
+    if (url) urls[asset.id] = url;
+  }
+  return urls;
 }
 
 /**

@@ -1,5 +1,5 @@
 /**
- * Base route for YCode editor
+ * Base route for Ycode editor
  * URL: /ycode
  *
  * The YCodeBuilder component is now rendered in layout.tsx to persist

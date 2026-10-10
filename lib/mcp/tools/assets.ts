@@ -26,10 +26,14 @@ export function registerAssetTools(server: McpServer) {
 
   server.tool(
     'upload_asset',
-    `Upload an image to YCode's asset library. Accepts either a public URL or base64-encoded image data.
+    `Upload an image to Ycode's asset library. Accepts either a public URL or base64-encoded image data.
 
 Use url for images already on the internet.
-Use base64_data for images generated locally (e.g. AI-generated images in a sandbox).`,
+Use base64_data for images generated locally (e.g. AI-generated images in a sandbox).
+
+SVGs are stored inline as markup, so the response has public_url: null and stored_inline: true.
+That is a successful upload — use the returned asset_id like any other image (get_asset returns
+the markup in "content").`,
     {
       url: z.string().url().optional().describe('Public URL of the image to upload'),
       base64_data: z.string().optional()
@@ -85,6 +89,7 @@ Use base64_data for images generated locally (e.g. AI-generated images in a sand
               public_url: asset.public_url,
               width: asset.width,
               height: asset.height,
+              ...(!asset.public_url && asset.content ? { stored_inline: true } : {}),
             }),
           }],
         };

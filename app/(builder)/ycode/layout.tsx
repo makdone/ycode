@@ -4,7 +4,7 @@ import { getRequestOrigin } from '@/lib/url-utils';
 import YCodeLayoutClient from './YCodeLayoutClient';
 
 /**
- * YCode Editor Layout (Server Component)
+ * Ycode Editor Layout (Server Component)
  * 
  * Forces dynamic rendering for all /ycode/* routes.
  * This is required because:

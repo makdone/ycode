@@ -8,7 +8,7 @@ export const revalidate = 0;
 /**
  * GET /ycode/api/apps/webflow/imports
  * List all Webflow site imports stored in app_settings, with stale collection
- * mappings filtered out so the UI only shows YCode collections that still
+ * mappings filtered out so the UI only shows Ycode collections that still
  * exist (the underlying mapping is preserved so re-sync can recreate any
  * deleted ones on demand).
  */
