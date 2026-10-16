@@ -65,6 +65,7 @@ export const TOOL_META: Record<string, ToolMeta> = {
   get_layers: read('Get page layers'),
   add_layer: write('Add layer'),
   update_layer_design: write('Update layer design'),
+  update_rich_text_styles: write('Update rich text element styles'),
   update_layer_text: write('Update layer text'),
   set_rich_text_content: write('Set rich text content'),
   delete_layer: destructive('Delete layer'),
@@ -106,6 +107,7 @@ export const TOOL_META: Record<string, ToolMeta> = {
   // Collection layers
   bind_collection_layer: write('Bind collection list'),
   set_collection_filters: write('Set collection filters'),
+  create_collection_pages: write('Create collection pages'),
   bind_layer_field: write('Bind layer to field'),
   set_dynamic_text: write('Set dynamic text'),
   set_layer_visibility: write('Set layer visibility'),
@@ -136,6 +138,7 @@ export const TOOL_META: Record<string, ToolMeta> = {
   get_component: read('Get component'),
   add_component_instance: write('Add component instance'),
   replace_layer_with_component: write('Replace layer with component'),
+  replace_component_instances: destructive('Replace component instances site-wide'),
   set_component_instance: write('Set component instance overrides'),
   detach_component_instance: destructive('Detach component instance'),
   reorder_component_variants: write('Reorder component variants'),
@@ -212,7 +215,12 @@ export function getToolAnnotations(name: string): { title: string; annotations: 
   if (!meta) {
     throw new Error(`MCP tool "${name}" has no entry in lib/mcp/tool-annotations.ts`);
   }
-  return { title: meta.title, annotations: ANNOTATIONS_BY_KIND[meta.kind] };
+  // The Claude connector directory reads the title from `annotations.title`,
+  // while newer clients read the top-level tool `title`, so both are set.
+  return {
+    title: meta.title,
+    annotations: { title: meta.title, ...ANNOTATIONS_BY_KIND[meta.kind] },
+  };
 }
 
 type RawToolHandler = Parameters<McpServer['registerTool']>[2];
