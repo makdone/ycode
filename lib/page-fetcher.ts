@@ -10,7 +10,7 @@ import { enrichItemsWithCountValues } from '@/lib/repositories/collectionCountRe
 import { getLocaleScaffoldTranslations, getCmsTranslationsForItems } from '@/lib/repositories/translationRepository';
 import { getTranslatableKey, slimTranslations, translatePageCustomCode } from '@/lib/locale-runtime';
 import type { Page, PageFolder, PageLayers, Component, ComponentVariable, CollectionItemWithValues, CollectionField, Layer, CollectionPaginationMeta, Translation, Locale } from '@/types';
-import { getCollectionVariable, resolveFieldValue, evaluateVisibility, evaluateCondition, getLayerHtmlTag, filterDisabledSliderLayers } from '@/lib/layer-utils';
+import { getCollectionVariable, resolveFieldValue, evaluateVisibility, evaluateCondition, getLayerHtmlTag, filterDisabledSliderLayers, applyCustomAttributesToHtml } from '@/lib/layer-utils';
 import { isFieldVariable, isAssetVariable, createDynamicTextVariable, createDynamicRichTextVariable, createAssetVariable, getDynamicTextContent, getVariableStringValue, getAssetId, resolveDesignStyles } from '@/lib/variable-utils';
 import { buildImageSizes, generateImageSrcset, getOptimizedImageUrl, getAssetProxyUrl, DEFAULT_ASSETS, collectLayerAssetIds, resolveInlineSvgAssetSrc, parseImageDimension, getSvgAspectRatioStyle } from '@/lib/asset-utils';
 import { resolveComponents, applyComponentOverrides } from '@/lib/resolve-components';
@@ -932,18 +932,22 @@ export async function fetchPageByPathForMetadata(
 /**
  * Fetch error page by error code (404, 401, 500)
  * Works for both draft and published pages
+ * @param localeCode - Non-default locale to translate the error page into
+ * @param options.throwOnError - Throw on lookup failures instead of returning
+ * null, so callers can tell them apart from a missing error page
  */
 export async function fetchErrorPage(
   errorCode: number,
   isPublished: boolean,
-  tenantId?: string
+  tenantId?: string,
+  localeCode?: string,
+  options: { throwOnError?: boolean } = {}
 ): Promise<PageData | null> {
   try {
     const supabase = await getSupabaseAdmin(tenantId);
 
     if (!supabase) {
-      console.error('Supabase not configured');
-      return null;
+      throw new Error('Supabase not configured');
     }
 
     // Get all active locales from the database
@@ -954,13 +958,17 @@ export async function fetchErrorPage(
       .is('deleted_at', null);
 
     // Get the error page
-    const { data: errorPage } = await supabase
+    const { data: errorPage, error: errorPageError } = await supabase
       .from('pages')
       .select('*')
       .eq('error_page', errorCode)
       .eq('is_published', isPublished)
       .is('deleted_at', null)
-      .single();
+      .maybeSingle();
+
+    if (errorPageError) {
+      throw new Error(`Failed to fetch error page: ${errorPageError.message}`);
+    }
 
     if (!errorPage) {
       return null;
@@ -978,40 +986,56 @@ export async function fetchErrorPage(
       .single();
 
     if (layersError) {
-      console.error(`Failed to fetch ${isPublished ? 'published' : 'draft'} error page layers:`, layersError);
-      return null;
+      throw new Error(`Failed to fetch ${isPublished ? 'published' : 'draft'} error page layers: ${layersError.message}`);
     }
 
     const components = await fetchComponents(supabase, isPublished);
 
+    const { locale, translations } = localeCode
+      ? await loadTranslationsForLocale(localeCode, isPublished, tenantId)
+      : { locale: null, translations: {} as Record<string, Translation> };
+    const pageTranslations = locale && Object.keys(translations).length > 0 ? translations : undefined;
+    const translationOptions = { includeIncomplete: !isPublished };
+
+    // Translate component-instance overrides before resolving components
+    const localizedLayers = pageTranslations
+      ? translateComponentOverrides(pageLayers?.layers || [], errorPage.id, pageTranslations, translationOptions)
+      : pageLayers?.layers || [];
+
     // First, resolve components so collection layers inside components are available
-    const layersWithComponents = resolveComponents(pageLayers?.layers || [], components);
+    const layersWithComponents = resolveComponents(localizedLayers, components);
 
     // Resolve collection layers server-side (for both draft and published)
     // The isPublished parameter controls which collection items to fetch
     let resolvedLayers = layersWithComponents.length > 0
-      ? await resolveCollectionLayers(layersWithComponents, isPublished, undefined, undefined, undefined)
+      ? await resolveCollectionLayers(layersWithComponents, isPublished, undefined, undefined, pageTranslations)
       : [];
 
     // Resolve collections inside rich text embedded components
-    resolvedLayers = await resolveRichTextCollections(resolvedLayers, components, isPublished);
+    resolvedLayers = await resolveRichTextCollections(resolvedLayers, components, isPublished, pageTranslations);
+
+    // Apply translations (components already resolved above)
+    if (pageTranslations) {
+      resolvedLayers = injectTranslatedText(resolvedLayers, errorPage.id, pageTranslations, translationOptions);
+    }
 
     // Resolve all AssetVariables to URLs server-side (prevents client-side API calls)
     const resolved = await resolveAllAssets(resolvedLayers, isPublished, components);
     resolvedLayers = resolved.layers;
 
-    return {
+    return withSlimTranslations({
       page: errorPage,
       pageLayers: {
         ...pageLayers,
         layers: resolvedLayers,
       },
       components, // Layers are pre-resolved; components passed for rich-text embedded rendering
-      locale: null, // Error pages don't have locale context
+      locale,
       availableLocales: availableLocales as Locale[] || [],
-      translations: {}, // Error pages don't have translations
-    };
+      translations,
+    });
   } catch (error) {
+    if (options.throwOnError) throw error;
     console.error('Failed to fetch error page:', error);
     return null;
   }
@@ -4867,6 +4891,9 @@ export function layerToHtml(
     attrs.push(`id="${escapeHtml(layer.attributes.id)}"`);
   }
 
+  const custom = applyCustomAttributesToHtml(attrs, layer.settings?.customAttributes || {});
+  attrs.splice(0, attrs.length, ...custom.attrs);
+
   // Hide elements marked as hiddenGenerated. Scoped to alerts only: the flag is
   // meant for form success/error alerts, whose reveal path clears inline display.
   // Non-alert layers (e.g. animated dropdowns) manage visibility via
@@ -4923,6 +4950,8 @@ export function layerToHtml(
       inlineStyles['aspect-ratio'] = iconAspectRatio;
     }
   }
+
+  Object.assign(inlineStyles, custom.styles);
 
   if (Object.keys(inlineStyles).length > 0) {
     const styleStr = Object.entries(inlineStyles)
