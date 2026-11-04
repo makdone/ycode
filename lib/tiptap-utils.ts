@@ -46,11 +46,14 @@ export function parseRichTextDoc(value: unknown): JSONContent {
   return { type: 'doc', content: [{ type: 'paragraph' }] };
 }
 
-/** Whether a stored rich-text value has no content (blank, or only empty paragraphs). */
+/** Text blocks that carry nothing when they have no children (an emptied editor keeps the block type). */
+const EMPTYABLE_TEXT_BLOCKS = new Set(['paragraph', 'heading']);
+
+/** Whether a stored rich-text value has no content (blank, or only empty paragraphs/headings). */
 export function isRichTextEmpty(value: unknown): boolean {
   const blocks = parseRichTextDoc(value).content;
   if (!Array.isArray(blocks)) return true;
-  return blocks.every((block) => block.type === 'paragraph' && !block.content?.length);
+  return blocks.every((block) => EMPTYABLE_TEXT_BLOCKS.has(block.type ?? '') && !block.content?.length);
 }
 
 /**
@@ -285,12 +288,12 @@ export function getSoleCmsFieldBinding(content: any): ReturnType<typeof getCmsFi
   return getCmsFieldBinding(nodes[0]);
 }
 
-/** True if a Tiptap doc contains at least one dynamicVariable node. */
-export function hasVariableNode(doc: any): boolean {
+/** True if a Tiptap doc contains at least one dynamicVariable node (matching `predicate` when given). */
+export function hasVariableNode(doc: any, predicate?: (node: any) => boolean): boolean {
   if (!doc?.content || !Array.isArray(doc.content)) return false;
   const walk = (nodes: any[]): boolean => nodes.some((n: any) => {
     if (!n || typeof n !== 'object') return false;
-    if (n.type === 'dynamicVariable') return true;
+    if (n.type === 'dynamicVariable' && (!predicate || predicate(n))) return true;
     if (Array.isArray(n.content)) return walk(n.content);
     return false;
   });
