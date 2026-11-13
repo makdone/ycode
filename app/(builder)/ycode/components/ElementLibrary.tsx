@@ -25,6 +25,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -34,11 +38,20 @@ import { getLayerFromTemplate, getBlockName, getBlockIcon, getLayoutTemplate, ge
 import { DEFAULT_ASSETS } from '@/lib/asset-constants';
 import { canHaveChildren, assignOrderClassToNewLayer, collectAllSettingsIds, generateUniqueSettingsId, findLayerById } from '@/lib/layer-utils';
 import { checkCircularReference, isCircularComponentReference } from '@/lib/component-utils';
+import {
+  getComponentFolderKey,
+  moveComponentFolder,
+  normalizeComponentFolder,
+  renameComponentFolderInOrder,
+} from '@/lib/component-folder-utils';
+import type { ComponentFolderGroup, ComponentFolderMove } from '@/lib/component-folder-utils';
 import { cn, generateId } from '@/lib/utils';
 import { toast } from 'sonner';
 import { componentsApi } from '@/lib/api';
 import type { Layer } from '@/types';
 import ComponentCard from './ComponentCard';
+import ComponentFolderList, { COLLAPSED_COMPONENT_FOLDERS_KEY } from './ComponentFolderList';
+import LibraryFolderHeader from './LibraryFolderHeader';
 import RenameComponentDialog from './RenameComponentDialog';
 import SaveLayoutDialog from './SaveLayoutDialog';
 import { usePagesStore } from '@/stores/usePagesStore';
@@ -46,7 +59,16 @@ import { useEditorStore } from '@/stores/useEditorStore';
 import { useComponentsStore } from '@/stores/useComponentsStore';
 import { useEditorActions } from '@/hooks/use-editor-url';
 import { useLocalizationMode } from '@/hooks/use-localization-mode';
+import { useSessionStorageSet } from '@/hooks/use-session-storage-set';
+import { useComponentFolderGroups, useComponentFolderOrder } from '@/hooks/use-component-folder-order';
 import type { UseLiveLayerUpdatesReturn } from '@/hooks/use-live-layer-updates';
+
+const COMPONENT_FOLDER_MOVES: { move: ComponentFolderMove; label: string }[] = [
+  { move: 'top', label: 'Move to top' },
+  { move: 'up', label: 'Move up' },
+  { move: 'down', label: 'Move down' },
+  { move: 'bottom', label: 'Move to bottom' },
+];
 
 /**
  * Element Button with drag support
@@ -302,6 +324,8 @@ export default function ElementLibrary({ isOpen, onClose, liveLayerUpdates }: El
   const updateComponentDraft = useComponentsStore((s) => s.updateComponentDraft);
   const deleteComponent = useComponentsStore((s) => s.deleteComponent);
   const renameComponent = useComponentsStore((s) => s.renameComponent);
+  const moveComponentToFolder = useComponentsStore((s) => s.moveComponentToFolder);
+  const renameComponentFolder = useComponentsStore((s) => s.renameComponentFolder);
   const getDeletePreview = useComponentsStore((s) => s.getDeletePreview);
   const loadComponentDraft = useComponentsStore((s) => s.loadComponentDraft);
   const getComponentById = useComponentsStore((s) => s.getComponentById);
@@ -356,26 +380,38 @@ export default function ElementLibrary({ isOpen, onClose, liveLayerUpdates }: El
 
   const hasComponentResults = !matchingComponentIds || matchingComponentIds.size > 0;
 
+  const { folderOrder: componentFolderOrder, saveFolderOrder: saveComponentFolderOrder } = useComponentFolderOrder();
+  const componentFolderGroups = useComponentFolderGroups(components);
+  const componentFolderKeys = useMemo(
+    () => componentFolderGroups.map((group) => getComponentFolderKey(group.folder)),
+    [componentFolderGroups]
+  );
+
+  // Name dialog shared by "New folder…" (moves a component into it) and "Rename folder".
+  // The target outlives `open` so the title doesn't change during the close animation.
+  const [folderDialogOpen, setFolderDialogOpen] = useState(false);
+  const [folderDialog, setFolderDialog] = useState<
+    | { mode: 'new'; componentId: string }
+    | { mode: 'rename'; folder: string }
+    | null
+  >(null);
+
+  const openFolderDialog = (target: NonNullable<typeof folderDialog>) => {
+    setFolderDialog(target);
+    setFolderDialogOpen(true);
+  };
+
   const [isEditLayoutDialogOpen, setIsEditLayoutDialogOpen] = useState(false);
   const [editingLayoutKey, setEditingLayoutKey] = useState<string>('');
   const [editingLayoutName, setEditingLayoutName] = useState<string>('');
   const [editingLayoutCategory, setEditingLayoutCategory] = useState<string>('Custom');
-  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(() => {
-    // Try to load from sessionStorage first
-    if (typeof window !== 'undefined') {
-      const saved = sessionStorage.getItem('elementLibrary-collapsedCategories');
-      if (saved) {
-        try {
-          return new Set(JSON.parse(saved));
-        } catch (e) {
-          // If parsing fails, fall through to default
-        }
-      }
-    }
-    // Initialize with all categories collapsed except "Navigation", "Hero", "Blog header" and "Blog posts"
-    const allCategories = Object.keys(getLayoutsByCategory());
-    return new Set(allCategories.filter(cat => cat !== 'Navigation' && cat !== 'Hero' && cat !== 'Blog header' && cat !== 'Blog posts'));
-  });
+  // Initialize with all categories collapsed except "Navigation", "Hero", "Blog header" and "Blog posts"
+  const [collapsedCategories, toggleCategory] = useSessionStorageSet(
+    'elementLibrary-collapsedCategories',
+    () => Object.keys(getLayoutsByCategory())
+      .filter(cat => cat !== 'Navigation' && cat !== 'Hero' && cat !== 'Blog header' && cat !== 'Blog posts')
+  );
+  const [collapsedComponentFolders, toggleComponentFolder] = useSessionStorageSet(COLLAPSED_COMPONENT_FOLDERS_KEY);
 
   // Sync tab when explicitly requested (e.g., "Add layout" button)
   React.useEffect(() => {
@@ -395,28 +431,6 @@ export default function ElementLibrary({ isOpen, onClose, liveLayerUpdates }: El
       sessionStorage.setItem('elementLibrary-activeTab', activeTab);
     }
   }, [activeTab]);
-
-  // Persist collapsed state to sessionStorage
-  React.useEffect(() => {
-    if (typeof window !== 'undefined') {
-      sessionStorage.setItem(
-        'elementLibrary-collapsedCategories',
-        JSON.stringify(Array.from(collapsedCategories))
-      );
-    }
-  }, [collapsedCategories]);
-
-  const toggleCategory = (category: string) => {
-    setCollapsedCategories(prev => {
-      const next = new Set(prev);
-      if (next.has(category)) {
-        next.delete(category);
-      } else {
-        next.add(category);
-      }
-      return next;
-    });
-  };
 
   // Handle drag start from element buttons
   // This is called when the mouse moves past the drag threshold
@@ -1402,6 +1416,47 @@ export default function ElementLibrary({ isOpen, onClose, liveLayerUpdates }: El
     }
   };
 
+  const handleConfirmFolderDialog = async (name: string) => {
+    if (!folderDialog) return;
+
+    try {
+      if (folderDialog.mode === 'new') {
+        await moveComponentToFolder(folderDialog.componentId, name);
+        return;
+      }
+
+      // Merging into the default folder or another existing folder is allowed
+      await renameComponentFolder(folderDialog.folder, name);
+      await updateFolderOrderAfterRename(folderDialog.folder, name);
+    } catch (error) {
+      console.error('Failed to update component folder:', error);
+    }
+  };
+
+  const handleRemoveFolder = async (folder: string) => {
+    try {
+      await renameComponentFolder(folder, null);
+      await updateFolderOrderAfterRename(folder, null);
+    } catch (error) {
+      console.error('Failed to remove component folder:', error);
+    }
+  };
+
+  const updateFolderOrderAfterRename = async (from: string, to: string | null) => {
+    const nextOrder = renameComponentFolderInOrder(componentFolderOrder, from, to);
+    if (nextOrder !== componentFolderOrder) await saveComponentFolderOrder(nextOrder);
+  };
+
+  const handleMoveFolder = async (folderKey: string, move: ComponentFolderMove) => {
+    try {
+      await saveComponentFolderOrder(
+        moveComponentFolder(componentFolderKeys, folderKey, move, componentFolderOrder)
+      );
+    } catch (error) {
+      console.error('Failed to reorder component folders:', error);
+    }
+  };
+
   const handleDeleteClick = async (component: Component, e: React.MouseEvent) => {
     e.stopPropagation();
     setComponentToDelete(component);
@@ -1474,6 +1529,144 @@ export default function ElementLibrary({ isOpen, onClose, liveLayerUpdates }: El
     );
   }
 
+  const renderComponentFolderActions = ({ folder, label }: ComponentFolderGroup) => {
+    const folderKey = getComponentFolderKey(folder);
+    const index = componentFolderKeys.indexOf(folderKey);
+    const canReorder = componentFolderKeys.length > 1;
+
+    if (!folder && !canReorder) return null;
+
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="size-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+            aria-label={`Folder actions for ${label}`}
+          >
+            <Icon name="more" className="size-3" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {folder && (
+            <>
+              <DropdownMenuItem onSelect={() => openFolderDialog({ mode: 'rename', folder })}>
+                Rename folder
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => handleRemoveFolder(folder)}>
+                Remove folder
+              </DropdownMenuItem>
+            </>
+          )}
+          {canReorder && (
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>Move folder</DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
+                {COMPONENT_FOLDER_MOVES.map(({ move, label: moveLabel }) => (
+                  <DropdownMenuItem
+                    key={move}
+                    disabled={
+                      (move === 'top' || move === 'up')
+                        ? index === 0
+                        : index === componentFolderKeys.length - 1
+                    }
+                    onSelect={() => handleMoveFolder(folderKey, move)}
+                  >
+                    {moveLabel}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  };
+
+  const renderComponentCard = (component: Component) => {
+    const isHidden = matchingComponentIds && !matchingComponentIds.has(component.id);
+    const currentFolder = normalizeComponentFolder(component.folder);
+
+    return (
+      <ComponentCard
+        key={component.id}
+        component={component}
+        className={cn(
+          circularComponentIds.has(component.id) && 'opacity-40 pointer-events-none',
+          isHidden && 'hidden',
+        )}
+        onStartRename={() => handleStartRename(component)}
+        onClick={() => handleAddComponent(component.id)}
+        onMouseDown={(e) => {
+          if (e.button !== 0) return;
+          if (circularComponentIds.has(component.id)) return;
+          const startX = e.clientX;
+          const startY = e.clientY;
+          let dragging = false;
+
+          const handleMouseMove = (moveEvent: MouseEvent) => {
+            const dx = moveEvent.clientX - startX;
+            const dy = moveEvent.clientY - startY;
+            if (!dragging && Math.sqrt(dx * dx + dy * dy) > 5) {
+              dragging = true;
+              handleElementDragStart(e, component.id, 'components', component.name);
+            }
+          };
+
+          const handleMouseUp = () => {
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+            if (!dragging) handleAddComponent(component.id);
+            dragging = false;
+          };
+
+          document.addEventListener('mousemove', handleMouseMove);
+          document.addEventListener('mouseup', handleMouseUp);
+        }}
+        actions={
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="size-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Icon name="more" className="size-3" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={(e) => handleEditComponent(component, e)}>Edit</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => handleStartRename(component)}>Rename</DropdownMenuItem>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>Move to</DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  {componentFolderGroups.map(({ folder, label }) => (
+                    <DropdownMenuItem
+                      key={getComponentFolderKey(folder)}
+                      disabled={folder === currentFolder}
+                      onSelect={() => moveComponentToFolder(component.id, folder)}
+                    >
+                      <Icon name="folder" className="size-3" />
+                      {label}
+                    </DropdownMenuItem>
+                  ))}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => openFolderDialog({ mode: 'new', componentId: component.id })}>
+                    <Icon name="plus" className="size-3" />
+                    New folder…
+                  </DropdownMenuItem>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              <DropdownMenuItem onClick={(e) => handleDeleteClick(component, e)}>Delete</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        }
+      />
+    );
+  };
+
   return (
     <div
       className={cn(
@@ -1545,19 +1738,12 @@ export default function ElementLibrary({ isOpen, onClose, liveLayerUpdates }: El
 
                   return (
                     <div key={category} className="flex flex-col">
-                      <header
-                        className="py-5 flex items-center gap-2 cursor-pointer hover:opacity-70 transition-opacity"
-                        onClick={() => toggleCategory(category)}
-                      >
-                        <Icon
-                          name="triangle-down"
-                          className={cn(
-                            'size-3 opacity-25 transition-transform',
-                            isCollapsed && '-rotate-90'
-                          )}
-                        />
-                        <Label className="cursor-pointer">{category}</Label>
-                      </header>
+                      <LibraryFolderHeader
+                        label={category}
+                        isCollapsed={isCollapsed}
+                        onToggle={() => toggleCategory(category)}
+                        count={layoutKeys.length}
+                      />
                       <div className={cn('grid grid-cols-1 gap-1.5 pb-5', isCollapsed && 'hidden')}>
                       {layoutKeys.map((layoutKey) => {
                         const previewImage = getLayoutPreviewImage(layoutKey);
@@ -1645,77 +1831,24 @@ export default function ElementLibrary({ isOpen, onClose, liveLayerUpdates }: El
                     />
                   </div>
                 </div>
-                <div className="border-b border-border mb-4" />
+                <div className="border-b border-border" />
                 {!hasComponentResults && (
-                  <Empty>
+                  <Empty className="mt-4">
                     <EmptyMedia variant="icon">
                       <Icon name="component" className="size-4" />
                     </EmptyMedia>
                     <EmptyTitle>No matching components</EmptyTitle>
                   </Empty>
                 )}
-                <div className={cn('grid grid-cols-1 gap-1.5 pb-5', !hasComponentResults && 'hidden')}>
-                  {components.map((component) => {
-                    const isHidden = matchingComponentIds && !matchingComponentIds.has(component.id);
-                    return (
-                      <ComponentCard
-                        key={component.id}
-                        component={component}
-                        className={cn(
-                          circularComponentIds.has(component.id) && 'opacity-40 pointer-events-none',
-                          isHidden && 'hidden',
-                        )}
-                        onStartRename={() => handleStartRename(component)}
-                        onClick={() => handleAddComponent(component.id)}
-                        onMouseDown={(e) => {
-                          if (e.button !== 0) return;
-                          if (circularComponentIds.has(component.id)) return;
-                          const startX = e.clientX;
-                          const startY = e.clientY;
-                          let dragging = false;
-
-                          const handleMouseMove = (moveEvent: MouseEvent) => {
-                            const dx = moveEvent.clientX - startX;
-                            const dy = moveEvent.clientY - startY;
-                            if (!dragging && Math.sqrt(dx * dx + dy * dy) > 5) {
-                              dragging = true;
-                              handleElementDragStart(e, component.id, 'components', component.name);
-                            }
-                          };
-
-                          const handleMouseUp = () => {
-                            document.removeEventListener('mousemove', handleMouseMove);
-                            document.removeEventListener('mouseup', handleMouseUp);
-                            if (!dragging) handleAddComponent(component.id);
-                            dragging = false;
-                          };
-
-                          document.addEventListener('mousemove', handleMouseMove);
-                          document.addEventListener('mouseup', handleMouseUp);
-                        }}
-                        actions={
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="size-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <Icon name="more" className="size-3" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={(e) => handleEditComponent(component, e)}>Edit</DropdownMenuItem>
-                              <DropdownMenuItem onSelect={() => handleStartRename(component)}>Rename</DropdownMenuItem>
-                              <DropdownMenuItem onClick={(e) => handleDeleteClick(component, e)}>Delete</DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        }
-                      />
-                    );
-                  })}
-                </div>
+                <ComponentFolderList
+                  groups={componentFolderGroups}
+                  matchingIds={matchingComponentIds}
+                  collapsedFolders={collapsedComponentFolders}
+                  onToggleFolder={toggleComponentFolder}
+                  renderComponent={renderComponentCard}
+                  renderFolderActions={renderComponentFolderActions}
+                  className={cn(!hasComponentResults && 'hidden')}
+                />
               </div>
             )}
           </TabsContent>
@@ -1726,6 +1859,16 @@ export default function ElementLibrary({ isOpen, onClose, liveLayerUpdates }: El
           onOpenChange={setRenameDialogOpen}
           onConfirm={handleConfirmRename}
           currentName={componentToRename?.name}
+        />
+
+        <RenameComponentDialog
+          open={folderDialogOpen}
+          onOpenChange={setFolderDialogOpen}
+          onConfirm={handleConfirmFolderDialog}
+          currentName={folderDialog?.mode === 'rename' ? folderDialog.folder : ''}
+          title={folderDialog?.mode === 'rename' ? 'Rename folder' : 'New folder'}
+          placeholder="Folder name"
+          confirmLabel={folderDialog?.mode === 'rename' ? 'Rename' : 'Create'}
         />
 
         <SaveLayoutDialog
